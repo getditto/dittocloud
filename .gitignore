@@ -1,0 +1,12 @@
+terraform.tfstate
+terraform.tfstate.backup
+.terraform/
+.terraform.lock.hcl
+*.tfvars
+*.tfstate
+*.tfstate.*
+# Added by goreleaser init:
+dist/
+.vscode/
+.DS_Store
+.envrc
