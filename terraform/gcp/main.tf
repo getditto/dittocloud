@@ -152,6 +152,21 @@ resource "google_project_iam_custom_role" "velero" {
   permissions = local.velero_role.permissions
 }
 
+# Google Cloud Storage bucket for storing Terraform state
+resource "google_storage_bucket" "terraform_state" {
+  name          = "ditto-terraform-state-${var.project_id}"
+  location      = var.region
+  force_destroy = false
+
+  uniform_bucket_level_access = true
+
+  versioning {
+    enabled = true
+  }
+
+  public_access_prevention = "enforced"
+}
+
 module "vpc" {
   source  = "terraform-google-modules/network/google"
   version = "~> 9.0"

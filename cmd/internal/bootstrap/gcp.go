@@ -4,16 +4,163 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/fatih/color"
-	"github.com/getditto/ditto-cloud-bootstrap/cmd/internal/log"
 	"github.com/hashicorp/terraform-exec/tfexec"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"google.golang.org/api/serviceusage/v1"
+
+	"github.com/getditto/ditto-cloud-bootstrap/cmd/internal/log"
 )
 
-// gcpCmd handles gcp specific variables and mutates the list of vars to be passed to terraform plan/apply
-func gcpCmd(vars *[]*tfexec.VarOption) *cobra.Command {
+// enableRequiredAPIs enables the GCP APIs required for Terraform to run successfully
+func enableRequiredAPIs(ctx context.Context, projectID string) error {
+	requiredAPIs := []string{
+		"compute.googleapis.com",
+		"iam.googleapis.com",
+	}
+
+	logger := log.FromContext(ctx)
+	progress := color.New(color.FgMagenta)
+
+	logger.Debug("Checking and enabling required GCP APIs", "project", projectID)
+	progress.Printf("Ensuring required APIs are enabled for project %s...\n", projectID)
+
+	// Create service usage client
+	service, err := serviceusage.NewService(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to create service usage client: %w", err)
+	}
+
+	// Check which APIs are already enabled
+	enabledAPIs := make(map[string]bool)
+	listCall := service.Services.List(fmt.Sprintf("projects/%s", projectID)).Filter("state:ENABLED")
+
+	err = listCall.Pages(ctx, func(page *serviceusage.ListServicesResponse) error {
+		for _, svc := range page.Services {
+			enabledAPIs[svc.Config.Name] = true
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list enabled services: %w", err)
+	}
+
+	// Enable any missing APIs
+	var apisToEnable []string
+	for _, api := range requiredAPIs {
+		if !enabledAPIs[api] {
+			apisToEnable = append(apisToEnable, api)
+		}
+	}
+
+	if len(apisToEnable) == 0 {
+		logger.Debug("All required APIs are already enabled")
+		progress.Println("✅ All required APIs are already enabled")
+		return nil
+	}
+
+	progress.Printf("Enabling %d APIs: %v\n", len(apisToEnable), apisToEnable)
+
+	// Enable APIs one by one (batch enable isn't always reliable)
+	for _, api := range apisToEnable {
+		logger.Debug("Enabling API", "api", api)
+
+		req := &serviceusage.EnableServiceRequest{}
+		op, err := service.Services.Enable(fmt.Sprintf("projects/%s/services/%s", projectID, api), req).Context(ctx).Do()
+		if err != nil {
+			return fmt.Errorf("failed to enable API %s: %w", api, err)
+		}
+
+		// Wait for the operation to complete
+		for !op.Done {
+			time.Sleep(2 * time.Second)
+			op, err = service.Operations.Get(op.Name).Context(ctx).Do()
+			if err != nil {
+				return fmt.Errorf("failed to check operation status for API %s: %w", api, err)
+			}
+		}
+
+		if op.Error != nil {
+			return fmt.Errorf("failed to enable API %s: %s", api, op.Error.Message)
+		}
+
+		progress.Printf("✅ Enabled %s\n", api)
+	}
+
+	// Wait a bit for APIs to fully propagate
+	logger.Debug("Waiting for API enablement to propagate")
+	progress.Println("Waiting for API enablement to propagate...")
+	time.Sleep(10 * time.Second)
+
+	return nil
+}
+
+// checkGCPAuth verifies that the user has proper GCP authentication
+func checkGCPAuth(ctx context.Context) error {
+	logger := log.FromContext(ctx)
+
+	// Try to create a service usage client to verify authentication
+	_, err := serviceusage.NewService(ctx)
+	if err != nil {
+		logger.Error("Failed to authenticate with GCP", "error", err)
+		return fmt.Errorf("GCP authentication failed. Please run 'gcloud auth application-default login' or set up service account credentials: %w", err)
+	}
+
+	logger.Debug("GCP authentication verified")
+	return nil
+}
+
+// GCPConfig holds GCP-specific configuration
+type GCPConfig struct {
+	ProjectID                  string
+	Region                     string
+	CreateSubnets              bool
+	CreateDefaultFirewallRules bool
+	SubnetCidr                 string
+	PodsCidrRange              string
+	ServicesCidrRange          string
+}
+
+func (g *GCPConfig) BuildTFVars() []*tfexec.VarOption {
+
+	var vars []*tfexec.VarOption
+	vars = append(vars,
+		tfexec.Var("project_id="+g.ProjectID),
+		tfexec.Var("region="+g.Region),
+	)
+
+	// Convert vpc_config to JSON using map
+	vpcConfigMap := map[string]string{
+		"create_subnets":                fmt.Sprintf("%t", g.CreateSubnets),
+		"create_default_firewall_rules": fmt.Sprintf("%t", g.CreateDefaultFirewallRules),
+		"subnet_cidr":                   g.SubnetCidr,
+		"pods_cidr_range":               g.PodsCidrRange,
+		"services_cidr_range":           g.ServicesCidrRange,
+	}
+
+	vpcConfigJSON, err := json.Marshal(vpcConfigMap)
+	if err != nil {
+		// Log error but continue with empty vpc_config
+		log.FromContext(context.Background()).Error("Failed to marshal vpc_config", "error", err)
+		vars = append(vars, tfexec.Var("vpc_config={}"))
+	} else {
+		vars = append(vars, tfexec.Var("vpc_config="+string(vpcConfigJSON)))
+	}
+	return vars
+}
+
+func (g *GCPConfig) BucketURL() (string, error) {
+	if g.ProjectID == "" {
+		return "", fmt.Errorf("project ID is required for GCP state management")
+	}
+	return fmt.Sprintf("gs://ditto-terraform-state-%s", g.ProjectID), nil
+}
+
+// gcpCmd handles gcp specific variables and populates the config
+func gcpCmd(config *GCPConfig) *cobra.Command {
 	flags := pflag.NewFlagSet("gcp", pflag.ContinueOnError)
 
 	cmd := &cobra.Command{
@@ -24,11 +171,21 @@ func gcpCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 			logger := log.FromContext(cmd.Context())
 			logger.Debug("Processing GCP bootstrap command")
 
-			gcpVars, err := promptGcpValues(cmd.Context(), flags)
+			err := promptGcpValues(cmd.Context(), flags, config)
 			if err != nil {
 				return fmt.Errorf("unable to prompt for values: %w", err)
 			}
-			*vars = append(*vars, gcpVars...)
+
+			// Check GCP authentication first
+			if err := checkGCPAuth(cmd.Context()); err != nil {
+				return err
+			}
+
+			// Enable required APIs before the bootstrap process continues
+			if err := enableRequiredAPIs(cmd.Context(), config.ProjectID); err != nil {
+				return fmt.Errorf("failed to enable required GCP APIs: %w", err)
+			}
+
 			return nil
 		},
 	}
@@ -48,8 +205,7 @@ func gcpCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 	return cmd
 }
 
-func promptGcpValues(ctx context.Context, flags *pflag.FlagSet) ([]*tfexec.VarOption, error) {
-	vars := []*tfexec.VarOption{}
+func promptGcpValues(ctx context.Context, flags *pflag.FlagSet, gcpConfig *GCPConfig) error {
 	// optional := color.New(color.FgYellow)
 	required := color.New(color.FgRed, color.Bold)
 	// failed := color.New(color.FgRed)
@@ -90,23 +246,23 @@ func promptGcpValues(ctx context.Context, flags *pflag.FlagSet) ([]*tfexec.VarOp
 		})
 	}
 
-	projectId := fmt.Sprintf("project_id=%s", flags.Lookup("project-id").Value.String())
-	log.FromContext(ctx).Debug("terraform variable", "project_id", projectId)
-	region := fmt.Sprintf("region=%s", flags.Lookup("region").Value.String())
-	log.FromContext(ctx).Debug("terraform variable", "region", region)
-	vpcConfigMap := map[string]string{
-		"create_subnets":                flags.Lookup("create-subnets").Value.String(),
-		"create_default_firewall_rules": flags.Lookup("create-default-firewall-rules").Value.String(),
-		"subnet_cidr":                   flags.Lookup("subnet-cidr").Value.String(),
-		"pods_cidr_range":               flags.Lookup("pods-cidr-range").Value.String(),
-		"services_cidr_range":           flags.Lookup("services-cidr-range").Value.String(),
-	}
+	gcpConfig.ProjectID = flags.Lookup("project-id").Value.String()
+	gcpConfig.Region = flags.Lookup("region").Value.String()
+	gcpConfig.CreateSubnets = flags.Lookup("create-subnets").Value.String() == "true"
+	gcpConfig.CreateDefaultFirewallRules = flags.Lookup("create-default-firewall-rules").Value.String() == "true"
+	gcpConfig.SubnetCidr = flags.Lookup("subnet-cidr").Value.String()
+	gcpConfig.PodsCidrRange = flags.Lookup("pods-cidr-range").Value.String()
+	gcpConfig.ServicesCidrRange = flags.Lookup("services-cidr-range").Value.String()
 
-	vpcConfigJson, err := json.Marshal(vpcConfigMap)
-	if err != nil {
-		return nil, fmt.Errorf("unable to marshal vpc config: %w", err)
-	}
-	vpcConfig := fmt.Sprintf("vpc_config=%s", string(vpcConfigJson))
-	log.FromContext(ctx).Debug("terraform variable", "vpc_config", vpcConfig)
-	return append(vars, tfexec.Var(projectId), tfexec.Var(region), tfexec.Var(vpcConfig)), nil
+	log.FromContext(ctx).Debug("GCP configuration",
+		"project_id", gcpConfig.ProjectID,
+		"region", gcpConfig.Region,
+		"create_subnets", gcpConfig.CreateSubnets,
+		"create_default_firewall_rules", gcpConfig.CreateDefaultFirewallRules,
+		"subnet_cidr", gcpConfig.SubnetCidr,
+		"pods_cidr_range", gcpConfig.PodsCidrRange,
+		"services_cidr_range", gcpConfig.ServicesCidrRange,
+	)
+
+	return nil
 }

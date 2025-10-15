@@ -12,12 +12,30 @@ import (
 	"strings"
 
 	"github.com/fatih/color"
-	"github.com/getditto/ditto-cloud-bootstrap/cmd/internal/log"
-	"github.com/getditto/ditto-cloud-bootstrap/terraform"
 	"github.com/hashicorp/terraform-exec/tfexec"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+
+	"github.com/getditto/ditto-cloud-bootstrap/cmd/internal/log"
+	"github.com/getditto/ditto-cloud-bootstrap/terraform"
 )
+
+// Constants for user confirmation responses
+const (
+	ConfirmYes     = "y"
+	ConfirmYesFull = "yes"
+	ConfirmNo      = "n"
+	ConfirmNoFull  = "no"
+)
+
+// ValidConfirmationResponses contains all valid user confirmation responses
+var ValidConfirmationResponses = []string{ConfirmYes, ConfirmYesFull, ConfirmNo, ConfirmNoFull}
+
+// ProviderConfig holds the configuration for a specific cloud provider
+type ProviderConfig interface {
+	BuildTFVars() []*tfexec.VarOption
+	BucketURL() (string, error)
+}
 
 // TerraformExecutor is an interface that abstracts terraform operations for testing
 type TerraformExecutor interface {
@@ -41,8 +59,11 @@ var defaultTerraformFactory TerraformFactory = func(workingDir string, execPath 
 var terraformFactory = defaultTerraformFactory
 
 func BootstrapCmd() *cobra.Command {
-	// Shared variables for all providers, scoped to this functions closure. At least they aren't globals.
-	var vars []*tfexec.VarOption
+	// configuration initialization for all providers, scoped to this functions closure.
+	// config is set to a specific provider config based on the subcommand during BootstrapCmd execution.
+	awsConfig := &AWSConfig{}
+	gcpConfig := &GCPConfig{}
+	var config ProviderConfig
 	var logLevel string
 	var tfVars []string
 
@@ -95,26 +116,64 @@ func BootstrapCmd() *cobra.Command {
 			// provider is the subcommand name
 			provider := cmd.Name()
 			workingDir := filepath.Join(tmpDir, provider)
+			logger.Debug("Working directory for provider", "provider", provider, "workingDir", workingDir)
 			progress.Printf("Using %q provider\n", provider)
 
 			localStateFilePath := cmd.Flag("state").Value.String()
 			tmpStateFilePath := filepath.Join(workingDir, "terraform.tfstate")
 
-			if _, err := os.Stat(localStateFilePath); err == nil {
-				progress.Printf("Copying local state file %q to temporary directory %q\n", localStateFilePath, workingDir)
-				input, err := os.ReadFile(localStateFilePath)
-				if err != nil {
-					return fmt.Errorf("unable to read local state file: %w", err)
-				}
-				if err := os.WriteFile(tmpStateFilePath, input, 0600); err != nil {
-					return fmt.Errorf("unable to write state file to temporary directory: %w", err)
-				}
-			} else {
-				progress.Printf(
-					"No local state file found, new state file will be created at %q\n",
-					localStateFilePath,
-				)
+			// initialize provider config based on the subcommand
+			switch provider {
+			case "aws":
+				config = awsConfig
+			case "gcp":
+				config = gcpConfig
+			default:
+				return fmt.Errorf("unsupported provider: %s", provider)
 			}
+
+			// TODO: extract state management into a separate function to reduce this function's complexity
+			var useLocalState bool
+
+			stateManager, err := StateManagerFromConfig(config)
+			if err != nil {
+				logger.Warn("Failed to create state manager", "error", err)
+				useLocalState = true
+			} else {
+				// Try to download from remote storage
+				if err := stateManager.DownloadState(cmd.Context(), tmpStateFilePath); err != nil {
+					logger.Warn("Failed to download remote state", "error", err)
+					useLocalState = true
+				} else {
+					logger.Debug("Downloaded remote state successfully", "path", tmpStateFilePath)
+					progress.Println("State file acquired from remote storage")
+					if _, err := os.Stat(tmpStateFilePath); err == nil {
+						useLocalState = false
+					}
+				}
+			}
+
+			if useLocalState {
+				logger.Debug("Using local state file", "path", localStateFilePath)
+				if _, err := os.Stat(localStateFilePath); err == nil {
+					progress.Printf("Copying local state file %q to temporary directory %q\n", localStateFilePath, workingDir)
+					input, err := os.ReadFile(localStateFilePath)
+					if err != nil {
+						return fmt.Errorf("unable to read local state file: %w", err)
+					}
+					if err := os.WriteFile(tmpStateFilePath, input, 0600); err != nil {
+						return fmt.Errorf("unable to write state file to temporary directory: %w", err)
+					}
+				} else {
+					progress.Printf(
+						"No local state file found, new state file will be created at %q\n",
+						localStateFilePath,
+					)
+				}
+			}
+
+			// Convert provider config to terraform vars
+			vars := config.BuildTFVars()
 
 			var execPath string
 
@@ -194,19 +253,10 @@ func BootstrapCmd() *cobra.Command {
 				return nil
 			}
 
-			// Only accept yes/no as inputs and re-prompt if it wasn't provided
-			// to prevent errant ENTER smashes as an approval.
-			color.White("%s", color.New(color.Bold).Sprint("Are you sure you want to apply these changes?"))
-			for {
-				v := StringPrompt("(y/n)", "")
-				if v == "n" || v == "no" {
-					progress.Println("Aborting...")
-					return nil
-				}
-				if v == "y" || v == "yes" {
-					break
-				}
-				progress.Println("Only \"y\" or \"n\" inputs are accepted.")
+			// Get user confirmation before applying changes
+			if !getUserConfirmation("Are you sure you want to apply these changes?", progress) {
+				progress.Println("Aborting...")
+				return nil
 			}
 
 			defer func() {
@@ -218,6 +268,13 @@ func BootstrapCmd() *cobra.Command {
 				}
 				if err := os.WriteFile(localStateFilePath, stateFileData, 0600); err != nil {
 					failure.Printf("unable to write state file to %q: %v", localStateFilePath, err)
+				}
+
+				// Also upload to remote storage if we have a state manager
+				if stateManager != nil {
+					if err := stateManager.UploadState(cmd.Context(), tmpStateFilePath); err != nil {
+						failure.Printf("unable to upload state file to remote storage: %v", err)
+					}
 				}
 			}()
 
@@ -242,12 +299,13 @@ func BootstrapCmd() *cobra.Command {
 	cmd.PersistentFlags().StringArrayVar(&tfVars, "tf-var", []string{}, "Pass arbitrary variables to terraform (can be specified multiple times)")
 	_ = cmd.PersistentFlags().MarkHidden("tf-var")
 
-	// The subcommands will handle cloud provider specific variables and mutate the list of vars to be passed to terraform plan/apply
-	cmd.AddCommand(awsCmd(&vars))
-	cmd.AddCommand(gcpCmd(&vars))
+	// The subcommands will handle cloud provider specific variables and populate the config
+	cmd.AddCommand(awsCmd(awsConfig))
+	cmd.AddCommand(gcpCmd(gcpConfig))
 	return cmd
 }
 
+// toPlanOptions converts VarOptions to PlanOptions
 func toPlanOptions(vars []*tfexec.VarOption) []tfexec.PlanOption {
 	planOpts := make([]tfexec.PlanOption, len(vars))
 	for i, v := range vars {
@@ -256,6 +314,7 @@ func toPlanOptions(vars []*tfexec.VarOption) []tfexec.PlanOption {
 	return planOpts
 }
 
+// toApplyOptions converts VarOptions to ApplyOptions
 func toApplyOptions(vars []*tfexec.VarOption) []tfexec.ApplyOption {
 	applyOpts := make([]tfexec.ApplyOption, len(vars))
 	for i, v := range vars {
@@ -310,6 +369,23 @@ func FlagOrPrompt(flag *pflag.Flag, label string, def string) string {
 	return StringPrompt(label, def)
 }
 
+// getUserConfirmation prompts the user for confirmation and returns true for yes, false for no
+// Only accepts yes/no inputs and re-prompts if invalid input is provided
+func getUserConfirmation(message string, progress *color.Color) bool {
+	color.White("%s", color.New(color.Bold).Sprint(message))
+	for {
+		response := StringPrompt("(y/n)", "")
+		switch response {
+		case ConfirmNo, ConfirmNoFull:
+			return false
+		case ConfirmYes, ConfirmYesFull:
+			return true
+		default:
+			progress.Println("Only \"y\" or \"n\" inputs are accepted.")
+		}
+	}
+}
+
 // showOutputs will pretty-print the TF outputs as JSON
 func showOutputs(ctx context.Context, tf TerraformExecutor) error {
 	output, err := tf.Output(ctx)
@@ -318,10 +394,13 @@ func showOutputs(ctx context.Context, tf TerraformExecutor) error {
 	}
 	color.Green("Terraform output:")
 	for k, v := range output {
-		raw, _ := v.Value.MarshalJSON()
+		raw, err := v.Value.MarshalJSON()
+		if err != nil {
+			return fmt.Errorf("unable to marshal terraform output value for %s: %w", k, err)
+		}
 		var m any
 
-		err := json.Unmarshal(raw, &m)
+		err = json.Unmarshal(raw, &m)
 		if err != nil {
 			return fmt.Errorf("unable to unmarshal terraform output: %w", err)
 		}
