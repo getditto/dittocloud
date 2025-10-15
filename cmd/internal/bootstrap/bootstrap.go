@@ -245,6 +245,7 @@ func BootstrapCmd() *cobra.Command {
 	// The subcommands will handle cloud provider specific variables and mutate the list of vars to be passed to terraform plan/apply
 	cmd.AddCommand(awsCmd(&vars))
 	cmd.AddCommand(gcpCmd(&vars))
+	cmd.AddCommand(azureCmd(&vars))
 	return cmd
 }
 
