@@ -204,18 +204,8 @@ module "vpc" {
 
   routes = []
 
-  depends_on = [module.project-services]
-}
-
-# Create firewall rules separately when enabled
-module "firewall_rules" {
-  count = var.vpc_config.create_default_firewall_rules ? 1 : 0
-  source       = "terraform-google-modules/network/google//modules/firewall-rules"
-  version      = "~> 9.0"
-  project_id   = var.project_id
-  network_name = module.vpc.network_name
-
-  rules = [
+  # Create firewall rules using the module
+  firewall_rules = var.vpc_config.create_default_firewall_rules ? [
     {
       name        = "${var.vpc_config.vpc_name}-allow-internal"
       direction   = "INGRESS"
@@ -226,6 +216,10 @@ module "firewall_rules" {
         var.vpc_config.pods_cidr_range,
         var.vpc_config.services_cidr_range
       ]
+      source_tags             = null
+      source_service_accounts = null
+      target_tags             = null
+      target_service_accounts = null
       allow = [
         {
           protocol = "tcp"
@@ -243,12 +237,15 @@ module "firewall_rules" {
       deny = []
     },
     {
-      name        = "${var.vpc_config.vpc_name}-allow-ssh"
-      direction   = "INGRESS"
-      priority    = 1000
-      description = "Allow SSH access to instances with ssh-access tag"
-      ranges      = ["0.0.0.0/0"]
-      target_tags = ["ssh-access"]
+      name                    = "${var.vpc_config.vpc_name}-allow-ssh"
+      direction               = "INGRESS"
+      priority                = 1000
+      description             = "Allow SSH access to instances with ssh-access tag"
+      ranges                  = ["0.0.0.0/0"]
+      source_tags             = null
+      source_service_accounts = null
+      target_tags             = ["ssh-access"]
+      target_service_accounts = null
       allow = [
         {
           protocol = "tcp"
@@ -258,12 +255,15 @@ module "firewall_rules" {
       deny = []
     },
     {
-      name        = "${var.vpc_config.vpc_name}-allow-https"
-      direction   = "INGRESS"
-      priority    = 1000
-      description = "Allow HTTP/HTTPS access for web services"
-      ranges      = ["0.0.0.0/0"]
-      target_tags = ["web-access"]
+      name                    = "${var.vpc_config.vpc_name}-allow-https"
+      direction               = "INGRESS"
+      priority                = 1000
+      description             = "Allow HTTP/HTTPS access for web services"
+      ranges                  = ["0.0.0.0/0"]
+      source_tags             = null
+      source_service_accounts = null
+      target_tags             = ["web-access"]
+      target_service_accounts = null
       allow = [
         {
           protocol = "tcp"
@@ -273,12 +273,15 @@ module "firewall_rules" {
       deny = []
     },
     {
-      name        = "${var.vpc_config.vpc_name}-allow-k8s-api"
-      direction   = "INGRESS"
-      priority    = 1000
-      description = "Allow access to Kubernetes API server"
-      ranges      = ["0.0.0.0/0"]
-      target_tags = ["k8s-control-plane"]
+      name                    = "${var.vpc_config.vpc_name}-allow-k8s-api"
+      direction               = "INGRESS"
+      priority                = 1000
+      description             = "Allow access to Kubernetes API server"
+      ranges                  = ["0.0.0.0/0"]
+      source_tags             = null
+      source_service_accounts = null
+      target_tags             = ["k8s-control-plane"]
+      target_service_accounts = null
       allow = [
         {
           protocol = "tcp"
@@ -287,5 +290,7 @@ module "firewall_rules" {
       ]
       deny = []
     }
-  ]
+  ] : []
+
+  depends_on = [module.project-services]
 }

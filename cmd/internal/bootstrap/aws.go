@@ -40,6 +40,19 @@ func (a *AWSConfig) BucketURL() (string, error) {
 	return fmt.Sprintf("s3://ditto-terraform-state-%s?region=%s", a.AccountID, a.Region), nil
 }
 
+func (a *AWSConfig) GetBackendConfig() (TerraformBackendConfig, error) {
+	if a.AccountID == "" {
+		return nil, fmt.Errorf("account ID is required for AWS state management")
+	}
+
+	bucketName := fmt.Sprintf("ditto-terraform-state-%s", a.AccountID)
+	return &AWSBackendConfig{
+		BucketName: bucketName,
+		Region:     a.Region,
+		KeyPrefix:  "terraform.tfstate",
+	}, nil
+}
+
 // awsCmd handles aws specific variables and populates the config
 func awsCmd(config *AWSConfig) *cobra.Command {
 	cmd := &cobra.Command{
@@ -110,4 +123,30 @@ func promptAWSValues(flag func(name string) (flag *pflag.Flag), awsConfig *AWSCo
 	//Set Account ID
 	getAccountID(awsConfig)
 	return nil
+}
+
+// AWSBackendConfig implements TerraformBackendConfig for AWS
+type AWSBackendConfig struct {
+	BucketName string
+	Region     string
+	KeyPrefix  string
+}
+
+func (c *AWSBackendConfig) BackendConfigFile() (string, error) {
+	return `terraform {
+  backend "s3" {}
+}
+`, nil
+}
+
+func (c *AWSBackendConfig) GetBackendConfig() ([]tfexec.InitOption, error) {
+	return []tfexec.InitOption{
+		tfexec.BackendConfig(fmt.Sprintf("bucket=%s", c.BucketName)),
+		tfexec.BackendConfig(fmt.Sprintf("region=%s", c.Region)),
+		tfexec.BackendConfig(fmt.Sprintf("key=%s", c.KeyPrefix)),
+	}, nil
+}
+
+func (c *AWSBackendConfig) GetBackendType() string {
+	return "s3"
 }

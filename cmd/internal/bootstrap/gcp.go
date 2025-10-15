@@ -159,6 +159,18 @@ func (g *GCPConfig) BucketURL() (string, error) {
 	return fmt.Sprintf("gs://ditto-terraform-state-%s", g.ProjectID), nil
 }
 
+func (g *GCPConfig) GetBackendConfig() (TerraformBackendConfig, error) {
+	if g.ProjectID == "" {
+		return nil, fmt.Errorf("project ID is required for GCP state management")
+	}
+
+	bucketName := fmt.Sprintf("ditto-terraform-state-%s", g.ProjectID)
+	return &GCPBackendConfig{
+		BucketName: bucketName,
+		Prefix:     "terraform/state",
+	}, nil
+}
+
 // gcpCmd handles gcp specific variables and populates the config
 func gcpCmd(config *GCPConfig) *cobra.Command {
 	flags := pflag.NewFlagSet("gcp", pflag.ContinueOnError)
@@ -265,4 +277,28 @@ func promptGcpValues(ctx context.Context, flags *pflag.FlagSet, gcpConfig *GCPCo
 	)
 
 	return nil
+}
+
+// GCPBackendConfig implements TerraformBackendConfig for GCP
+type GCPBackendConfig struct {
+	BucketName string
+	Prefix     string
+}
+
+func (c *GCPBackendConfig) BackendConfigFile() (string, error) {
+	return `terraform {
+  backend "gcs" {}
+}
+`, nil
+}
+
+func (c *GCPBackendConfig) GetBackendConfig() ([]tfexec.InitOption, error) {
+	return []tfexec.InitOption{
+		tfexec.BackendConfig(fmt.Sprintf("bucket=%s", c.BucketName)),
+		tfexec.BackendConfig(fmt.Sprintf("prefix=%s", c.Prefix)),
+	}, nil
+}
+
+func (c *GCPBackendConfig) GetBackendType() string {
+	return "gcs"
 }
