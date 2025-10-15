@@ -26,6 +26,7 @@ const (
 	ConfirmYesFull = "yes"
 	ConfirmNo      = "n"
 	ConfirmNoFull  = "no"
+	StateFile      = "terraform.tfstate"
 )
 
 // ValidConfirmationResponses contains all valid user confirmation responses
@@ -35,28 +36,8 @@ var ValidConfirmationResponses = []string{ConfirmYes, ConfirmYesFull, ConfirmNo,
 type ProviderConfig interface {
 	BuildTFVars() []*tfexec.VarOption
 	BucketURL() (string, error)
+	GetBackendConfig() (TerraformBackendConfig, error)
 }
-
-// TerraformExecutor is an interface that abstracts terraform operations for testing
-type TerraformExecutor interface {
-	Init(context.Context, ...tfexec.InitOption) error
-	Plan(context.Context, ...tfexec.PlanOption) (bool, error)
-	Apply(context.Context, ...tfexec.ApplyOption) error
-	Output(context.Context, ...tfexec.OutputOption) (map[string]tfexec.OutputMeta, error)
-	SetStdout(io.Writer)
-	SetStderr(io.Writer)
-}
-
-// TerraformFactory creates a TerraformExecutor
-type TerraformFactory func(workingDir string, execPath string) (TerraformExecutor, error)
-
-// defaultTerraformFactory is the default factory that creates real terraform instances
-var defaultTerraformFactory TerraformFactory = func(workingDir string, execPath string) (TerraformExecutor, error) {
-	return tfexec.NewTerraform(workingDir, execPath)
-}
-
-// terraformFactory is the factory used by the code (can be replaced in tests)
-var terraformFactory = defaultTerraformFactory
 
 func BootstrapCmd() *cobra.Command {
 	// configuration initialization for all providers, scoped to this functions closure.
@@ -65,11 +46,9 @@ func BootstrapCmd() *cobra.Command {
 	gcpConfig := &GCPConfig{}
 	var config ProviderConfig
 	var logLevel string
-	var tfVars []string
 
 	header := color.New(color.FgCyan, color.Bold)
 	progress := color.New(color.FgMagenta)
-	failure := color.New(color.FgRed, color.Bold)
 	cmd := &cobra.Command{
 		Use:   "bootstrap",
 		Short: "Bootstrap a cloud provider",
@@ -101,7 +80,7 @@ func BootstrapCmd() *cobra.Command {
 				return fmt.Errorf("unable to create temporary directory: %w", err)
 			}
 			if cmd.Flag("remove-tmpdir").Value.String() == "true" {
-				defer os.Remove(tmpDir)
+				defer os.RemoveAll(tmpDir)
 			}
 
 			progress.Printf("Copying terraform files to temporary directory %q\n", tmpDir)
@@ -120,7 +99,6 @@ func BootstrapCmd() *cobra.Command {
 			progress.Printf("Using %q provider\n", provider)
 
 			localStateFilePath := cmd.Flag("state").Value.String()
-			tmpStateFilePath := filepath.Join(workingDir, "terraform.tfstate")
 
 			// initialize provider config based on the subcommand
 			switch provider {
@@ -130,46 +108,6 @@ func BootstrapCmd() *cobra.Command {
 				config = gcpConfig
 			default:
 				return fmt.Errorf("unsupported provider: %s", provider)
-			}
-
-			// TODO: extract state management into a separate function to reduce this function's complexity
-			var useLocalState bool
-
-			stateManager, err := StateManagerFromConfig(config)
-			if err != nil {
-				logger.Warn("Failed to create state manager", "error", err)
-				useLocalState = true
-			} else {
-				// Try to download from remote storage
-				if err := stateManager.DownloadState(cmd.Context(), tmpStateFilePath); err != nil {
-					logger.Warn("Failed to download remote state", "error", err)
-					useLocalState = true
-				} else {
-					logger.Debug("Downloaded remote state successfully", "path", tmpStateFilePath)
-					progress.Println("State file acquired from remote storage")
-					if _, err := os.Stat(tmpStateFilePath); err == nil {
-						useLocalState = false
-					}
-				}
-			}
-
-			if useLocalState {
-				logger.Debug("Using local state file", "path", localStateFilePath)
-				if _, err := os.Stat(localStateFilePath); err == nil {
-					progress.Printf("Copying local state file %q to temporary directory %q\n", localStateFilePath, workingDir)
-					input, err := os.ReadFile(localStateFilePath)
-					if err != nil {
-						return fmt.Errorf("unable to read local state file: %w", err)
-					}
-					if err := os.WriteFile(tmpStateFilePath, input, 0600); err != nil {
-						return fmt.Errorf("unable to write state file to temporary directory: %w", err)
-					}
-				} else {
-					progress.Printf(
-						"No local state file found, new state file will be created at %q\n",
-						localStateFilePath,
-					)
-				}
 			}
 
 			// Convert provider config to terraform vars
@@ -184,21 +122,16 @@ func BootstrapCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("terraform executable not available: %w", err)
 			}
-			tf, err := terraformFactory(workingDir, execPath)
+			tf, err := tfexec.NewTerraform(workingDir, execPath)
 			if err != nil {
 				return fmt.Errorf("unable to create terraform instance: %w", err)
 			}
-			progress.Println("Initializing terraform...")
-			if err := tf.Init(cmd.Context(), tfexec.Upgrade(true)); err != nil {
-				return fmt.Errorf("unable to initialize terraform: %w", err)
-			}
 
-			// Parse and append any --tf-var flags to the vars slice
-			for _, tfVar := range tfVars {
-				if !strings.Contains(tfVar, "=") {
-					return fmt.Errorf("invalid --tf-var format %q: must be in key=value format", tfVar)
-				}
-				vars = append(vars, tfexec.Var(tfVar))
+			// Create a state manager and initialize Terraform with appropriate backend
+			stateManager := NewStateManager(cmd.Context(), config, workingDir, tf, localStateFilePath)
+
+			if err := stateManager.InitializeWithBackend(cmd.Context()); err != nil {
+				return fmt.Errorf("unable to initialize terraform with backend: %w", err)
 			}
 
 			progress.Println("Running terraform plan...")
@@ -260,25 +193,13 @@ func BootstrapCmd() *cobra.Command {
 			}
 
 			defer func() {
-				// Copy the state file back to the original location
-				progress.Printf("Copying state file back to %q\n", localStateFilePath)
-				stateFileData, err := os.ReadFile(tmpStateFilePath)
-				if err != nil {
-					failure.Printf("unable to read state file from temporary directory: %v", err)
-				}
-				if err := os.WriteFile(localStateFilePath, stateFileData, 0600); err != nil {
-					failure.Printf("unable to write state file to %q: %v", localStateFilePath, err)
-				}
-
-				// Also upload to remote storage if we have a state manager
-				if stateManager != nil {
-					if err := stateManager.UploadState(cmd.Context(), tmpStateFilePath); err != nil {
-						failure.Printf("unable to upload state file to remote storage: %v", err)
-					}
-				}
+				// Handle state file transfer back and check for remote backend migration
+				stateManager.FinalizeStateTransfer(cmd.Context())
 			}()
 
 			progress.Println("Running terraform apply...")
+			tf.SetStdout(os.Stdout) // Always show apply output
+			tf.SetStderr(os.Stderr)
 			if err := tf.Apply(cmd.Context(), toApplyOptions(vars)...); err != nil {
 				return fmt.Errorf("unable to run terraform apply: %w", err)
 			}
@@ -296,8 +217,6 @@ func BootstrapCmd() *cobra.Command {
 	cmd.PersistentFlags().Bool("remove-tmpdir", true, "Remove the temporary directory after running")
 	cmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "Set the log level")
 	cmd.PersistentFlags().Bool("force-terraform-download", false, "Force download terraform")
-	cmd.PersistentFlags().StringArrayVar(&tfVars, "tf-var", []string{}, "Pass arbitrary variables to terraform (can be specified multiple times)")
-	_ = cmd.PersistentFlags().MarkHidden("tf-var")
 
 	// The subcommands will handle cloud provider specific variables and populate the config
 	cmd.AddCommand(awsCmd(awsConfig))
@@ -387,7 +306,7 @@ func getUserConfirmation(message string, progress *color.Color) bool {
 }
 
 // showOutputs will pretty-print the TF outputs as JSON
-func showOutputs(ctx context.Context, tf TerraformExecutor) error {
+func showOutputs(ctx context.Context, tf *tfexec.Terraform) error {
 	output, err := tf.Output(ctx)
 	if err != nil {
 		return fmt.Errorf("unable to get terraform output: %w", err)
