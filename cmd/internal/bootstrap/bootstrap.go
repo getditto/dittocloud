@@ -19,10 +19,32 @@ import (
 	"github.com/spf13/pflag"
 )
 
+// TerraformExecutor is an interface that abstracts terraform operations for testing
+type TerraformExecutor interface {
+	Init(context.Context, ...tfexec.InitOption) error
+	Plan(context.Context, ...tfexec.PlanOption) (bool, error)
+	Apply(context.Context, ...tfexec.ApplyOption) error
+	Output(context.Context, ...tfexec.OutputOption) (map[string]tfexec.OutputMeta, error)
+	SetStdout(io.Writer)
+	SetStderr(io.Writer)
+}
+
+// TerraformFactory creates a TerraformExecutor
+type TerraformFactory func(workingDir string, execPath string) (TerraformExecutor, error)
+
+// defaultTerraformFactory is the default factory that creates real terraform instances
+var defaultTerraformFactory TerraformFactory = func(workingDir string, execPath string) (TerraformExecutor, error) {
+	return tfexec.NewTerraform(workingDir, execPath)
+}
+
+// terraformFactory is the factory used by the code (can be replaced in tests)
+var terraformFactory = defaultTerraformFactory
+
 func BootstrapCmd() *cobra.Command {
 	// Shared variables for all providers, scoped to this functions closure. At least they aren't globals.
 	var vars []*tfexec.VarOption
 	var logLevel string
+	var tfVars []string
 
 	header := color.New(color.FgCyan, color.Bold)
 	progress := color.New(color.FgMagenta)
@@ -103,13 +125,21 @@ func BootstrapCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("terraform executable not available: %w", err)
 			}
-			tf, err := tfexec.NewTerraform(workingDir, execPath)
+			tf, err := terraformFactory(workingDir, execPath)
 			if err != nil {
 				return fmt.Errorf("unable to create terraform instance: %w", err)
 			}
 			progress.Println("Initializing terraform...")
 			if err := tf.Init(cmd.Context(), tfexec.Upgrade(true)); err != nil {
 				return fmt.Errorf("unable to initialize terraform: %w", err)
+			}
+
+			// Parse and append any --tf-var flags to the vars slice
+			for _, tfVar := range tfVars {
+				if !strings.Contains(tfVar, "=") {
+					return fmt.Errorf("invalid --tf-var format %q: must be in key=value format", tfVar)
+				}
+				vars = append(vars, tfexec.Var(tfVar))
 			}
 
 			progress.Println("Running terraform plan...")
@@ -209,6 +239,8 @@ func BootstrapCmd() *cobra.Command {
 	cmd.PersistentFlags().Bool("remove-tmpdir", true, "Remove the temporary directory after running")
 	cmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "Set the log level")
 	cmd.PersistentFlags().Bool("force-terraform-download", false, "Force download terraform")
+	cmd.PersistentFlags().StringArrayVar(&tfVars, "tf-var", []string{}, "Pass arbitrary variables to terraform (can be specified multiple times)")
+	_ = cmd.PersistentFlags().MarkHidden("tf-var")
 
 	// The subcommands will handle cloud provider specific variables and mutate the list of vars to be passed to terraform plan/apply
 	cmd.AddCommand(awsCmd(&vars))
@@ -279,7 +311,7 @@ func FlagOrPrompt(flag *pflag.Flag, label string, def string) string {
 }
 
 // showOutputs will pretty-print the TF outputs as JSON
-func showOutputs(ctx context.Context, tf *tfexec.Terraform) error {
+func showOutputs(ctx context.Context, tf TerraformExecutor) error {
 	output, err := tf.Output(ctx)
 	if err != nil {
 		return fmt.Errorf("unable to get terraform output: %w", err)

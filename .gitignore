@@ -10,3 +10,5 @@ dist/
 .vscode/
 .DS_Store
 .envrc
+ditto-cloud-bootstrap
+dittocloud
