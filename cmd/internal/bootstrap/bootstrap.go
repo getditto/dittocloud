@@ -12,8 +12,8 @@ import (
 	"strings"
 
 	"github.com/fatih/color"
-	"github.com/getditto/ditto-cloud-bootstrap/cmd/internal/log"
-	"github.com/getditto/ditto-cloud-bootstrap/terraform"
+	"github.com/getditto/dittocloud/cmd/internal/log"
+	"github.com/getditto/dittocloud/terraform"
 	"github.com/hashicorp/terraform-exec/tfexec"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -67,7 +67,7 @@ func BootstrapCmd() *cobra.Command {
 			logger.Debug("Starting Ditto Cloud Bootstrap", "command", cmd.Name())
 
 			header.Println("══════════════════════════════════════════════════")
-			header.Println("               Ditto Cloud Bootstrap")
+			header.Println("               Ditto Cloud Bootstrap              ")
 			header.Println("══════════════════════════════════════════════════")
 			return nil
 		},
@@ -75,7 +75,7 @@ func BootstrapCmd() *cobra.Command {
 			logger := log.FromContext(cmd.Context())
 			color.NoColor = cmd.Flag("no-color").Value.String() == "true"
 			// Copy the packaged terrafrom files into a temporary directory
-			tmpDir, err := os.MkdirTemp(os.TempDir(), "ditto-cloud-bootstrap")
+			tmpDir, err := os.MkdirTemp(os.TempDir(), "dittocloud")
 			if err != nil {
 				return fmt.Errorf("unable to create temporary directory: %w", err)
 			}

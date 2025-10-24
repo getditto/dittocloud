@@ -1,4 +1,4 @@
-module github.com/getditto/ditto-cloud-bootstrap
+module github.com/getditto/dittocloud
 
 go 1.23.0
 
