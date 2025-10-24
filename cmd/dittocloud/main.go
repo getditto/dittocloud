@@ -6,7 +6,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
-	"github.com/getditto/ditto-cloud-bootstrap/cmd/internal/bootstrap"
+	"github.com/getditto/dittocloud/cmd/internal/bootstrap"
 )
 
 func RootCommand() *cobra.Command {
