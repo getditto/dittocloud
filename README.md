@@ -82,8 +82,8 @@ dittocloud bootstrap aws
 dittocloud bootstrap aws \
   --aws-profile my-profile \
   --aws-region us-west-2 \
-  --vpc-name ditto-vpc \
-  --vpc-cidr 10.0.0.0/16
+  --aws-vpc-name ditto-vpc \
+  --aws-vpc-cidr 10.0.0.0/16
 ```
 
 ### Bootstrap GCP
@@ -95,8 +95,7 @@ dittocloud bootstrap gcp
 # With command-line flags
 dittocloud bootstrap gcp \
   --project-id my-project-id \
-  --region us-central1 \
-  --vpc-name ditto-vpc
+  --region us-central1
 ```
 
 ## Output
@@ -105,8 +104,7 @@ After successful execution, the tool displays important resource information tha
 
 **For AWS:**
 - AWS Account ID and region
-- VPC configuration details
-- IAM role information
+- VPC configuration details (VPC ID, subnets, CIDR blocks)
 
 **For GCP:**
 - Project ID and available zones
