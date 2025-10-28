@@ -1,10 +1,10 @@
-# Ditto Cloud Bootstrap
+# Ditto Cloud
 
 A command-line tool to bootstrap your cloud infrastructure with the necessary resources and configurations required for Ditto deployment. This tool prepares your AWS or GCP environment with the proper networking, IAM roles, and security settings needed to deploy and run Ditto services.
 
 ## Overview
 
-The Ditto Cloud Bootstrap tool automates the setup of cloud infrastructure components that are prerequisites for Ditto deployment. It creates the foundation layer including VPCs, IAM roles, service accounts, and security configurations tailored for Ditto's requirements.
+The Ditto Cloud tool automates the setup of cloud infrastructure components that are prerequisites for Ditto deployment. It creates the foundation layer including VPCs, IAM roles, service accounts, and security configurations tailored for Ditto's requirements.
 
 ### What it creates:
 
@@ -26,28 +26,28 @@ The Ditto Cloud Bootstrap tool automates the setup of cloud infrastructure compo
 
 ### Download Pre-built Binaries
 
-Download the latest release from the [releases page](https://github.com/getditto/ditto-cloud-bootstrap/releases):
+Download the latest release from the [releases page](https://github.com/getditto/dittocloud/releases):
 
 ```bash
 # For macOS (Apple Silicon)
-curl -LO https://github.com/getditto/ditto-cloud-bootstrap/releases/latest/download/ditto-cloud-bootstrap_Darwin_arm64.tar.gz
-tar -xzf ditto-cloud-bootstrap_Darwin_arm64.tar.gz
+curl -LO https://github.com/getditto/dittocloud/releases/latest/download/dittocloud_Darwin_arm64.tar.gz
+tar -xzf dittocloud_Darwin_arm64.tar.gz
 
 # For macOS (Intel)
-curl -LO https://github.com/getditto/ditto-cloud-bootstrap/releases/latest/download/ditto-cloud-bootstrap_Darwin_x86_64.tar.gz
-tar -xzf ditto-cloud-bootstrap_Darwin_x86_64.tar.gz
+curl -LO https://github.com/getditto/dittocloud/releases/latest/download/dittocloud_Darwin_x86_64.tar.gz
+tar -xzf dittocloud_Darwin_x86_64.tar.gz
 
 # For Linux (x86_64)
-curl -LO https://github.com/getditto/ditto-cloud-bootstrap/releases/latest/download/ditto-cloud-bootstrap_Linux_x86_64.tar.gz
-tar -xzf ditto-cloud-bootstrap_Linux_x86_64.tar.gz
+curl -LO https://github.com/getditto/dittocloud/releases/latest/download/dittocloud_Linux_x86_64.tar.gz
+tar -xzf dittocloud_Linux_x86_64.tar.gz
 ```
 
 ### Build from Source
 
 ```bash
-git clone https://github.com/getditto/ditto-cloud-bootstrap.git
-cd ditto-cloud-bootstrap
-go build -o ditto-cloud-bootstrap ./cmd/dittocloud
+git clone https://github.com/getditto/dittocloud.git
+cd dittocloud
+go build -o dittocloud ./cmd/dittocloud
 ```
 
 ## Prerequisites
@@ -76,27 +76,26 @@ go build -o ditto-cloud-bootstrap ./cmd/dittocloud
 
 ```bash
 # Interactive mode - the tool will prompt for required values
-ditto-cloud-bootstrap bootstrap aws
+dittocloud bootstrap aws
 
 # With command-line flags
-ditto-cloud-bootstrap bootstrap aws \
+dittocloud bootstrap aws \
   --aws-profile my-profile \
   --aws-region us-west-2 \
-  --vpc-name ditto-vpc \
-  --vpc-cidr 10.0.0.0/16
+  --aws-vpc-name ditto-vpc \
+  --aws-vpc-cidr 10.0.0.0/16
 ```
 
 ### Bootstrap GCP
 
 ```bash
 # Interactive mode - the tool will prompt for required values
-ditto-cloud-bootstrap bootstrap gcp
+dittocloud bootstrap gcp
 
 # With command-line flags
-ditto-cloud-bootstrap bootstrap gcp \
+dittocloud bootstrap gcp \
   --project-id my-project-id \
-  --region us-central1 \
-  --vpc-name ditto-vpc
+  --region us-central1
 ```
 
 ## Output
@@ -105,8 +104,7 @@ After successful execution, the tool displays important resource information tha
 
 **For AWS:**
 - AWS Account ID and region
-- VPC configuration details
-- IAM role information
+- VPC configuration details (VPC ID, subnets, CIDR blocks)
 
 **For GCP:**
 - Project ID and available zones
@@ -133,7 +131,7 @@ For detailed information about the infrastructure components created by this too
 
 ```bash
 # Build for current platform
-go build -o ditto-cloud-bootstrap ./cmd/dittocloud
+go build -o dittocloud ./cmd/dittocloud
 
 # Build for all platforms (requires GoReleaser)
 goreleaser release --snapshot --clean
@@ -156,7 +154,7 @@ go test ./...
 ## Support
 
 For questions, issues, or support:
-- Open an issue on [GitHub](https://github.com/getditto/ditto-cloud-bootstrap/issues)
+- Open an issue on [GitHub](https://github.com/getditto/dittocloud/issues)
 - Contact the Ditto team through your support channels
 
 ## Security

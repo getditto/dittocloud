@@ -13,7 +13,7 @@ import (
 	"github.com/hashicorp/hc-install/product"
 	"github.com/hashicorp/hc-install/releases"
 
-	"github.com/getditto/ditto-cloud-bootstrap/cmd/internal/log"
+	"github.com/getditto/dittocloud/cmd/internal/log"
 )
 
 func isCompatibleTerraformVersion(execPath, requiredVersion string) bool {
@@ -169,8 +169,8 @@ func getCachedTerraform(ctx context.Context, requiredVersion string) (string, bo
 		return "", false
 	}
 
-	// Create cache path: ~/.cache/ditto-cloud-bootstrap/terraform/{version}/terraform
-	cachedPath := filepath.Join(cacheDir, "ditto-cloud-bootstrap", "terraform", requiredVersion, "terraform")
+	// Create cache path: ~/.cache/dittocloud/terraform/{version}/terraform
+	cachedPath := filepath.Join(cacheDir, "dittocloud", "terraform", requiredVersion, "terraform")
 
 	// Check if cached terraform exists, is executable and the right version
 	if info, err := os.Stat(cachedPath); err == nil && !info.IsDir() {
@@ -190,7 +190,7 @@ func cacheTerraform(sourcePath, requiredVersion string) (string, error) {
 	}
 
 	// Create cache directory structure
-	terraformCacheDir := filepath.Join(cacheDir, "ditto-cloud-bootstrap", "terraform", requiredVersion)
+	terraformCacheDir := filepath.Join(cacheDir, "dittocloud", "terraform", requiredVersion)
 	if err := os.MkdirAll(terraformCacheDir, 0755); err != nil {
 		return "", fmt.Errorf("unable to create cache directory: %w", err)
 	}

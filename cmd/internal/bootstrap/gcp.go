@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/fatih/color"
-	"github.com/getditto/ditto-cloud-bootstrap/cmd/internal/log"
+	"github.com/getditto/dittocloud/cmd/internal/log"
 	"github.com/hashicorp/terraform-exec/tfexec"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"

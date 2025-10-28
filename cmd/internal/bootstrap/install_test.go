@@ -12,7 +12,7 @@ import (
 	"github.com/hashicorp/hc-install/product"
 	"github.com/hashicorp/hc-install/releases"
 
-	"github.com/getditto/ditto-cloud-bootstrap/cmd/internal/log"
+	"github.com/getditto/dittocloud/cmd/internal/log"
 )
 
 func TestGetTerraform(t *testing.T) {
@@ -40,7 +40,7 @@ func TestGetTerraform(t *testing.T) {
 		}
 
 		// Should be in cache directory
-		if !strings.Contains(execPath, "ditto-cloud-bootstrap/terraform") {
+		if !strings.Contains(execPath, "dittocloud/terraform") {
 			t.Errorf("expected terraform to be cached, got path: %s", execPath)
 		}
 	})
@@ -71,7 +71,7 @@ func TestGetTerraform(t *testing.T) {
 		}
 
 		// Should be in cache directory
-		if !strings.Contains(execPath, "ditto-cloud-bootstrap/terraform") {
+		if !strings.Contains(execPath, "dittocloud/terraform") {
 			t.Errorf("expected terraform to be from cache, got path: %s", execPath)
 		}
 	})
@@ -99,7 +99,7 @@ func TestGetTerraform(t *testing.T) {
 		}
 
 		// Should be system terraform (not cached)
-		if strings.Contains(execPath, "ditto-cloud-bootstrap/terraform") {
+		if strings.Contains(execPath, "dittocloud/terraform") {
 			t.Errorf("expected system terraform, but got cached: %s", execPath)
 		}
 
@@ -129,7 +129,7 @@ func TestGetTerraform(t *testing.T) {
 		}
 
 		// Should be cached (downloaded and then cached)
-		if !strings.Contains(execPath, "ditto-cloud-bootstrap/terraform") {
+		if !strings.Contains(execPath, "dittocloud/terraform") {
 			t.Errorf("expected downloaded terraform to be cached, got path: %s", execPath)
 		}
 	})
@@ -157,7 +157,7 @@ func TestGetTerraform(t *testing.T) {
 		}
 
 		// Should be cached (downloaded because system was incompatible)
-		if !strings.Contains(execPath, "ditto-cloud-bootstrap/terraform") {
+		if !strings.Contains(execPath, "dittocloud/terraform") {
 			t.Errorf("expected downloaded terraform to be cached, got path: %s", execPath)
 		}
 	})

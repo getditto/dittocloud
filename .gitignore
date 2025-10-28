@@ -12,3 +12,4 @@ dist/
 .envrc
 ditto-cloud-bootstrap
 dittocloud
+!cmd/dittocloud

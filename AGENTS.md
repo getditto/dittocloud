@@ -14,7 +14,7 @@ A Go CLI tool that bootstraps cloud infrastructure (AWS and GCP) for Ditto deplo
 
 ### Build
 ```bash
-go build -o ditto-cloud-bootstrap ./cmd/dittocloud
+go build -o dittocloud ./cmd/dittocloud
 ```
 
 ### Test
@@ -35,7 +35,7 @@ go test ./...
   - Provider-agnostic orchestration
 - `aws.go`: AWS-specific variable prompting and flag definitions
 - `gcp.go`: GCP-specific variable prompting and flag definitions
-- `install.go`: Terraform version management (downloads v1.11.4 if needed, caches in `~/.cache/ditto-cloud-bootstrap/terraform/`)
+- `install.go`: Terraform version management (downloads v1.11.4 if needed, caches in `~/.cache/dittocloud/terraform/`)
 
 **Terraform Layer** (`terraform/`):
 - `embed.go`: Embeds all Terraform files into the binary using `//go:embed`
