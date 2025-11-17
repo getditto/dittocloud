@@ -80,6 +80,18 @@ resource "google_project_iam_member" "k8s_control_plane_access" {
   }
 }
 
+resource "google_project_iam_member" "k8s_control_plane_token_creator" {
+  project = data.google_project.this.project_id
+  role    = "roles/iam.serviceAccountTokenCreator"
+  member  = "serviceAccount:${google_service_account.k8s_control_plane.email}"
+
+  condition {
+    title       = local.iam_condition.title
+    description = local.iam_condition.description
+    expression  = local.iam_condition.expression
+  }
+}
+
 resource "google_service_account" "k8s_node" {
   account_id   = var.capg_iam.node_service_account_name
   display_name = "Ditto Workload Cluster Node Service Account"
@@ -88,6 +100,18 @@ resource "google_service_account" "k8s_node" {
 resource "google_project_iam_member" "k8s_node_access" {
   project = data.google_project.this.project_id
   role    = var.capg_iam.node_role_id
+  member  = "serviceAccount:${google_service_account.k8s_node.email}"
+
+  condition {
+    title       = local.iam_condition.title
+    description = local.iam_condition.description
+    expression  = local.iam_condition.expression
+  }
+}
+
+resource "google_project_iam_member" "k8s_node_token_creator" {
+  project = data.google_project.this.project_id
+  role    = "roles/iam.serviceAccountTokenCreator"
   member  = "serviceAccount:${google_service_account.k8s_node.email}"
 
   condition {
@@ -118,6 +142,11 @@ resource "google_project_iam_member" "crossplane_iam_binding" {
   role    = google_project_iam_custom_role.crossplane.id
   member  = "serviceAccount:${local.crossplane_service_account_email}"
 
+  condition {
+    title       = local.iam_condition.title
+    description = local.iam_condition.description
+    expression  = local.iam_condition.expression
+  }
 }
 
 resource "google_project_iam_member" "crossplane_iam_binding_limited" {
