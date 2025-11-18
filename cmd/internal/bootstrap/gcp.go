@@ -2,7 +2,6 @@ package bootstrap
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/fatih/color"
@@ -35,28 +34,19 @@ func gcpCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 
 	flags.String("project-id", "", "GCP project ID to use")
 	flags.String("region", "", "GCP region to use")
-	flags.Bool("create-subnets", false, "Create subnets and firewall rules")
-	flags.Bool("create-default-firewall-rules", false, "Create default firewall rules")
-	flags.String("subnet-cidr", "10.140.0.0/19", "Subnet CIDR to use")
-	flags.String("pods-cidr-range", "100.90.0.0/16", "Pods CIDR range to use")
-	flags.String("services-cidr-range", "100.91.0.0/16", "Services CIDR range to use")
-
+	flags.String("vpc-name", "ditto-vpc", "GCP VPC name to use")
+	flags.Bool("create-default-firewall-rules", false, "Create default firewall rules for internal VPC traffic")
 	cmd.Flags().AddFlagSet(flags)
-	// cmd.MarkFlagRequired("project-id")
-	// cmd.MarkFlagRequired("region")
 
 	return cmd
 }
 
 func promptGcpValues(ctx context.Context, flags *pflag.FlagSet) ([]*tfexec.VarOption, error) {
 	vars := []*tfexec.VarOption{}
-	// optional := color.New(color.FgYellow)
 	required := color.New(color.FgRed, color.Bold)
-	// failed := color.New(color.FgRed)
 
 	// confirm all flag values
 	flags.VisitAll(func(flag *pflag.Flag) {
-		// is this correctly handling bool?
 		err := flag.Value.Set(StringPrompt(flag.Name, flag.Value.String()))
 		if err != nil {
 			log.FromContext(ctx).Error("unable to set flag value from prompt", "flag", flag.Name, "error", err)
@@ -90,23 +80,29 @@ func promptGcpValues(ctx context.Context, flags *pflag.FlagSet) ([]*tfexec.VarOp
 		})
 	}
 
+
+	// Build terraform variables
 	projectId := fmt.Sprintf("project_id=%s", flags.Lookup("project-id").Value.String())
 	log.FromContext(ctx).Debug("terraform variable", "project_id", projectId)
+	vars = append(vars, tfexec.Var(projectId))
+
 	region := fmt.Sprintf("region=%s", flags.Lookup("region").Value.String())
 	log.FromContext(ctx).Debug("terraform variable", "region", region)
-	vpcConfigMap := map[string]string{
-		"create_subnets":                flags.Lookup("create-subnets").Value.String(),
-		"create_default_firewall_rules": flags.Lookup("create-default-firewall-rules").Value.String(),
-		"subnet_cidr":                   flags.Lookup("subnet-cidr").Value.String(),
-		"pods_cidr_range":               flags.Lookup("pods-cidr-range").Value.String(),
-		"services_cidr_range":           flags.Lookup("services-cidr-range").Value.String(),
+	vars = append(vars, tfexec.Var(region))
+
+	// Add optional vpc-name if provided
+	if vpcNameFlag := flags.Lookup("vpc-name"); vpcNameFlag != nil && vpcNameFlag.Value.String() != "" {
+		vpcName := fmt.Sprintf("vpc_name=%s", vpcNameFlag.Value.String())
+		log.FromContext(ctx).Debug("terraform variable", "vpc_name", vpcName)
+		vars = append(vars, tfexec.Var(vpcName))
 	}
 
-	vpcConfigJson, err := json.Marshal(vpcConfigMap)
-	if err != nil {
-		return nil, fmt.Errorf("unable to marshal vpc config: %w", err)
+	// Add optional create-default-firewall-rules if provided
+	if firewallFlag := flags.Lookup("create-default-firewall-rules"); firewallFlag != nil && firewallFlag.Value.String() != "" {
+		createFirewallRules := fmt.Sprintf("create_default_firewall_rules=%s", firewallFlag.Value.String())
+		log.FromContext(ctx).Debug("terraform variable", "create_default_firewall_rules", createFirewallRules)
+		vars = append(vars, tfexec.Var(createFirewallRules))
 	}
-	vpcConfig := fmt.Sprintf("vpc_config=%s", string(vpcConfigJson))
-	log.FromContext(ctx).Debug("terraform variable", "vpc_config", vpcConfig)
-	return append(vars, tfexec.Var(projectId), tfexec.Var(region), tfexec.Var(vpcConfig)), nil
+
+	return vars, nil
 }

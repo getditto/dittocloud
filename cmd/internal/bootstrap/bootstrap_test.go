@@ -2,7 +2,6 @@ package bootstrap
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"reflect"
 	"strings"
@@ -162,11 +161,8 @@ func TestBootstrap(t *testing.T) {
 			"gcp",
 			"--project-id=test-project",
 			"--region=us-central1",
-			"--create-subnets=true",
-			"--create-default-firewall-rules=true",
-			"--subnet-cidr=10.140.0.0/19",
-			"--pods-cidr-range=100.90.0.0/16",
-			"--services-cidr-range=100.91.0.0/16",
+			"--vpc-name=test-vpc",
+			"--create-default-firewall-rules=false",
 			"--state=/tmp/test.tfstate",
 			"--dry-run",
 		})
@@ -177,35 +173,17 @@ func TestBootstrap(t *testing.T) {
 
 		assertCallCounts(t, mock, 1, 1, 0)
 
-		// Verify simple variables
-		if got := mock.PlanVars["project_id"]; got != "test-project" {
-			t.Errorf("project_id: got %q, want %q", got, "test-project")
-		}
-		if got := mock.PlanVars["region"]; got != "us-central1" {
-			t.Errorf("region: got %q, want %q", got, "us-central1")
-		}
-
-		// Verify vpc_config JSON variable
-		vpcConfigJSON, ok := mock.PlanVars["vpc_config"]
-		if !ok {
-			t.Fatal("vpc_config variable not found")
+		wantVars := map[string]string{
+			"project_id":                    "test-project",
+			"region":                        "us-central1",
+			"vpc_name":                      "test-vpc",
+			"create_default_firewall_rules": "false",
 		}
 
-		var actualConfig map[string]string
-		if err := json.Unmarshal([]byte(vpcConfigJSON), &actualConfig); err != nil {
-			t.Fatalf("failed to parse vpc_config JSON: %v", err)
-		}
-
-		wantConfig := map[string]string{
-			"create_subnets":                "true",
-			"create_default_firewall_rules": "true",
-			"subnet_cidr":                   "10.140.0.0/19",
-			"pods_cidr_range":               "100.90.0.0/16",
-			"services_cidr_range":           "100.91.0.0/16",
-		}
-
-		if !reflect.DeepEqual(actualConfig, wantConfig) {
-			t.Errorf("vpc_config mismatch.\nGot:  %+v\nWant: %+v", actualConfig, wantConfig)
+		for key, want := range wantVars {
+			if got := mock.PlanVars[key]; got != want {
+				t.Errorf("%s: got %q, want %q", key, got, want)
+			}
 		}
 	})
 

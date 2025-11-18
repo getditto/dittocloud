@@ -157,44 +157,23 @@ module "vpc" {
   version = "~> 9.0"
 
   project_id   = var.project_id
-  network_name = var.vpc_config.vpc_name
-  description  = var.vpc_config.vpc_description
-  routing_mode = var.vpc_config.routing_mode
+  network_name = var.vpc_name
+  description  = "VPC for Ditto workload clusters"
+  routing_mode = "REGIONAL"
 
   auto_create_subnetworks = false
 
-  subnets = var.vpc_config.create_subnets ? [
-    {
-      subnet_name           = var.vpc_config.subnet_name
-      subnet_ip             = var.vpc_config.subnet_cidr
-      subnet_region         = var.region
-      description           = var.vpc_config.subnet_description
-      subnet_private_access = var.vpc_config.private_google_access ? "true" : "false"
-      subnet_flow_logs      = "false"
-    }
-  ] : []
-
-  secondary_ranges = var.vpc_config.create_subnets ? {
-    (var.vpc_config.subnet_name) = [
-      {
-        range_name    = var.vpc_config.pods_secondary_range_name
-        ip_cidr_range = var.vpc_config.pods_cidr_range
-      },
-      {
-        range_name    = var.vpc_config.services_secondary_range_name
-        ip_cidr_range = var.vpc_config.services_cidr_range
-      }
-    ]
-  } : {}
-
-  routes = []
+  # Subnets are created by CAPG to avoid CIDR conflicts
+  subnets          = []
+  secondary_ranges = {}
+  routes           = []
 
   depends_on = [module.project-services]
 }
 
 # Create firewall rules separately when enabled
 module "firewall_rules" {
-  count = var.vpc_config.create_default_firewall_rules ? 1 : 0
+  count        = var.create_default_firewall_rules ? 1 : 0
   source       = "terraform-google-modules/network/google//modules/firewall-rules"
   version      = "~> 9.0"
   project_id   = var.project_id
@@ -202,15 +181,11 @@ module "firewall_rules" {
 
   rules = [
     {
-      name        = "${var.vpc_config.vpc_name}-allow-internal"
+      name        = "${var.vpc_name}-allow-internal"
       direction   = "INGRESS"
       priority    = 1000
-      description = "Allow internal communication within VPC and secondary ranges"
-      ranges = [
-        var.vpc_config.subnet_cidr,
-        var.vpc_config.pods_cidr_range,
-        var.vpc_config.services_cidr_range
-      ]
+      description = "Allow all internal communication within the VPC (all subnets created by CAPG)"
+      ranges      = ["10.0.0.0/8"] # Allow all RFC1918 private ranges that CAPG might use
       allow = [
         {
           protocol = "tcp"
@@ -228,7 +203,7 @@ module "firewall_rules" {
       deny = []
     },
     {
-      name        = "${var.vpc_config.vpc_name}-allow-ssh"
+      name        = "${var.vpc_name}-allow-ssh"
       direction   = "INGRESS"
       priority    = 1000
       description = "Allow SSH access to instances with ssh-access tag"
@@ -243,7 +218,7 @@ module "firewall_rules" {
       deny = []
     },
     {
-      name        = "${var.vpc_config.vpc_name}-allow-https"
+      name        = "${var.vpc_name}-allow-https"
       direction   = "INGRESS"
       priority    = 1000
       description = "Allow HTTP/HTTPS access for web services"
@@ -258,7 +233,7 @@ module "firewall_rules" {
       deny = []
     },
     {
-      name        = "${var.vpc_config.vpc_name}-allow-k8s-api"
+      name        = "${var.vpc_name}-allow-k8s-api"
       direction   = "INGRESS"
       priority    = 1000
       description = "Allow access to Kubernetes API server"
