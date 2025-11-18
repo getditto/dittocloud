@@ -15,11 +15,11 @@ The Ditto Cloud tool automates the setup of cloud infrastructure components that
 - IAM permissions for cluster management
 
 **GCP:**
-- VPC networks with subnets and secondary ranges for Kubernetes
+- VPC network (subnets are created by CAPG during cluster deployment)
 - Service accounts with appropriate IAM bindings
 - Project-level IAM roles and custom roles
 - Resource tagging for access control
-- Firewall rules for secure communication
+- Optional firewall rules for secure communication
 - Support for CAPG (Cluster API Provider GCP) and Crossplane
 
 ## Installation
@@ -64,10 +64,10 @@ go build -o dittocloud ./cmd/dittocloud
 - Google Cloud CLI (`gcloud`) installed and authenticated
 - A GCP project with billing enabled
 - Sufficient permissions to create:
-  - VPC networks and subnets
+  - VPC networks
   - Service accounts and IAM bindings
   - Custom IAM roles
-  - Firewall rules
+  - Firewall rules (optional)
   - Project-level tags
 
 ## Usage
@@ -108,7 +108,7 @@ After successful execution, the tool displays important resource information tha
 
 **For GCP:**
 - Project ID and available zones
-- VPC network and subnet details (including secondary ranges for Kubernetes)
+- VPC network details
 - Service account details for control plane and worker nodes
 - Custom IAM role information for CAPG, Crossplane, and Velero
 - Resource tagging information for access control

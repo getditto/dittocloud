@@ -43,7 +43,8 @@ go test ./...
   - `vpc/`: VPC with subnets across availability zones
   - `cross_account_iam/`: CAPA controller, control plane, and node IAM roles
 - `gcp/`: GCP networking, service accounts, and custom IAM roles
-  - VPC with optional subnets and firewall rules
+  - VPC network (subnets are created by CAPG during cluster deployment)
+  - Optional firewall rules
   - Tag-based IAM access control (uses resource tags to limit IAM permissions)
   - Service accounts for CAPG control plane and worker nodes
   - Custom roles for CAPG, Crossplane, and Velero
@@ -71,9 +72,9 @@ go test ./...
 
 **Tag-based IAM Access Control**: The GCP module uses resource tags to restrict IAM permissions. All resources created by Ditto are tagged, and IAM roles include conditions that check for these tags. This prevents service accounts from accessing resources outside Ditto's management scope.
 
-**VPC Configuration**: The `vpc_config` variable in GCP is passed as JSON and controls whether to create subnets, firewall rules, and secondary IP ranges for Kubernetes pods/services.
+**VPC Configuration**: The GCP module creates a VPC network without subnets. CAPG (Cluster API Provider GCP) creates subnets with appropriate CIDR ranges and secondary IP ranges for Kubernetes pods and services during cluster deployment.
 
-**Firewall Rules Module**: Firewall rules are created in a separate module (`terraform/gcp/firewall_rules`) to avoid conditional type errors when `create_default_firewall_rules` is false.
+**Firewall Rules Module**: Optional firewall rules can be created using the `--create-default-firewall-rules` flag. When enabled, rules are created in a separate module to avoid conditional type errors.
 
 ## AWS-Specific Details
 
