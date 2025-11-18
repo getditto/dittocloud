@@ -27,16 +27,6 @@ output "networking" {
       id        = module.vpc.network_id
       self_link = module.vpc.network_self_link
     }
-    // TODO: make output more friendly for CAPG resources/helm charts to refer
-    subnets = {
-      primary = length(module.vpc.subnets_names) > 0 ? {
-        name             = module.vpc.subnets_names[0]
-        id               = module.vpc.subnets_ids[0]
-        self_link        = module.vpc.subnets_self_links[0]
-        cidr             = module.vpc.subnets_ips[0]
-        secondary_ranges = length(module.vpc.subnets_names) > 0 && length(module.vpc.subnets_secondary_ranges) > 0 ? module.vpc.subnets_secondary_ranges[0] : null
-      } : null
-    }
   }
 }
 

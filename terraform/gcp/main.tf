@@ -163,7 +163,6 @@ module "vpc" {
 
   auto_create_subnetworks = false
 
-  # Subnets are created by CAPG to avoid CIDR conflicts
   subnets          = []
   secondary_ranges = {}
   routes           = []
@@ -184,7 +183,7 @@ module "firewall_rules" {
       name        = "${var.vpc_name}-allow-internal"
       direction   = "INGRESS"
       priority    = 1000
-      description = "Allow all internal communication within the VPC (all subnets created by CAPG)"
+      description = "Allow all internal communication within the VPC network"
       ranges      = ["10.0.0.0/8"] # Allow all RFC1918 private ranges that CAPG might use
       allow = [
         {
