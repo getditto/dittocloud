@@ -8,34 +8,16 @@ variable "region" {
   type        = string
 }
 
-variable "vpc_config" {
-  description = "VPC configuration for hosting Kubernetes clusters"
-  type = object({
-    vpc_name                = optional(string, "ditto-vpc")
-    vpc_description         = optional(string, "VPC for Ditto workload clusters")
-    auto_create_subnetworks = optional(bool, false)
-    routing_mode            = optional(string, "REGIONAL")
+variable "vpc_name" {
+  description = "The name of the VPC to create"
+  type        = string
+  default     = "ditto-vpc"
+}
 
-    # letting CAPG create subnets and firewall rules
-    create_subnets = optional(bool, false)
-    # Subnet configuration
-    subnet_name        = optional(string, "ditto-subnet")
-    subnet_description = optional(string, "Subnet for Ditto workload clusters")
-    subnet_cidr        = optional(string, "10.140.0.0/19")
-
-    # Secondary IP ranges for K8s
-    pods_secondary_range_name     = optional(string, "pods")
-    pods_cidr_range               = optional(string, "100.90.0.0/16")
-    services_secondary_range_name = optional(string, "services")
-    services_cidr_range           = optional(string, "100.91.0.0/16")
-
-    # Network security
-    private_google_access = optional(bool, true)
-
-    # Firewall configuration
-    create_default_firewall_rules = optional(bool, false)
-  })
-  default = {}
+variable "create_default_firewall_rules" {
+  description = "Create default firewall rules for internal VPC traffic"
+  type        = bool
+  default     = false
 }
 
 variable "capg_iam" {
