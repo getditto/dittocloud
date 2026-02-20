@@ -212,6 +212,34 @@ func TestBootstrap(t *testing.T) {
 		}
 	})
 
+	t.Run("should pass controller-trusted-role-arns and iam-trusted-role-arns as JSON lists", func(t *testing.T) {
+		cmd, mock := setupBootstrapTest(t, []string{
+			"aws",
+			"--aws-profile=test-profile",
+			"--controller-trusted-role-arns=arn:aws:iam::123456789012:role/controller-role",
+			"--controller-trusted-role-arns=arn:aws:iam::123456789012:role/valet-controller-role",
+			"--iam-trusted-role-arns=arn:aws:iam::123456789012:role/trust-editor-role",
+			"--state=/tmp/test.tfstate",
+			"--dry-run",
+		})
+
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error executing command: %v", err)
+		}
+
+		assertCallCounts(t, mock, 1, 1, 0)
+
+		wantControllerARNs := `["arn:aws:iam::123456789012:role/controller-role","arn:aws:iam::123456789012:role/valet-controller-role"]`
+		if got := mock.PlanVars["controller_trusted_role_arns"]; got != wantControllerARNs {
+			t.Errorf("controller_trusted_role_arns: got %q, want %q", got, wantControllerARNs)
+		}
+
+		wantIAMARNs := `["arn:aws:iam::123456789012:role/trust-editor-role"]`
+		if got := mock.PlanVars["iam_trusted_role_arns"]; got != wantIAMARNs {
+			t.Errorf("iam_trusted_role_arns: got %q, want %q", got, wantIAMARNs)
+		}
+	})
+
 	t.Run("should error on invalid --tf-var format", func(t *testing.T) {
 		cmd, _ := setupBootstrapTest(t, []string{
 			"aws",
