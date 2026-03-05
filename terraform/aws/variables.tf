@@ -7,12 +7,6 @@ variable "region" {
   default     = "us-east-1"
 }
 
-variable "profile" {
-  description = "The AWS profile to use for authentication"
-  type        = string
-  default     = "default"
-}
-
 ####################################################################################################
 # IAM Policies
 ####################################################################################################
