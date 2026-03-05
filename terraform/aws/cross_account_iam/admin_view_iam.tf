@@ -19,7 +19,7 @@ module "iam_admin_view_role" {
 
   trust_policy_permissions = {
     trusted_operations = {
-      actions = ["sts:AssumeRole"]
+      actions = ["sts:AssumeRole", "sts:TagSession"]
       principals = [
         {
           type        = "AWS"
