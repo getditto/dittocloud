@@ -3,7 +3,7 @@ data "aws_region" "current" {}
 
 locals {
   name   = var.vpc_name
-  region = data.aws_region.current.name
+  region = coalesce(var.region, data.aws_region.current.name)
 
   vpc_cidr = var.vpc_cidr
   azs      = slice(data.aws_availability_zones.available.names, 0, 3)
@@ -39,7 +39,7 @@ locals {
   # }
 
   // us-east-1 uses ec2.internal, all other regions use <region>.compute.internal
-  dhcp_domain = var.region == "us-east-1" ? "ec2.internal" : "${var.region}.compute.internal"
+  dhcp_domain = local.region == "us-east-1" ? "ec2.internal" : "${local.region}.compute.internal"
 }
 
 

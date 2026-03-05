@@ -8,16 +8,16 @@ variable "vpc_cidr" {
   default     = "10.210.0.0/16"
 }
 
+variable "region" {
+  description = "The AWS region to deploy resources in. Overrides the provider region when set."
+  type        = string
+  default     = null
+}
+
 variable "tags" {
   type = map(string)
   default = {
     GithubRepo = "terraform-modules"
     GithubOrg  = "getditto"
   }
-}
-
-variable "region" {
-  description = "The AWS region to deploy the resources in"
-  type        = string
-  default     = "us-east-1"
 }
