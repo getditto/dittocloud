@@ -2,20 +2,32 @@
 # Shared Variables
 ####################################################################################################
 variable "region" {
-  description = "The AWS region to deploy the resources in"
+  description = "The AWS region to deploy resources in. Can be overridden by the embedded CLI."
   type        = string
-  default     = "us-east-1"
+  default     = null
 }
 
 variable "profile" {
-  description = "The AWS profile to use for authentication"
+  description = "The AWS profile to use for authentication. Can be overridden by the embedded CLI."
   type        = string
-  default     = "default"
+  default     = null
 }
 
 ####################################################################################################
 # IAM Policies
 ####################################################################################################
+variable "create_iam" {
+  type        = bool
+  description = "Whether to create cross-account IAM roles and policies. IAM is a global service — set to false for additional region deployments to avoid duplicate resource conflicts."
+  default     = true
+}
+
+variable "create_vpc" {
+  type        = bool
+  description = "Whether to create VPC resources for Valet default is true for best configurations."
+  default     = true
+}
+
 variable "controller_trusted_role_arns" {
   type = list(string)
 

@@ -9,16 +9,30 @@ R O L E
 */
 
 module "iam_trust_editor_role" {
-  source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role"
-  version = "5.48.0"
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role"
+  version = "6.4.0"
 
-  create_role             = true
-  role_name               = "iam-trust-editor.ditto.live"
-  role_description        = "Ditto Cross Account IAM trust editor role"
-  role_path               = "/ditto/"
-  role_requires_mfa       = false
-  custom_role_policy_arns = var.unrestricted ? [aws_iam_policy.unrestricted_iam_trust_editor_policy[0].arn] : [aws_iam_policy.iam_trust_editor_policy[0].arn]
-  trusted_role_arns       = var.iam_trusted_role_arns
+  create          = true
+  name            = "iam-trust-editor.ditto.live"
+  use_name_prefix = false
+  description     = "Ditto Cross Account IAM trust editor role"
+  path            = "/ditto/"
+
+  trust_policy_permissions = {
+    trusted_roles = {
+      actions = ["sts:AssumeRole", "sts:TagSession"]
+      principals = [
+        {
+          type        = "AWS"
+          identifiers = var.iam_trusted_role_arns
+        }
+      ]
+    }
+  }
+
+  policies = {
+    iam-trust-editor = var.unrestricted ? aws_iam_policy.unrestricted_iam_trust_editor_policy[0].arn : aws_iam_policy.iam_trust_editor_policy[0].arn
+  }
 }
 
 /*

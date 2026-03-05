@@ -3,7 +3,7 @@ data "aws_region" "current" {}
 
 locals {
   name   = var.vpc_name
-  region = data.aws_region.current.name
+  region = coalesce(var.region, data.aws_region.current.id)
 
   vpc_cidr = var.vpc_cidr
   azs      = slice(data.aws_availability_zones.available.names, 0, 3)
@@ -39,7 +39,7 @@ locals {
   # }
 
   // us-east-1 uses ec2.internal, all other regions use <region>.compute.internal
-  dhcp_domain = var.region == "us-east-1" ? "ec2.internal" : "${var.region}.compute.internal"
+  dhcp_domain = local.region == "us-east-1" ? "ec2.internal" : "${local.region}.compute.internal"
 }
 
 
@@ -80,7 +80,7 @@ module "subnets" {
 
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
-  version = "5.18.1"
+  version = "6.6.0"
 
   name = local.name
   cidr = local.vpc_cidr
@@ -138,7 +138,7 @@ module "vpc" {
 
 module "vpc_endpoints" {
   source  = "terraform-aws-modules/vpc/aws//modules/vpc-endpoints"
-  version = "5.18.1"
+  version = "6.6.0"
 
   vpc_id = module.vpc.vpc_id
 

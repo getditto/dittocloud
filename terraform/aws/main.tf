@@ -1,5 +1,6 @@
 module "vpc" {
   source = "./vpc"
+  count  = var.create_vpc ? 1 : 0
 
   region   = var.region
   vpc_name = var.vpc_name
@@ -9,23 +10,24 @@ module "vpc" {
 
 module "cross_account_iam" {
   source = "./cross_account_iam"
+  count  = var.create_iam ? 1 : 0
 
   # Variables used by the module
   controller_trusted_role_arns          = var.controller_trusted_role_arns
   iam_trusted_role_arns                 = var.iam_trusted_role_arns
   iam_trusted_operations_principal_arns = var.iam_trusted_operations_principal_arns
   iam_trusted_operations_condition_arns = var.iam_trusted_operations_condition_arns
+
+  unrestricted = var.unrestricted
 }
 
-data "aws_caller_identity" "current" {
-  # This data source retrieves the current AWS account ID
-  # and is used to set the account_id variable in the output
-}
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
 
 output "aws" {
   value = {
     account_id = data.aws_caller_identity.current.account_id
-    region = var.region
-    vpc = module.vpc
+    region     = coalesce(var.region, data.aws_region.current.id)
+    vpc        = module.vpc
   }
 }
