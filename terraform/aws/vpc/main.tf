@@ -80,7 +80,7 @@ module "subnets" {
 
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
-  version = "5.18.1"
+  version = "6.6.0"
 
   name = local.name
   cidr = local.vpc_cidr
@@ -138,7 +138,7 @@ module "vpc" {
 
 module "vpc_endpoints" {
   source  = "terraform-aws-modules/vpc/aws//modules/vpc-endpoints"
-  version = "5.18.1"
+  version = "6.6.0"
 
   vpc_id = module.vpc.vpc_id
 
