@@ -18,7 +18,7 @@ module "iam_admin_view_role" {
   path            = "/ditto/"
 
   trust_policy_permissions = {
-    trusted_operations = {
+    TrustedOperations = {
       actions = ["sts:AssumeRole", "sts:TagSession"]
       principals = [
         {

@@ -19,7 +19,7 @@ module "iam_trust_editor_role" {
   path            = "/ditto/"
 
   trust_policy_permissions = {
-    trusted_roles = {
+    TrustedRoles = {
       actions = ["sts:AssumeRole", "sts:TagSession"]
       principals = [
         {

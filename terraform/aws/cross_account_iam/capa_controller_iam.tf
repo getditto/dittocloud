@@ -14,7 +14,7 @@ module "capa_controller_role" {
   description     = "Ditto Cross Account Infrastructure Controller"
 
   trust_policy_permissions = {
-    trusted_roles = {
+    TrustedRoles = {
       actions = ["sts:AssumeRole", "sts:TagSession"]
       principals = [
         {
