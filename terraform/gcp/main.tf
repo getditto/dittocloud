@@ -152,6 +152,41 @@ resource "google_project_iam_custom_role" "velero" {
   permissions = local.velero_role.permissions
 }
 
+# GCP PD CSI Driver custom IAM role and service account for snapshot operations
+resource "google_project_iam_custom_role" "csi_snapshot" {
+  project     = data.google_project.this.project_id
+  role_id     = var.csi_snapshot_iam.custom_role_name
+  title       = "Ditto CSI Snapshot"
+  description = "Role for GCP PD CSI driver snapshot and restore operations"
+  permissions = local.csi_snapshot_role.permissions
+}
+
+resource "google_service_account" "csi_snapshot" {
+  project      = data.google_project.this.project_id
+  account_id   = var.csi_snapshot_iam.service_account_name
+  display_name = "Ditto GCP PD CSI Snapshot Service Account"
+}
+
+resource "google_project_iam_member" "csi_snapshot_access" {
+  project = data.google_project.this.project_id
+  role    = google_project_iam_custom_role.csi_snapshot.id
+  member  = "serviceAccount:${google_service_account.csi_snapshot.email}"
+
+  condition {
+    title       = local.iam_condition.title
+    description = local.iam_condition.description
+    expression  = local.iam_condition.expression
+  }
+}
+
+# Workload Identity binding: allows the K8s SA csi-gce-pd-controller-sa in the
+# gce-pd-csi-driver namespace to impersonate the GCP service account
+resource "google_service_account_iam_member" "csi_snapshot_workload_identity" {
+  service_account_id = google_service_account.csi_snapshot.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "principal://iam.googleapis.com/projects/${data.google_project.this.number}/locations/global/workloadIdentityPools/${var.csi_snapshot_iam.workload_identity_pool}/subject/system:serviceaccount:gce-pd-csi-driver:csi-gce-pd-controller-sa"
+}
+
 module "vpc" {
   source  = "terraform-google-modules/network/google"
   version = "~> 9.0"

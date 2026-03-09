@@ -76,7 +76,11 @@ resource "aws_iam_policy" "capa_control_plane" {
     ]
     Version = "2012-10-17"
   })
+}
 
+# Configure the AWS EBS CSI Permissions to enable backups and updates to snapshots
+data "aws_iam_policy" "aws_ebs_csi_policy" {
+  arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
 }
 
 resource "aws_iam_role" "capa_control_plane" {
@@ -110,8 +114,14 @@ resource "aws_iam_role_policy_attachment" "capa_control_plane_nodes_policy" {
   policy_arn = aws_iam_policy.capa_nodes.arn
 }
 
-// ControlPlane nodes also need the nodes policy.
+// ControlPlane nodes also need the controllers policy.
 resource "aws_iam_role_policy_attachment" "capa_control_plane_controllers_policy" {
   role       = aws_iam_role.capa_control_plane.name
   policy_arn = aws_iam_policy.capa_controller_policy.arn
+}
+
+// ControlPlane AWS EBS Controller needs the ability to take snapshots
+resource "aws_iam_role_policy_attachment" "aws_ebs_csi_policy" {
+  role       = aws_iam_role.capa_control_plane.name
+  policy_arn = data.aws_iam_policy.aws_ebs_csi_policy.arn
 }

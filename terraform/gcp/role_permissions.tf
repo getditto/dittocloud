@@ -192,4 +192,27 @@ locals {
       "iam.serviceAccounts.signBlob",
     ]
   }
+
+  csi_snapshot_role = {
+    name        = "csi-snapshot"
+    description = "Role for CSI snapshots"
+    permissions = [
+      # Core compute permissions for disk snapshots
+      "compute.disks.get",
+      "compute.disks.create",  # restore functionality
+      "compute.disks.createSnapshot",
+      "compute.disks.setLabels",
+      "compute.projects.get",
+      "compute.snapshots.get",
+      "compute.snapshots.list",
+      "compute.snapshots.create",
+      "compute.snapshots.useReadOnly",
+      "compute.snapshots.delete",
+      "compute.snapshots.setLabels",
+      "compute.globalOperations.get",
+      "compute.regionOperations.get",
+      "compute.zones.get",
+      "compute.zoneOperations.get",
+    ]
+  }
 }
