@@ -13,7 +13,10 @@ locals {
       "compute.backendServices.getEffectiveSecurityPolicies",
       "compute.backendServices.list",
       "compute.backendServices.update",
-      "compute.disks.create",
+      "compute.disks.get",  # CSI functionality
+      "compute.disks.create",  # CSI functionality
+      "compute.disks.createSnapshot",  # CSI functionality
+      "compute.disks.setLabels",  # CSI functionality
       "compute.firewalls.create",
       "compute.firewalls.delete",
       "compute.firewalls.get",
@@ -54,6 +57,12 @@ locals {
       "compute.routers.create",
       "compute.routers.delete",
       "compute.routers.get",
+      "compute.snapshots.get",  # CSI functionality
+      "compute.snapshots.list",  # CSI functionality
+      "compute.snapshots.create",  # CSI functionality
+      "compute.snapshots.useReadOnly",  # CSI functionality
+      "compute.snapshots.delete",  # CSI functionality
+      "compute.snapshots.setLabels",  # CSI functionality
       "compute.subnetworks.create",
       "compute.subnetworks.delete",
       "compute.subnetworks.get",
@@ -65,6 +74,7 @@ locals {
       "compute.targetPools.setSecurityPolicy",
       "compute.zoneOperations.get",
       "compute.zones.list",
+      "compute.zones.get",
       "iam.serviceAccounts.actAs",
       "resourcemanager.projects.get",
       "storage.buckets.create",
@@ -193,26 +203,4 @@ locals {
     ]
   }
 
-  csi_snapshot_role = {
-    name        = "csi-snapshot"
-    description = "Role for CSI snapshots"
-    permissions = [
-      # Core compute permissions for disk snapshots
-      "compute.disks.get",
-      "compute.disks.create",  # restore functionality
-      "compute.disks.createSnapshot",
-      "compute.disks.setLabels",
-      "compute.projects.get",
-      "compute.snapshots.get",
-      "compute.snapshots.list",
-      "compute.snapshots.create",
-      "compute.snapshots.useReadOnly",
-      "compute.snapshots.delete",
-      "compute.snapshots.setLabels",
-      "compute.globalOperations.get",
-      "compute.regionOperations.get",
-      "compute.zones.get",
-      "compute.zoneOperations.get",
-    ]
-  }
 }
