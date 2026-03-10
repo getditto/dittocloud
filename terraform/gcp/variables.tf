@@ -76,15 +76,6 @@ variable "velero_iam" {
   default = {}
 }
 
-variable "csi_snapshot_iam" {
-  description = "IAM configuration for GCP PD CSI snapshot operations"
-  type = object({
-    custom_role_name         = optional(string, "DittoCsiSnapshot")
-    service_account_name     = optional(string, "ditto-csi-snapshot")
-    workload_identity_pool   = string
-  })
-}
-
 variable "ditto_management_project" {
   description = "The project ID for Ditto management operations"
   type        = string
