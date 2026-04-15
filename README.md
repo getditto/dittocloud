@@ -121,6 +121,63 @@ The tool uses Terraform state files to track the infrastructure it creates. By d
 
 **Important:** Keep your state file safe and backed up, as it's required for any future updates or destruction of the created resources.
 
+## Updating an Existing Deployment
+
+Occasionally Ditto may request that you re-run the script to make necessary updates to permissions and resources.
+
+To do so, run the same bootstrap command you used for the initial setup. Using Terraform, the script will detect the existing resources via the state file and only apply the necessary changes.
+
+**Before you run:**
+
+1. Ensure the `terraform.tfstate` file from the original run is in your current working directory (or use the `--state` flag to point to its location).
+2. Download or build the new version of the `dittocloud` binary.
+
+**Then run the same command as before:**
+
+```bash
+# AWS
+dittocloud bootstrap aws \
+  --aws-profile my-profile \
+  --aws-region us-west-2 \
+  --aws-vpc-name ditto-vpc \
+  --aws-vpc-cidr 10.0.0.0/16
+
+# GCP
+dittocloud bootstrap gcp \
+  --project-id my-project-id \
+  --region us-central1
+```
+
+The tool will show a Terraform plan of what will change and prompt for confirmation before applying. For example:
+
+```bash
+Plan: 0 to add, 1 to change, 0 to destroy.
+
+  # google_project_iam_custom_role.capg will be updated in-place
+  ~ resource "google_project_iam_custom_role" "capg" {
+        id          = "projects/<project-id>/roles/DittoCapg"
+        name        = "projects/<project-id>/roles/DittoCapg"
+      ~ permissions = [
+          + "compute.disks.createSnapshot",
+          + "compute.disks.get",
+          + "compute.disks.setLabels",
+          + "compute.snapshots.create",
+          + "compute.snapshots.delete",
+          + "compute.snapshots.get",
+          + "compute.snapshots.list",
+          + "compute.snapshots.setLabels",
+          + "compute.snapshots.useReadOnly",
+          + "compute.zones.get",
+            # (96 unchanged elements hidden)
+        ]
+        # (6 unchanged attributes hidden)
+    }
+```
+
+Use the `--dry-run` flag to preview changes without applying them.
+
+**If you don't have the state file:** Terraform will treat it as a fresh deployment and attempt to recreate all resources.  If you've lost the state file, contact the Ditto team for assistance.
+
 ## Architecture
 
 For detailed information about the infrastructure components created by this tool, see [ARCHITECTURE.md](ARCHITECTURE.md).
