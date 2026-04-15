@@ -4,7 +4,9 @@ A command-line tool to bootstrap your cloud infrastructure with the necessary re
 
 ## Overview
 
-The Ditto Cloud tool automates the setup of cloud infrastructure components that are prerequisites for Ditto deployment. It creates the foundation layer including VPCs, IAM roles, service accounts, and security configurations tailored for Ditto's requirements.
+The Ditto Cloud tool automates the setup of cloud infrastructure components that are prerequisites to deploy a BYOC Ditto Server. It creates the foundation layer including VPCs, IAM roles, service accounts, and security configurations.
+
+For more information, see: https://docs.ditto.live/cloud/public-cloud/overview
 
 ### What it creates:
 
