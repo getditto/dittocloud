@@ -25,7 +25,7 @@ func TestGetTerraform(t *testing.T) {
 		cleanEnv := setupCleanEnvironment(t)
 		defer cleanEnv.cleanup()
 
-		execPath, err := getTerraform(ctx, true)
+		execPath, err := GetTerraform(ctx, true)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -56,7 +56,7 @@ func TestGetTerraform(t *testing.T) {
 			t.Fatalf("Failed to download and cache terraform: %v", err)
 		}
 
-		execPath, err := getTerraform(ctx, false)
+		execPath, err := GetTerraform(ctx, false)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -84,7 +84,7 @@ func TestGetTerraform(t *testing.T) {
 		systemTerraformSetup := installSystemTerraform(t, RequiredTerraformVersion)
 		defer systemTerraformSetup.cleanup()
 
-		execPath, err := getTerraform(ctx, false)
+		execPath, err := GetTerraform(ctx, false)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -114,7 +114,7 @@ func TestGetTerraform(t *testing.T) {
 		cleanEnv := setupCleanEnvironment(t)
 		defer cleanEnv.cleanup()
 
-		execPath, err := getTerraform(ctx, false)
+		execPath, err := GetTerraform(ctx, false)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -142,7 +142,7 @@ func TestGetTerraform(t *testing.T) {
 		systemTerraformSetup := installSystemTerraform(t, "1.10.0") // incompatible version
 		defer systemTerraformSetup.cleanup()
 
-		execPath, err := getTerraform(ctx, false)
+		execPath, err := GetTerraform(ctx, false)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

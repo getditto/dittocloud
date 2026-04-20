@@ -1,22 +1,20 @@
-package bootstrap
+package privatenetworking
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/fatih/color"
+	"github.com/getditto/dittocloud/cmd/internal/bootstrap"
 	"github.com/getditto/dittocloud/cmd/internal/log"
 	"github.com/getditto/dittocloud/terraform"
 	"github.com/hashicorp/terraform-exec/tfexec"
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 )
 
 // TerraformExecutor is an interface that abstracts terraform operations for testing
@@ -40,42 +38,108 @@ var defaultTerraformFactory TerraformFactory = func(workingDir string, execPath 
 // terraformFactory is the factory used by the code (can be replaced in tests)
 var terraformFactory = defaultTerraformFactory
 
-func BootstrapCmd() *cobra.Command {
-	// Shared variables for all providers, scoped to this functions closure. At least they aren't globals.
-	var vars []*tfexec.VarOption
+func PrivateNetworkingCmd() *cobra.Command {
 	var logLevel string
 	var tfVars []string
 
 	header := color.New(color.FgCyan, color.Bold)
 	progress := color.New(color.FgMagenta)
 	failure := color.New(color.FgRed, color.Bold)
+	success := color.New(color.FgGreen, color.Bold)
+
 	cmd := &cobra.Command{
-		Use:   "bootstrap",
-		Short: "Bootstrap a cloud provider",
-		Long:  "Bootstrap a cloud provider",
-		// Persistent methods run in the context of the subcommand, not the root command,
-		// so the cloud provider specifc context is available here.
-		// The cloud provider specific operations are handled in the subcommand.
-		// Common operations are handled here.
-		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			// Setup logger first
+		Use:   "private-networking",
+		Short: "Setup private networking access to Big Peer NLBs",
+		Long: `Configure VPC Endpoint Service for private networking access to Big Peer deployments.
+
+This command should be run after:
+1. Running 'dittocloud bootstrap aws' to prepare the account
+2. Deploying the Big Peer via Valet control plane
+
+It will:
+- Find the NLB associated with your Big Peer deployment
+- Create a VPC Endpoint Service with auto-accept for the specified principal
+- Configure private DNS name for the endpoint service
+- Provide domain verification details for setting up TXT records`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Setup logger
 			logger := log.Setup(logLevel)
 			ctx := log.WithLogger(cmd.Context(), logger)
 			cmd.SetContext(ctx)
 
-			// Log the start of bootstrap
-			logger.Debug("Starting Ditto Cloud Bootstrap", "command", cmd.Name())
+			logger.Debug("Starting Private Networking Setup", "command", cmd.Name())
 
 			header.Println("══════════════════════════════════════════════════")
-			header.Println("               Ditto Cloud Bootstrap              ")
+			header.Println("        Private Networking Setup for Big Peer     ")
 			header.Println("══════════════════════════════════════════════════")
-			return nil
-		},
-		PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
-			logger := log.FromContext(cmd.Context())
-			color.NoColor = cmd.Flag("no-color").Value.String() == "true"
-			// Copy the packaged terrafrom files into a temporary directory
-			tmpDir, err := os.MkdirTemp(os.TempDir(), "dittocloud")
+
+			// Get input values
+			bigPeerName := bootstrap.FlagOrPrompt(
+				cmd.Flags().Lookup("big-peer-name"),
+				"Enter the Big Peer name",
+				"",
+			)
+			if bigPeerName == "" {
+				return fmt.Errorf("big-peer-name is required")
+			}
+
+			privateDNSName := bootstrap.FlagOrPrompt(
+				cmd.Flags().Lookup("private-dns-name"),
+				"Enter the private DNS name (FQDN)",
+				"",
+			)
+			if privateDNSName == "" {
+				return fmt.Errorf("private-dns-name is required")
+			}
+
+			allowedPrincipal := bootstrap.FlagOrPrompt(
+				cmd.Flags().Lookup("allowed-principal"),
+				"Enter the allowed principal (AWS account ID, IAM role ARN, or principal ARN)",
+				"",
+			)
+			if allowedPrincipal == "" {
+				return fmt.Errorf("allowed-principal is required")
+			}
+
+			// Optional AWS profile
+			awsProfile := bootstrap.FlagOrPrompt(
+				cmd.Flags().Lookup("aws-profile"),
+				"Enter the AWS profile (optional)",
+				"",
+			)
+
+			// Optional AWS region
+			awsRegion := bootstrap.FlagOrPrompt(
+				cmd.Flags().Lookup("aws-region"),
+				"Enter the AWS region (optional, will use default region if not specified)",
+				"",
+			)
+
+			// Build terraform variables
+			vars := []*tfexec.VarOption{
+				tfexec.Var("big_peer_name=" + bigPeerName),
+				tfexec.Var("private_dns_name=" + privateDNSName),
+				tfexec.Var("allowed_principal=" + allowedPrincipal),
+			}
+
+			if awsProfile != "" {
+				vars = append(vars, tfexec.Var("profile="+awsProfile))
+			}
+
+			if awsRegion != "" {
+				vars = append(vars, tfexec.Var("region="+awsRegion))
+			}
+
+			// Parse and append any --tf-var flags
+			for _, tfVar := range tfVars {
+				if !strings.Contains(tfVar, "=") {
+					return fmt.Errorf("invalid --tf-var format %q: must be in key=value format", tfVar)
+				}
+				vars = append(vars, tfexec.Var(tfVar))
+			}
+
+			// Copy the packaged terraform files into a temporary directory
+			tmpDir, err := os.MkdirTemp(os.TempDir(), "dittocloud-private-networking")
 			if err != nil {
 				return fmt.Errorf("unable to create temporary directory: %w", err)
 			}
@@ -92,10 +156,8 @@ func BootstrapCmd() *cobra.Command {
 				return fmt.Errorf("unable to change permissions on temporary directory: %w", err)
 			}
 
-			// provider is the subcommand name
-			provider := cmd.Name()
-			workingDir := filepath.Join(tmpDir, provider)
-			progress.Printf("Using %q provider\n", provider)
+			workingDir := filepath.Join(tmpDir, "aws", "private_networking")
+			progress.Printf("Using AWS private networking module in %q\n", workingDir)
 
 			localStateFilePath := cmd.Flag("state").Value.String()
 			tmpStateFilePath := filepath.Join(workingDir, "terraform.tfstate")
@@ -121,7 +183,7 @@ func BootstrapCmd() *cobra.Command {
 			// this will be set to true if a valid terraform executable is not found
 			shouldDownload := cmd.Flag("force-terraform-download").Value.String() == "true"
 
-			execPath, err = GetTerraform(cmd.Context(), shouldDownload)
+			execPath, err = bootstrap.GetTerraform(cmd.Context(), shouldDownload)
 			if err != nil {
 				return fmt.Errorf("terraform executable not available: %w", err)
 			}
@@ -132,14 +194,6 @@ func BootstrapCmd() *cobra.Command {
 			progress.Println("Initializing terraform...")
 			if err := tf.Init(cmd.Context(), tfexec.Upgrade(true)); err != nil {
 				return fmt.Errorf("unable to initialize terraform: %w", err)
-			}
-
-			// Parse and append any --tf-var flags to the vars slice
-			for _, tfVar := range tfVars {
-				if !strings.Contains(tfVar, "=") {
-					return fmt.Errorf("invalid --tf-var format %q: must be in key=value format", tfVar)
-				}
-				vars = append(vars, tfexec.Var(tfVar))
 			}
 
 			progress.Println("Running terraform plan...")
@@ -161,7 +215,7 @@ func BootstrapCmd() *cobra.Command {
 
 				if !planChanged {
 					color.Green("\n✅ No changes detected. Infrastructure is up to date.\n")
-					if err := showOutputs(cmd.Context(), tf); err != nil {
+					if err := showOutputs(cmd.Context(), tf, success, failure); err != nil {
 						return err
 					}
 					return nil
@@ -179,7 +233,7 @@ func BootstrapCmd() *cobra.Command {
 
 				if !planChanged {
 					color.Green("\n✅ No changes detected. Infrastructure is up to date.\n")
-					if err := showOutputs(cmd.Context(), tf); err != nil {
+					if err := showOutputs(cmd.Context(), tf, success, failure); err != nil {
 						return err
 					}
 					return nil
@@ -195,10 +249,9 @@ func BootstrapCmd() *cobra.Command {
 			}
 
 			// Only accept yes/no as inputs and re-prompt if it wasn't provided
-			// to prevent errant ENTER smashes as an approval.
 			color.White("%s", color.New(color.Bold).Sprint("Are you sure you want to apply these changes?"))
 			for {
-				v := StringPrompt("(y/n)", "")
+				v := bootstrap.StringPrompt("(y/n)", "")
 				if v == "n" || v == "no" {
 					progress.Println("Aborting...")
 					return nil
@@ -226,25 +279,35 @@ func BootstrapCmd() *cobra.Command {
 				return fmt.Errorf("unable to run terraform apply: %w", err)
 			}
 
-			if err := showOutputs(cmd.Context(), tf); err != nil {
+			if err := showOutputs(cmd.Context(), tf, success, failure); err != nil {
 				return err
 			}
+
+			// Show domain verification instructions
+			success.Println("\n══════════════════════════════════════════════════")
+			success.Println("          Domain Verification Required            ")
+			success.Println("══════════════════════════════════════════════════")
+			color.White("\nPlease provide the domain verification details shown above to Ditto.")
+			color.White("Ditto will set up the required TXT record to verify domain ownership.\n")
 
 			return nil
 		},
 	}
-	cmd.PersistentFlags().Bool("dry-run", false, "Run terraform plan instead of terraform apply")
-	cmd.PersistentFlags().Bool("no-color", false, "Disable color output")
-	cmd.PersistentFlags().String("state", "terraform.tfstate", "Path to the terraform state file")
-	cmd.PersistentFlags().Bool("remove-tmpdir", true, "Remove the temporary directory after running")
-	cmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "Set the log level")
-	cmd.PersistentFlags().Bool("force-terraform-download", false, "Force download terraform")
-	cmd.PersistentFlags().StringArrayVar(&tfVars, "tf-var", []string{}, "Pass arbitrary variables to terraform (can be specified multiple times)")
-	_ = cmd.PersistentFlags().MarkHidden("tf-var")
 
-	// The subcommands will handle cloud provider specific variables and mutate the list of vars to be passed to terraform plan/apply
-	cmd.AddCommand(awsCmd(&vars))
-	cmd.AddCommand(gcpCmd(&vars))
+	cmd.Flags().String("big-peer-name", "", "Name of the Big Peer deployment")
+	cmd.Flags().String("private-dns-name", "", "Fully qualified domain name for the VPC Endpoint Service")
+	cmd.Flags().String("allowed-principal", "", "AWS principal allowed to create endpoint connections")
+	cmd.Flags().String("aws-profile", "", "AWS profile to use")
+	cmd.Flags().String("aws-region", "", "AWS region (optional, will use default region if not specified)")
+	cmd.Flags().Bool("dry-run", false, "Run terraform plan instead of terraform apply")
+	cmd.Flags().Bool("no-color", false, "Disable color output")
+	cmd.Flags().String("state", "terraform-private-networking.tfstate", "Path to the terraform state file")
+	cmd.Flags().Bool("remove-tmpdir", true, "Remove the temporary directory after running")
+	cmd.Flags().StringVar(&logLevel, "log-level", "info", "Set the log level")
+	cmd.Flags().Bool("force-terraform-download", false, "Force download terraform")
+	cmd.Flags().StringArrayVar(&tfVars, "tf-var", []string{}, "Pass arbitrary variables to terraform (can be specified multiple times)")
+	_ = cmd.Flags().MarkHidden("tf-var")
+
 	return cmd
 }
 
@@ -264,68 +327,32 @@ func toApplyOptions(vars []*tfexec.VarOption) []tfexec.ApplyOption {
 	return applyOpts
 }
 
-// Prompt prompts the user for a value and returns it.
-func StringPrompt(label string, def string) string {
-	prompt := color.New(color.FgHiWhite, color.Bold)
-	var value string
-	if def != "" {
-		prompt.Printf("%s (default: %s): ", label, color.WhiteString(def))
-	} else {
-		prompt.Printf("%s: ", label)
-	}
-	_, _ = fmt.Scanln(&value)
-	value = strings.TrimSpace(value)
-	if value == "" {
-		value = def
-	}
-	return value
-}
-
-// OptionsPrompt prompts the user for a value from a list of options,
-// if the user enters an invalid option, it will prompt again
-// until a valid option is entered.
-func OptionsPrompt(label string, options []string) string {
-	prompt := color.New(color.FgHiWhite, color.Bold)
-	failed := color.New(color.FgRed)
-	var value string
-	for {
-		prompt.Printf("%s %s: ", label, color.WhiteString("%v", options))
-		_, err := fmt.Scanln(&value)
-		if err != nil {
-			return ""
-		}
-		if slices.Contains(options, value) {
-			return value
-		}
-		failed.Println("Invalid option, please try again.")
-	}
-}
-
-// FlagOrPrompt checks if the flag is set, if it is, it returns the value of the flag,
-// otherwise it prompts the user for a value and returns that.
-func FlagOrPrompt(flag *pflag.Flag, label string, def string) string {
-	if flag.Changed {
-		return flag.Value.String()
-	}
-	return StringPrompt(label, def)
-}
-
-// showOutputs will pretty-print the TF outputs as JSON
-func showOutputs(ctx context.Context, tf TerraformExecutor) error {
+// showOutputs will pretty-print the TF outputs with special formatting for domain verification
+func showOutputs(ctx context.Context, tf TerraformExecutor, success *color.Color, failure *color.Color) error {
 	output, err := tf.Output(ctx)
 	if err != nil {
 		return fmt.Errorf("unable to get terraform output: %w", err)
 	}
-	color.Green("Terraform output:")
+
+	success.Println("\n══════════════════════════════════════════════════")
+	success.Println("            Private Networking Setup Complete      ")
+	success.Println("══════════════════════════════════════════════════")
+
+	// Display domain verification details prominently
+	if domainVerif, ok := output["domain_verification"]; ok {
+		success.Println("\nDomain Verification Details:")
+		success.Println("──────────────────────────────────────────────────")
+		raw, _ := domainVerif.Value.MarshalJSON()
+		color.Yellow("%s", string(raw))
+		success.Println("──────────────────────────────────────────────────")
+	}
+
+	// Display other outputs
+	color.Green("\nAll Terraform Outputs:")
 	for k, v := range output {
 		raw, _ := v.Value.MarshalJSON()
-		var m any
-
-		err := json.Unmarshal(raw, &m)
-		if err != nil {
-			return fmt.Errorf("unable to unmarshal terraform output: %w", err)
-		}
 		color.Green("%s: %s", color.New(color.Bold).Sprint(k), raw)
 	}
+
 	return nil
 }

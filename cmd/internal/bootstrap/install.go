@@ -68,7 +68,7 @@ type terraformVersionInfo struct {
 
 const RequiredTerraformVersion = "1.11.4"
 
-func getTerraform(ctx context.Context, shouldDownload bool) (string, error) {
+func GetTerraform(ctx context.Context, shouldDownload bool) (string, error) {
 	if !shouldDownload {
 		if execPath, found := findExistingTerraform(ctx, RequiredTerraformVersion); found {
 			return execPath, nil
