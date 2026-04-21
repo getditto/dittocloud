@@ -22,6 +22,7 @@ type TerraformExecutor interface {
 	Init(context.Context, ...tfexec.InitOption) error
 	Plan(context.Context, ...tfexec.PlanOption) (bool, error)
 	Apply(context.Context, ...tfexec.ApplyOption) error
+	Destroy(context.Context, ...tfexec.DestroyOption) error
 	Output(context.Context, ...tfexec.OutputOption) (map[string]tfexec.OutputMeta, error)
 	SetStdout(io.Writer)
 	SetStderr(io.Writer)
@@ -73,7 +74,10 @@ It will:
 			header.Println("        Private Networking Setup for Big Peer     ")
 			header.Println("══════════════════════════════════════════════════")
 
-			// Get input values
+			// Check if we're in destroy mode
+			destroyMode := cmd.Flag("destroy").Value.String() == "true"
+
+			// Big Peer name is always required (even for destroy, since we need to find the NLB)
 			bigPeerName := bootstrap.FlagOrPrompt(
 				cmd.Flags().Lookup("big-peer-name"),
 				"Enter the Big Peer name",
@@ -83,24 +87,6 @@ It will:
 				return fmt.Errorf("big-peer-name is required")
 			}
 
-			privateDNSName := bootstrap.FlagOrPrompt(
-				cmd.Flags().Lookup("private-dns-name"),
-				"Enter the private DNS name (FQDN)",
-				"",
-			)
-			if privateDNSName == "" {
-				return fmt.Errorf("private-dns-name is required")
-			}
-
-			allowedPrincipal := bootstrap.FlagOrPrompt(
-				cmd.Flags().Lookup("allowed-principal"),
-				"Enter the allowed principal (AWS account ID, IAM role ARN, or principal ARN)",
-				"",
-			)
-			if allowedPrincipal == "" {
-				return fmt.Errorf("allowed-principal is required")
-			}
-
 			// Get AWS profile - use empty string for default credentials if not specified
 			awsProfile := cmd.Flags().Lookup("aws-profile").Value.String()
 
@@ -108,14 +94,46 @@ It will:
 			awsRegion := cmd.Flags().Lookup("aws-region").Value.String()
 
 			// Build terraform variables
-			// Always pass profile (empty string = use default credentials)
-			// Always pass region (empty string = use default region)
-			vars := []*tfexec.VarOption{
-				tfexec.Var("big_peer_name=" + bigPeerName),
-				tfexec.Var("private_dns_name=" + privateDNSName),
-				tfexec.Var("allowed_principal=" + allowedPrincipal),
-				tfexec.Var("profile=" + awsProfile),
-				tfexec.Var("region=" + awsRegion),
+			var vars []*tfexec.VarOption
+
+			if destroyMode {
+				// For destroy, we need big_peer_name (for NLB data source lookup)
+				// but can use placeholders for create-only parameters
+				vars = []*tfexec.VarOption{
+					tfexec.Var("big_peer_name=" + bigPeerName),
+					tfexec.Var("private_dns_name=placeholder.example.com"),
+					tfexec.Var("allowed_principal=arn:aws:iam::000000000000:root"),
+					tfexec.Var("profile=" + awsProfile),
+					tfexec.Var("region=" + awsRegion),
+				}
+			} else {
+				// For create/update, get all required values
+				privateDNSName := bootstrap.FlagOrPrompt(
+					cmd.Flags().Lookup("private-dns-name"),
+					"Enter the private DNS name (FQDN)",
+					"",
+				)
+				if privateDNSName == "" {
+					return fmt.Errorf("private-dns-name is required")
+				}
+
+				allowedPrincipal := bootstrap.FlagOrPrompt(
+					cmd.Flags().Lookup("allowed-principal"),
+					"Enter the allowed principal (AWS account ID, IAM role ARN, or principal ARN)",
+					"",
+				)
+				if allowedPrincipal == "" {
+					return fmt.Errorf("allowed-principal is required")
+				}
+
+				// Build terraform variables with all required values
+				vars = []*tfexec.VarOption{
+					tfexec.Var("big_peer_name=" + bigPeerName),
+					tfexec.Var("private_dns_name=" + privateDNSName),
+					tfexec.Var("allowed_principal=" + allowedPrincipal),
+					tfexec.Var("profile=" + awsProfile),
+					tfexec.Var("region=" + awsRegion),
+				}
 			}
 
 			// Parse and append any --tf-var flags
@@ -182,6 +200,43 @@ It will:
 			progress.Println("Initializing terraform...")
 			if err := tf.Init(cmd.Context(), tfexec.Upgrade(true)); err != nil {
 				return fmt.Errorf("unable to initialize terraform: %w", err)
+			}
+
+			// Handle destroy mode separately
+			if destroyMode {
+				color.Red("\n⚠️  WARNING: You are about to DESTROY the private networking infrastructure!\n")
+				color.White("%s", color.New(color.Bold).Sprint("Are you sure you want to destroy all resources?"))
+				for {
+					v := bootstrap.StringPrompt("(y/n)", "")
+					if v == "n" || v == "no" {
+						progress.Println("Aborting...")
+						return nil
+					}
+					if v == "y" || v == "yes" {
+						break
+					}
+					progress.Println("Only \"y\" or \"n\" inputs are accepted.")
+				}
+
+				defer func() {
+					// Copy the state file back to the original location
+					progress.Printf("Copying state file back to %q\n", localStateFilePath)
+					stateFileData, err := os.ReadFile(tmpStateFilePath)
+					if err != nil {
+						failure.Printf("unable to read state file from temporary directory: %v", err)
+					}
+					if err := os.WriteFile(localStateFilePath, stateFileData, 0600); err != nil {
+						failure.Printf("unable to write state file to %q: %v", localStateFilePath, err)
+					}
+				}()
+
+				progress.Println("Running terraform destroy...")
+				if err := tf.Destroy(cmd.Context(), toDestroyOptions(vars)...); err != nil {
+					return fmt.Errorf("unable to run terraform destroy: %w", err)
+				}
+
+				success.Println("\n✅ Private networking infrastructure successfully destroyed!")
+				return nil
 			}
 
 			progress.Println("Running terraform plan...")
@@ -288,6 +343,7 @@ It will:
 	cmd.Flags().String("aws-profile", "", "AWS profile to use")
 	cmd.Flags().String("aws-region", "", "AWS region (optional, will use default region if not specified)")
 	cmd.Flags().Bool("dry-run", false, "Run terraform plan instead of terraform apply")
+	cmd.Flags().Bool("destroy", false, "Destroy the private networking infrastructure")
 	cmd.Flags().Bool("no-color", false, "Disable color output")
 	cmd.Flags().String("state", "terraform-private-networking.tfstate", "Path to the terraform state file")
 	cmd.Flags().Bool("remove-tmpdir", true, "Remove the temporary directory after running")
@@ -313,6 +369,14 @@ func toApplyOptions(vars []*tfexec.VarOption) []tfexec.ApplyOption {
 		applyOpts[i] = v
 	}
 	return applyOpts
+}
+
+func toDestroyOptions(vars []*tfexec.VarOption) []tfexec.DestroyOption {
+	destroyOpts := make([]tfexec.DestroyOption, len(vars))
+	for i, v := range vars {
+		destroyOpts[i] = v
+	}
+	return destroyOpts
 }
 
 // showOutputs will pretty-print the TF outputs with special formatting for domain verification
