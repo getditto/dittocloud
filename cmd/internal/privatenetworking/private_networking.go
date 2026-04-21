@@ -2,6 +2,7 @@ package privatenetworking
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -48,6 +49,8 @@ func PrivateNetworkingCmd() *cobra.Command {
 
 	cmd.AddCommand(EndpointServiceCmd())
 	cmd.AddCommand(EndpointCmd())
+	cmd.AddCommand(LockNLBCmd())
+	cmd.AddCommand(UnlockNLBCmd())
 
 	return cmd
 }
@@ -780,4 +783,65 @@ func formatSubnetIDs(subnetIDsStr string) string {
 		quoted[i] = "\"" + strings.TrimSpace(part) + "\""
 	}
 	return strings.Join(quoted, ",")
+}
+
+// terraformState represents the structure of a Terraform state file
+type terraformState struct {
+	Resources []struct {
+		Module    string `json:"module"`
+		Mode      string `json:"mode"`
+		Type      string `json:"type"`
+		Name      string `json:"name"`
+		Instances []struct {
+			Attributes map[string]interface{} `json:"attributes"`
+		} `json:"instances"`
+	} `json:"resources"`
+}
+
+// iamRoleNames holds the CAPA IAM role names extracted from bootstrap state
+type iamRoleNames struct {
+	ControllerRole   string
+	ControlPlaneRole string
+	NodesRole        string
+}
+
+// parseBootstrapState reads the bootstrap Terraform state file and extracts IAM role names
+func parseBootstrapState(stateFilePath string) (*iamRoleNames, error) {
+	// Read the state file
+	stateData, err := os.ReadFile(stateFilePath)
+	if err != nil {
+		return nil, fmt.Errorf("unable to read bootstrap state file: %w", err)
+	}
+
+	var state terraformState
+	if err := json.Unmarshal(stateData, &state); err != nil {
+		return nil, fmt.Errorf("unable to parse bootstrap state file: %w", err)
+	}
+
+	roleNames := &iamRoleNames{}
+
+	// Look for IAM role resources in the cross_account_iam module
+	for _, resource := range state.Resources {
+		if resource.Type == "aws_iam_role" && len(resource.Instances) > 0 {
+			if name, ok := resource.Instances[0].Attributes["name"].(string); ok {
+				// Match role names based on patterns
+				switch {
+				case strings.Contains(name, "controllers.cluster-api-provider-aws"):
+					roleNames.ControllerRole = name
+				case strings.Contains(name, "control-plane.cluster-api-provider-aws"):
+					roleNames.ControlPlaneRole = name
+				case strings.Contains(name, "nodes.cluster-api-provider-aws"):
+					roleNames.NodesRole = name
+				}
+			}
+		}
+	}
+
+	// Validate that we found all three roles
+	if roleNames.ControllerRole == "" || roleNames.ControlPlaneRole == "" || roleNames.NodesRole == "" {
+		return nil, fmt.Errorf("unable to find all required IAM roles in bootstrap state file (found: controller=%q, controlplane=%q, nodes=%q)",
+			roleNames.ControllerRole, roleNames.ControlPlaneRole, roleNames.NodesRole)
+	}
+
+	return roleNames, nil
 }
