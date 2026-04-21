@@ -1,8 +1,9 @@
 # Data source to find the NLB by tags
 data "aws_lb" "big_peer_nlb" {
   tags = {
-    "elbv2.k8s.aws/cluster"       = var.big_peer_name
-    "ditto.live/valet-cluster"    = "true"
+    "elbv2.k8s.aws/cluster"    = var.big_peer_name
+    "ditto.live/valet-cluster" = "true"
+    "service.k8s.aws/stack"    = "ingress/ingress-nginx-controller"
   }
 }
 
@@ -16,9 +17,9 @@ resource "aws_vpc_endpoint_service" "big_peer" {
 
   tags = merge(
     {
-      Name       = "${var.big_peer_name}-endpoint-service"
-      BigPeer    = var.big_peer_name
-      ManagedBy  = "dittocloud"
+      Name      = "${var.big_peer_name}-endpoint-service"
+      BigPeer   = var.big_peer_name
+      ManagedBy = "dittocloud"
     },
     var.tags
   )

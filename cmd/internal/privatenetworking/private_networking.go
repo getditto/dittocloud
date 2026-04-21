@@ -101,33 +101,21 @@ It will:
 				return fmt.Errorf("allowed-principal is required")
 			}
 
-			// Optional AWS profile
-			awsProfile := bootstrap.FlagOrPrompt(
-				cmd.Flags().Lookup("aws-profile"),
-				"Enter the AWS profile (optional)",
-				"",
-			)
+			// Get AWS profile - use empty string for default credentials if not specified
+			awsProfile := cmd.Flags().Lookup("aws-profile").Value.String()
 
-			// Optional AWS region
-			awsRegion := bootstrap.FlagOrPrompt(
-				cmd.Flags().Lookup("aws-region"),
-				"Enter the AWS region (optional, will use default region if not specified)",
-				"",
-			)
+			// Get AWS region - use empty string for default region if not specified
+			awsRegion := cmd.Flags().Lookup("aws-region").Value.String()
 
 			// Build terraform variables
+			// Always pass profile (empty string = use default credentials)
+			// Always pass region (empty string = use default region)
 			vars := []*tfexec.VarOption{
 				tfexec.Var("big_peer_name=" + bigPeerName),
 				tfexec.Var("private_dns_name=" + privateDNSName),
 				tfexec.Var("allowed_principal=" + allowedPrincipal),
-			}
-
-			if awsProfile != "" {
-				vars = append(vars, tfexec.Var("profile="+awsProfile))
-			}
-
-			if awsRegion != "" {
-				vars = append(vars, tfexec.Var("region="+awsRegion))
+				tfexec.Var("profile=" + awsProfile),
+				tfexec.Var("region=" + awsRegion),
 			}
 
 			// Parse and append any --tf-var flags
