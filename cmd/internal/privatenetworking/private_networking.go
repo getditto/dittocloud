@@ -178,7 +178,7 @@ It will:
 				return fmt.Errorf("unable to change permissions on temporary directory: %w", err)
 			}
 
-			workingDir := filepath.Join(tmpDir, "aws", "private_networking")
+			workingDir := filepath.Join(tmpDir, "aws", "private_networking", "vpc_endpoint_service")
 			progress.Printf("Using AWS private networking module in %q\n", workingDir)
 
 			localStateFilePath := cmd.Flag("state").Value.String()
@@ -587,7 +587,7 @@ It will:
 				return fmt.Errorf("unable to change permissions on temporary directory: %w", err)
 			}
 
-			workingDir := filepath.Join(tmpDir, "aws", "vpc_endpoint")
+			workingDir := filepath.Join(tmpDir, "aws", "private_networking", "vpc_endpoint")
 			progress.Printf("Using AWS VPC endpoint module in %q\n", workingDir)
 
 			localStateFilePath := cmd.Flag("state").Value.String()

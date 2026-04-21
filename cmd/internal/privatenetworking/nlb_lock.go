@@ -118,7 +118,7 @@ orphaned and customer connectivity breaks.`,
 				return fmt.Errorf("unable to change permissions on temporary directory: %w", err)
 			}
 
-			workingDir := filepath.Join(tmpDir, "aws", "nlb_protection")
+			workingDir := filepath.Join(tmpDir, "aws", "private_networking", "nlb_protection")
 			progress.Printf("Using AWS NLB protection module in %q\n", workingDir)
 
 			// State file uses big peer name for tracking
@@ -348,7 +348,7 @@ NLB or when decommissioning the private networking setup.`,
 				return fmt.Errorf("unable to change permissions on temporary directory: %w", err)
 			}
 
-			workingDir := filepath.Join(tmpDir, "aws", "nlb_protection")
+			workingDir := filepath.Join(tmpDir, "aws", "private_networking", "nlb_protection")
 			progress.Printf("Using AWS NLB protection module in %q\n", workingDir)
 
 			// State file uses big peer name for tracking
