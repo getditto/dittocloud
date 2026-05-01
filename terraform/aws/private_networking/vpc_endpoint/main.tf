@@ -1,3 +1,9 @@
+variable "private_dns_enabled" {
+  description = "Whether to associate a private hosted zone with the specified VPC for the endpoint service. Defaults to true to preserve existing behavior."
+  type        = bool
+  default     = true
+}
+
 # VPC Endpoint for accessing the Endpoint Service
 resource "aws_vpc_endpoint" "main" {
   vpc_id              = var.vpc_id
@@ -6,7 +12,7 @@ resource "aws_vpc_endpoint" "main" {
   subnet_ids          = var.subnet_ids
   security_group_ids  = [aws_security_group.vpc_endpoint.id]
 
-  private_dns_enabled = true
+  private_dns_enabled = var.private_dns_enabled
 
   tags = merge(
     {

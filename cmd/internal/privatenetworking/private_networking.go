@@ -45,6 +45,12 @@ func PrivateNetworkingCmd() *cobra.Command {
 		Use:   "private-networking",
 		Short: "Manage private networking for Big Peer deployments",
 		Long:  `Manage VPC Endpoint Services and VPC Endpoints for private networking access to Big Peer deployments.`,
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			noColor, err := cmd.Flags().GetBool("no-color")
+			if err == nil {
+				color.NoColor = noColor
+			}
+		},
 	}
 
 	cmd.AddCommand(EndpointServiceCmd())
@@ -120,7 +126,9 @@ It will:
 					tfexec.Var("private_dns_name=placeholder.example.com"),
 					tfexec.Var("allowed_principal=arn:aws:iam::000000000000:root"),
 					tfexec.Var("profile=" + awsProfile),
-					tfexec.Var("region=" + awsRegion),
+				}
+				if awsRegion != "" {
+					vars = append(vars, tfexec.Var("region="+awsRegion))
 				}
 			} else {
 				// For create/update, get all required values
@@ -148,7 +156,9 @@ It will:
 					tfexec.Var("private_dns_name=" + privateDNSName),
 					tfexec.Var("allowed_principal=" + allowedPrincipal),
 					tfexec.Var("profile=" + awsProfile),
-					tfexec.Var("region=" + awsRegion),
+				}
+				if awsRegion != "" {
+					vars = append(vars, tfexec.Var("region="+awsRegion))
 				}
 			}
 
@@ -166,7 +176,11 @@ It will:
 				return fmt.Errorf("unable to create temporary directory: %w", err)
 			}
 			if cmd.Flag("remove-tmpdir").Value.String() == "true" {
-				defer os.Remove(tmpDir)
+				defer func() {
+					if err := os.RemoveAll(tmpDir); err != nil {
+						slog.Warn("unable to remove temporary directory", "tmpDir", tmpDir, "error", err)
+					}
+				}()
 			}
 
 			progress.Printf("Copying terraform files to temporary directory %q\n", tmpDir)
@@ -557,7 +571,9 @@ It will:
 					tfexec.Var("subnet_ids=[" + formatSubnetIDs(subnetIDsStr) + "]"),
 					tfexec.Var("private_dns_name=" + privateDNSName),
 					tfexec.Var("profile=" + awsProfile),
-					tfexec.Var("region=" + awsRegion),
+				}
+				if awsRegion != "" {
+					vars = append(vars, tfexec.Var("region="+awsRegion))
 				}
 			}
 
@@ -575,7 +591,11 @@ It will:
 				return fmt.Errorf("unable to create temporary directory: %w", err)
 			}
 			if cmd.Flag("remove-tmpdir").Value.String() == "true" {
-				defer os.Remove(tmpDir)
+				defer func() {
+					if err := os.RemoveAll(tmpDir); err != nil {
+						slog.Warn("unable to remove temporary directory", "tmpDir", tmpDir, "error", err)
+					}
+				}()
 			}
 
 			progress.Printf("Copying terraform files to temporary directory %q\n", tmpDir)
