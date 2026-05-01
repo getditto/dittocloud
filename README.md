@@ -127,16 +127,7 @@ The private networking feature enables secure, private access to Big Peer deploy
 
    This will output domain verification details. Provide these to Ditto to set up the required TXT records.
 
-4. **Protect the NLB** from accidental modifications:
-   ```bash
-   dittocloud private-networking lock-nlb \
-     --big-peer-name my-big-peer \
-     --aws-region us-east-2
-   ```
-
-   This adds IAM deny policies to prevent Valet from modifying or deleting the NLB, which would break connectivity.
-
-5. **Create VPC Endpoint** in your customer account (where you want to access the Big Peer):
+4. **Create VPC Endpoint** in your customer account (where you want to access the Big Peer):
    ```bash
    dittocloud private-networking endpoint \
      --service-name com.amazonaws.vpce.us-east-2.vpce-svc-xxx \
@@ -151,35 +142,20 @@ The private networking feature enables secure, private access to Big Peer deploy
 To remove private networking:
 
 ```bash
-# 1. Unlock the NLB first
-dittocloud private-networking unlock-nlb \
-  --big-peer-name my-big-peer \
-  --aws-region us-east-2
-
-# 2. Destroy the customer VPC endpoint
+# 1. Destroy the customer VPC endpoint
 dittocloud private-networking endpoint --destroy --aws-region us-east-2
 
-# 3. Destroy the endpoint service
+# 2. Destroy the endpoint service
 dittocloud private-networking endpoint-service --destroy \
   --big-peer-name my-big-peer \
   --aws-region us-east-2
 ```
-
-### Why Lock the NLB?
-
-The VPC Endpoint Service is permanently bound to a specific NLB ARN. If the NLB is recreated or modified:
-- The endpoint service becomes orphaned
-- Customer VPC endpoints lose connectivity
-- Manual intervention is required to fix
-
-The `lock-nlb` command adds targeted IAM deny policies to CAPA roles, preventing modifications while allowing other load balancer operations to continue normally.
 
 ### State Files
 
 Private networking uses separate state files:
 - `terraform-endpoint-service.tfstate` - VPC Endpoint Service
 - `terraform-endpoint.tfstate` - Customer VPC Endpoint
-- `terraform-nlb-protection-<big-peer-name>.tfstate` - NLB protection policies
 
 Keep these files safe alongside your bootstrap state file.
 

@@ -37,8 +37,7 @@ go test ./...
   - `gcp.go`: GCP-specific variable prompting and flag definitions
   - `install.go`: Terraform version management (downloads v1.11.4 if needed, caches in `~/.cache/dittocloud/terraform/`)
 - `privatenetworking/`: Private networking commands for Big Peer PrivateLink access (temporary stopgap solution)
-  - `private_networking.go`: Parent command and endpoint-service command
-  - `nlb_lock.go`: NLB protection commands (lock-nlb/unlock-nlb)
+  - `private_networking.go`: Parent command, endpoint-service, and endpoint commands
 
 **Terraform Layer** (`terraform/`):
 - `embed.go`: Embeds all Terraform files into the binary using `//go:embed`
@@ -48,7 +47,6 @@ go test ./...
   - `private_networking/`: Temporary stopgap for Big Peer PrivateLink access
     - `vpc_endpoint_service/`: VPC Endpoint Service in BYOC account (binds to NLB)
     - `vpc_endpoint/`: VPC Endpoint in customer account (connects to endpoint service)
-    - `nlb_protection/`: IAM deny policies to protect NLB from Valet modifications
 - `gcp/`: GCP networking, service accounts, and custom IAM roles
   - VPC network (subnets are created by CAPG during cluster deployment)
   - Optional firewall rules
@@ -158,36 +156,16 @@ The private networking feature enables customers to access Big Peer NLBs via AWS
 - Enables private DNS for seamless connectivity
 - State file: `terraform-endpoint.tfstate`
 
-**`dittocloud private-networking lock-nlb`**: Protects NLB from modifications
-- Adds IAM deny policies to CAPA controller, control plane, and node roles
-- Prevents NLB deletion, modification, subnet changes, and ENI deletion
-- Required because VPC Endpoint Service is permanently bound to NLB ARN
-- Reads IAM role names from bootstrap state file
-- State file: `terraform-nlb-protection-<big-peer-name>.tfstate`
-
-**`dittocloud private-networking unlock-nlb`**: Removes NLB protection
-- Destroys IAM deny policies to restore normal Valet operations
-- Use when decommissioning private networking or before allowing Valet changes
-
-### Why Protection is Necessary
-
-VPC Endpoint Service resources reference specific NLB ARNs. If Valet reconciles and recreates the NLB:
-- Endpoint service becomes orphaned (references non-existent NLB)
-- Customer VPC endpoints lose connectivity
-- Manual intervention required to fix
-
-The lock-nlb command adds targeted deny policies that prevent these operations without affecting other load balancers.
-
 ### State File Management
 
-Each component uses separate state files to support:
-- Multiple protected Big Peers independently
-- Independent lifecycle management of endpoint service vs endpoint
-- Easy tracking of which resources are managed
+Each component uses separate state files:
+- `terraform-endpoint-service.tfstate`: VPC Endpoint Service in BYOC account
+- `terraform-endpoint.tfstate`: VPC Endpoint in customer account
+
+This allows independent lifecycle management of each component.
 
 ### Future Direction
 
 This implementation is temporary. Future Valet versions will:
-- Natively manage VPC Endpoint Services
+- Natively manage VPC Endpoint Services and protection of underlying resources
 - Handle private networking lifecycle automatically
-- Eliminate need for manual NLB protection
