@@ -26,22 +26,27 @@ go test ./...
 
 ### Code Structure
 
-**CLI Layer** (`cmd/dittocloud/` and `cmd/internal/bootstrap/`):
+**CLI Layer** (`cmd/dittocloud/` and `cmd/internal/`):
 - `main.go`: Root Cobra command setup
-- `bootstrap.go`: Core bootstrap command with shared logic for all cloud providers
-  - Handles Terraform lifecycle: init → plan → apply
+- `bootstrap/`: Core bootstrap command with shared logic for all cloud providers
+  - `bootstrap.go`: Handles Terraform lifecycle: init → plan → apply
   - Manages state file copying between local and temp directories
   - Implements interactive prompts and confirmation flows
   - Provider-agnostic orchestration
-- `aws.go`: AWS-specific variable prompting and flag definitions
-- `gcp.go`: GCP-specific variable prompting and flag definitions
-- `install.go`: Terraform version management (downloads v1.11.4 if needed, caches in `~/.cache/dittocloud/terraform/`)
+  - `aws.go`: AWS-specific variable prompting and flag definitions
+  - `gcp.go`: GCP-specific variable prompting and flag definitions
+  - `install.go`: Terraform version management (downloads v1.11.4 if needed, caches in `~/.cache/dittocloud/terraform/`)
+- `privatenetworking/`: Private networking commands for Big Peer PrivateLink access (temporary stopgap solution)
+  - `private_networking.go`: Parent command, endpoint-service, and endpoint commands
 
 **Terraform Layer** (`terraform/`):
 - `embed.go`: Embeds all Terraform files into the binary using `//go:embed`
 - `aws/`: AWS VPC and cross-account IAM role modules
   - `vpc/`: VPC with subnets across availability zones
   - `cross_account_iam/`: CAPA controller, control plane, and node IAM roles
+  - `private_networking/`: Temporary stopgap for Big Peer PrivateLink access
+    - `vpc_endpoint_service/`: VPC Endpoint Service in BYOC account (binds to NLB)
+    - `vpc_endpoint/`: VPC Endpoint in customer account (connects to endpoint service)
 - `gcp/`: GCP networking, service accounts, and custom IAM roles
   - VPC network (subnets are created by CAPG during cluster deployment)
   - Optional firewall rules
@@ -128,3 +133,39 @@ Only one test file exists: `cmd/internal/bootstrap/install_test.go` for Terrafor
 - Always use `defer cleanup()` immediately after setup
 - Cleanup functions should restore original state (environment variables, PATH, etc.)
 - Use `defer` for all cleanup, even if test might fail
+
+## Private Networking (Temporary Stopgap Solution)
+
+**Important Context**: This is a temporary workaround until Valet natively supports private networking management.
+
+### Overview
+
+The private networking feature enables customers to access Big Peer NLBs via AWS PrivateLink endpoints, providing secure private connectivity without exposing services to the public internet.
+
+### Commands
+
+**`dittocloud private-networking endpoint-service`**: Creates VPC Endpoint Service in BYOC account
+- Auto-discovers NLB using Big Peer name tags
+- Configures endpoint service with auto-accept and private DNS
+- Outputs domain verification details for TXT record setup
+- State file: `terraform-endpoint-service.tfstate`
+
+**`dittocloud private-networking endpoint`**: Creates VPC Endpoint in customer account
+- Deploys Interface-type VPC endpoint in specified VPC/subnets
+- Auto-creates security group allowing VPC CIDR ingress
+- Enables private DNS for seamless connectivity
+- State file: `terraform-endpoint.tfstate`
+
+### State File Management
+
+Each component uses separate state files:
+- `terraform-endpoint-service.tfstate`: VPC Endpoint Service in BYOC account
+- `terraform-endpoint.tfstate`: VPC Endpoint in customer account
+
+This allows independent lifecycle management of each component.
+
+### Future Direction
+
+This implementation is temporary. Future Valet versions will:
+- Natively manage VPC Endpoint Services and protection of underlying resources
+- Handle private networking lifecycle automatically

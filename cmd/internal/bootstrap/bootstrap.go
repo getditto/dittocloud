@@ -121,7 +121,7 @@ func BootstrapCmd() *cobra.Command {
 			// this will be set to true if a valid terraform executable is not found
 			shouldDownload := cmd.Flag("force-terraform-download").Value.String() == "true"
 
-			execPath, err = getTerraform(cmd.Context(), shouldDownload)
+			execPath, err = GetTerraform(cmd.Context(), shouldDownload)
 			if err != nil {
 				return fmt.Errorf("terraform executable not available: %w", err)
 			}
