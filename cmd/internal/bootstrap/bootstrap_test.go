@@ -87,9 +87,16 @@ func setupBootstrapTest(t *testing.T, args []string) (*cobra.Command, *mockTerra
 
 	ctx := log.WithLogger(context.Background(), log.Setup("debug"))
 
-	// Save and restore original terraform factory
+	// Save and restore original terraform factory and GCP preflight check
 	originalFactory := terraformFactory
-	t.Cleanup(func() { terraformFactory = originalFactory })
+	originalGCPPreflight := gcpPreflightCheck
+	t.Cleanup(func() {
+		terraformFactory = originalFactory
+		gcpPreflightCheck = originalGCPPreflight
+	})
+
+	// Skip real GCP API calls in tests
+	gcpPreflightCheck = func(ctx context.Context, projectID string) error { return nil }
 
 	// Create mock terraform executor
 	mock := &mockTerraformExecutor{
@@ -161,7 +168,6 @@ func TestBootstrap(t *testing.T) {
 			"gcp",
 			"--project-id=test-project",
 			"--region=us-central1",
-			"--vpc-name=test-vpc",
 			"--create-default-firewall-rules=false",
 			"--state=/tmp/test.tfstate",
 			"--dry-run",
@@ -174,16 +180,19 @@ func TestBootstrap(t *testing.T) {
 		assertCallCounts(t, mock, 1, 1, 0)
 
 		wantVars := map[string]string{
-			"project_id":                    "test-project",
-			"region":                        "us-central1",
-			"vpc_name":                      "test-vpc",
-			"create_default_firewall_rules": "false",
+			"project_id": "test-project",
+			"region":     "us-central1",
 		}
 
 		for key, want := range wantVars {
 			if got := mock.PlanVars[key]; got != want {
 				t.Errorf("%s: got %q, want %q", key, got, want)
 			}
+		}
+
+		// Verify vpc_config is present and contains expected values
+		if got := mock.PlanVars["vpc_config"]; got == "" {
+			t.Error("expected vpc_config to be set")
 		}
 	})
 

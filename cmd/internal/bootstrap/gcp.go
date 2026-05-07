@@ -2,17 +2,187 @@ package bootstrap
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/fatih/color"
 	"github.com/getditto/dittocloud/cmd/internal/log"
 	"github.com/hashicorp/terraform-exec/tfexec"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"google.golang.org/api/serviceusage/v1"
 )
 
-// gcpCmd handles gcp specific variables and mutates the list of vars to be passed to terraform plan/apply
-func gcpCmd(vars *[]*tfexec.VarOption) *cobra.Command {
+// enableRequiredAPIs enables the GCP APIs required for Terraform to run successfully
+func enableRequiredAPIs(ctx context.Context, projectID string) error {
+	requiredAPIs := []string{
+		"compute.googleapis.com",
+		"iam.googleapis.com",
+	}
+
+	logger := log.FromContext(ctx)
+	progress := color.New(color.FgMagenta)
+
+	logger.Debug("Checking and enabling required GCP APIs", "project", projectID)
+	progress.Printf("Ensuring required APIs are enabled for project %s...\n", projectID)
+
+	// Create service usage client
+	service, err := serviceusage.NewService(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to create service usage client: %w", err)
+	}
+
+	// Check which APIs are already enabled
+	enabledAPIs := make(map[string]bool)
+	listCall := service.Services.List(fmt.Sprintf("projects/%s", projectID)).Filter("state:ENABLED")
+
+	err = listCall.Pages(ctx, func(page *serviceusage.ListServicesResponse) error {
+		for _, svc := range page.Services {
+			enabledAPIs[svc.Config.Name] = true
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list enabled services: %w", err)
+	}
+
+	// Enable any missing APIs
+	var apisToEnable []string
+	for _, api := range requiredAPIs {
+		if !enabledAPIs[api] {
+			apisToEnable = append(apisToEnable, api)
+		}
+	}
+
+	if len(apisToEnable) == 0 {
+		logger.Debug("All required APIs are already enabled")
+		progress.Println("✅ All required APIs are already enabled")
+		return nil
+	}
+
+	progress.Printf("Enabling %d APIs: %v\n", len(apisToEnable), apisToEnable)
+
+	// Enable APIs one by one (batch enable isn't always reliable)
+	for _, api := range apisToEnable {
+		logger.Debug("Enabling API", "api", api)
+
+		req := &serviceusage.EnableServiceRequest{}
+		op, err := service.Services.Enable(fmt.Sprintf("projects/%s/services/%s", projectID, api), req).Context(ctx).Do()
+		if err != nil {
+			return fmt.Errorf("failed to enable API %s: %w", api, err)
+		}
+
+		// Wait for the operation to complete
+		for !op.Done {
+			time.Sleep(2 * time.Second)
+			op, err = service.Operations.Get(op.Name).Context(ctx).Do()
+			if err != nil {
+				return fmt.Errorf("failed to check operation status for API %s: %w", api, err)
+			}
+		}
+
+		if op.Error != nil {
+			return fmt.Errorf("failed to enable API %s: %s", api, op.Error.Message)
+		}
+
+		progress.Printf("✅ Enabled %s\n", api)
+	}
+
+	// Wait a bit for APIs to fully propagate
+	logger.Debug("Waiting for API enablement to propagate")
+	progress.Println("Waiting for API enablement to propagate...")
+	time.Sleep(10 * time.Second)
+
+	return nil
+}
+
+// gcpPreflightCheck is a package-level function for GCP preflight checks (auth + API enablement).
+// It can be replaced in tests to skip real GCP API calls.
+var gcpPreflightCheck = defaultGCPPreflightCheck
+
+func defaultGCPPreflightCheck(ctx context.Context, projectID string) error {
+	if err := checkGCPAuth(ctx); err != nil {
+		return err
+	}
+	return enableRequiredAPIs(ctx, projectID)
+}
+
+// checkGCPAuth verifies that the user has proper GCP authentication
+func checkGCPAuth(ctx context.Context) error {
+	logger := log.FromContext(ctx)
+
+	// Try to create a service usage client to verify authentication
+	_, err := serviceusage.NewService(ctx)
+	if err != nil {
+		logger.Error("Failed to authenticate with GCP", "error", err)
+		return fmt.Errorf("GCP authentication failed. Please run 'gcloud auth application-default login' or set up service account credentials: %w", err)
+	}
+
+	logger.Debug("GCP authentication verified")
+	return nil
+}
+
+// GCPConfig holds GCP-specific configuration
+type GCPConfig struct {
+	ProjectID                  string
+	Region                     string
+	CreateSubnets              bool
+	CreateDefaultFirewallRules bool
+	SubnetCidr                 string
+	PodsCidrRange              string
+	ServicesCidrRange          string
+}
+
+func (g *GCPConfig) BuildTFVars() []*tfexec.VarOption {
+
+	var vars []*tfexec.VarOption
+	vars = append(vars,
+		tfexec.Var("project_id="+g.ProjectID),
+		tfexec.Var("region="+g.Region),
+	)
+
+	// Convert vpc_config to JSON using map
+	vpcConfigMap := map[string]string{
+		"create_subnets":                fmt.Sprintf("%t", g.CreateSubnets),
+		"create_default_firewall_rules": fmt.Sprintf("%t", g.CreateDefaultFirewallRules),
+		"subnet_cidr":                   g.SubnetCidr,
+		"pods_cidr_range":               g.PodsCidrRange,
+		"services_cidr_range":           g.ServicesCidrRange,
+	}
+
+	vpcConfigJSON, err := json.Marshal(vpcConfigMap)
+	if err != nil {
+		// Log error but continue with empty vpc_config
+		log.FromContext(context.Background()).Error("Failed to marshal vpc_config", "error", err)
+		vars = append(vars, tfexec.Var("vpc_config={}"))
+	} else {
+		vars = append(vars, tfexec.Var("vpc_config="+string(vpcConfigJSON)))
+	}
+	return vars
+}
+
+func (g *GCPConfig) BucketURL() (string, error) {
+	if g.ProjectID == "" {
+		return "", fmt.Errorf("project ID is required for GCP state management")
+	}
+	return fmt.Sprintf("gs://ditto-terraform-state-%s", g.ProjectID), nil
+}
+
+func (g *GCPConfig) GetBackendConfig() (TerraformBackendConfig, error) {
+	if g.ProjectID == "" {
+		return nil, fmt.Errorf("project ID is required for GCP state management")
+	}
+
+	bucketName := fmt.Sprintf("ditto-terraform-state-%s", g.ProjectID)
+	return &GCPBackendConfig{
+		BucketName: bucketName,
+		Prefix:     "terraform/state",
+	}, nil
+}
+
+// gcpCmd handles gcp specific variables and populates the config
+func gcpCmd(config *GCPConfig) *cobra.Command {
 	flags := pflag.NewFlagSet("gcp", pflag.ContinueOnError)
 
 	cmd := &cobra.Command{
@@ -23,26 +193,35 @@ func gcpCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 			logger := log.FromContext(cmd.Context())
 			logger.Debug("Processing GCP bootstrap command")
 
-			gcpVars, err := promptGcpValues(cmd.Context(), flags)
+			err := promptGcpValues(cmd.Context(), flags, config)
 			if err != nil {
 				return fmt.Errorf("unable to prompt for values: %w", err)
 			}
-			*vars = append(*vars, gcpVars...)
+
+			// Run GCP preflight checks (auth + API enablement)
+			if err := gcpPreflightCheck(cmd.Context(), config.ProjectID); err != nil {
+				return fmt.Errorf("GCP preflight checks failed: %w", err)
+			}
+
 			return nil
 		},
 	}
 
 	flags.String("project-id", "", "GCP project ID to use")
 	flags.String("region", "", "GCP region to use")
-	flags.String("vpc-name", "ditto-vpc", "GCP VPC name to use")
-	flags.Bool("create-default-firewall-rules", false, "Create default firewall rules for internal VPC traffic")
+	flags.Bool("create-subnets", false, "Create subnets and firewall rules")
+	flags.Bool("create-default-firewall-rules", false, "Create default firewall rules")
+	flags.String("subnet-cidr", "10.140.0.0/19", "Subnet CIDR to use")
+	flags.String("pods-cidr-range", "100.90.0.0/16", "Pods CIDR range to use")
+	flags.String("services-cidr-range", "100.91.0.0/16", "Services CIDR range to use")
+
 	cmd.Flags().AddFlagSet(flags)
 
 	return cmd
 }
 
-func promptGcpValues(ctx context.Context, flags *pflag.FlagSet) ([]*tfexec.VarOption, error) {
-	vars := []*tfexec.VarOption{}
+func promptGcpValues(ctx context.Context, flags *pflag.FlagSet, gcpConfig *GCPConfig) error {
+	// optional := color.New(color.FgYellow)
 	required := color.New(color.FgRed, color.Bold)
 
 	// confirm all flag values
@@ -80,29 +259,47 @@ func promptGcpValues(ctx context.Context, flags *pflag.FlagSet) ([]*tfexec.VarOp
 		})
 	}
 
+	gcpConfig.ProjectID = flags.Lookup("project-id").Value.String()
+	gcpConfig.Region = flags.Lookup("region").Value.String()
+	gcpConfig.CreateSubnets = flags.Lookup("create-subnets").Value.String() == "true"
+	gcpConfig.CreateDefaultFirewallRules = flags.Lookup("create-default-firewall-rules").Value.String() == "true"
+	gcpConfig.SubnetCidr = flags.Lookup("subnet-cidr").Value.String()
+	gcpConfig.PodsCidrRange = flags.Lookup("pods-cidr-range").Value.String()
+	gcpConfig.ServicesCidrRange = flags.Lookup("services-cidr-range").Value.String()
 
-	// Build terraform variables
-	projectId := fmt.Sprintf("project_id=%s", flags.Lookup("project-id").Value.String())
-	log.FromContext(ctx).Debug("terraform variable", "project_id", projectId)
-	vars = append(vars, tfexec.Var(projectId))
+	log.FromContext(ctx).Debug("GCP configuration",
+		"project_id", gcpConfig.ProjectID,
+		"region", gcpConfig.Region,
+		"create_subnets", gcpConfig.CreateSubnets,
+		"create_default_firewall_rules", gcpConfig.CreateDefaultFirewallRules,
+		"subnet_cidr", gcpConfig.SubnetCidr,
+		"pods_cidr_range", gcpConfig.PodsCidrRange,
+		"services_cidr_range", gcpConfig.ServicesCidrRange,
+	)
 
-	region := fmt.Sprintf("region=%s", flags.Lookup("region").Value.String())
-	log.FromContext(ctx).Debug("terraform variable", "region", region)
-	vars = append(vars, tfexec.Var(region))
+	return nil
+}
 
-	// Add optional vpc-name if provided
-	if vpcNameFlag := flags.Lookup("vpc-name"); vpcNameFlag != nil && vpcNameFlag.Value.String() != "" {
-		vpcName := fmt.Sprintf("vpc_name=%s", vpcNameFlag.Value.String())
-		log.FromContext(ctx).Debug("terraform variable", "vpc_name", vpcName)
-		vars = append(vars, tfexec.Var(vpcName))
-	}
+// GCPBackendConfig implements TerraformBackendConfig for GCP
+type GCPBackendConfig struct {
+	BucketName string
+	Prefix     string
+}
 
-	// Add optional create-default-firewall-rules if provided
-	if firewallFlag := flags.Lookup("create-default-firewall-rules"); firewallFlag != nil && firewallFlag.Value.String() != "" {
-		createFirewallRules := fmt.Sprintf("create_default_firewall_rules=%s", firewallFlag.Value.String())
-		log.FromContext(ctx).Debug("terraform variable", "create_default_firewall_rules", createFirewallRules)
-		vars = append(vars, tfexec.Var(createFirewallRules))
-	}
+func (c *GCPBackendConfig) BackendConfigFile() (string, error) {
+	return `terraform {
+  backend "gcs" {}
+}
+`, nil
+}
 
-	return vars, nil
+func (c *GCPBackendConfig) GetBackendConfig() ([]tfexec.InitOption, error) {
+	return []tfexec.InitOption{
+		tfexec.BackendConfig(fmt.Sprintf("bucket=%s", c.BucketName)),
+		tfexec.BackendConfig(fmt.Sprintf("prefix=%s", c.Prefix)),
+	}, nil
+}
+
+func (c *GCPBackendConfig) GetBackendType() string {
+	return "gcs"
 }

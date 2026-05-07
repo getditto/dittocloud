@@ -1,28 +1,81 @@
 package bootstrap
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/fatih/color"
 	"github.com/hashicorp/terraform-exec/tfexec"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
 
-// awsCmd handles aws specific variables and mutates the list of vars to be passed to terraform plan/apply
-func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
+// AWSConfig holds AWS-specific configuration
+type AWSConfig struct {
+	Profile                   string
+	Region                    string
+	VPCName                   string
+	VPCCidr                   string
+	AccountID                 string // Will be populated dynamically
+	ControllerTrustedRoleArns string // JSON-encoded list of ARNs
+	IAMTrustedRoleArns        string // JSON-encoded list of ARNs
+}
+
+func (a *AWSConfig) BuildTFVars() []*tfexec.VarOption {
+	var vars []*tfexec.VarOption
+	vars = append(vars,
+		tfexec.Var("profile="+a.Profile),
+		tfexec.Var("region="+a.Region),
+		tfexec.Var("vpc_name="+a.VPCName),
+		tfexec.Var("vpc_cidr="+a.VPCCidr),
+	)
+	if a.ControllerTrustedRoleArns != "" {
+		vars = append(vars, tfexec.Var("controller_trusted_role_arns="+a.ControllerTrustedRoleArns))
+	}
+	if a.IAMTrustedRoleArns != "" {
+		vars = append(vars, tfexec.Var("iam_trusted_role_arns="+a.IAMTrustedRoleArns))
+	}
+	return vars
+}
+
+func (a *AWSConfig) BucketURL() (string, error) {
+	if a.AccountID == "" {
+		return "", fmt.Errorf("account ID is required for AWS state management")
+	}
+	return fmt.Sprintf("s3://ditto-terraform-state-%s?region=%s", a.AccountID, a.Region), nil
+}
+
+func (a *AWSConfig) GetBackendConfig() (TerraformBackendConfig, error) {
+	if a.AccountID == "" {
+		return nil, fmt.Errorf("account ID is required for AWS state management")
+	}
+
+	bucketName := fmt.Sprintf("ditto-terraform-state-%s", a.AccountID)
+	return &AWSBackendConfig{
+		BucketName: bucketName,
+		Region:     a.Region,
+		KeyPrefix:  "terraform.tfstate",
+	}, nil
+}
+
+// awsCmd handles aws specific variables and populates the config
+func awsCmd(config *AWSConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "aws",
 		Short: "Bootstrap AWS",
 		Long:  "Bootstrap AWS",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			promptedAwsVars, err := promptAWSValues(cmd.Flags())
+			err := promptAWSValues(cmd.Flags(), config)
 			if err != nil {
 				return fmt.Errorf("unable to prompt for values: %w", err)
 			}
-			// Append the prompted AWS variables to the 'vars' slice that the parent command uses for terraform plan/apply
-			*vars = append(*vars, promptedAwsVars...)
+
+			// Set the AWS configuration
 			return nil
 		},
 	}
@@ -37,66 +90,102 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 	return cmd
 }
 
-func promptAWSValues(flags *pflag.FlagSet) ([]*tfexec.VarOption, error) {
-	vars := []*tfexec.VarOption{}
-
-	optional := color.New(color.FgYellow)
-	// Ask for the profile
-	vars = append(vars,
-		tfexec.Var("profile="+FlagOrPrompt(flags.Lookup("aws-profile"), "Enter the AWS profile", "")),
+func getAccountID(awsConfig *AWSConfig) {
+	if os.Getenv("AWS_PROFILE") == "" {
+		os.Setenv("AWS_PROFILE", awsConfig.Profile)
+	}
+	cfg, err := config.LoadDefaultConfig(
+		context.Background(),
 	)
+	if err != nil {
+		return
+	}
+
+	stsClient := sts.NewFromConfig(cfg)
+	result, err := stsClient.GetCallerIdentity(context.Background(), &sts.GetCallerIdentityInput{})
+	if err != nil {
+		return
+	}
+	awsConfig.AccountID = aws.ToString(result.Account)
+}
+
+func promptAWSValues(flags *pflag.FlagSet, awsConfig *AWSConfig) error {
+	optional := color.New(color.FgYellow)
+
+	// Ask for the profile
+	awsConfig.Profile = FlagOrPrompt(flags.Lookup("aws-profile"), "Enter the AWS profile", "")
 
 	// Ask for optional
 	optional.Println("confirm parameters")
 
-	if region := StringPrompt(
+	awsConfig.Region = StringPrompt(
 		"Enter the AWS region",
 		flags.Lookup("aws-region").Value.String(),
-	); region != "" {
-		vars = append(vars,
-			tfexec.Var("region="+region),
-		)
-	}
-	if vpcName := StringPrompt(
+	)
+
+	awsConfig.VPCName = StringPrompt(
 		"Enter the VPC name",
 		flags.Lookup("aws-vpc-name").Value.String(),
-	); vpcName != "" {
-		vars = append(vars,
-			tfexec.Var("vpc_name="+vpcName),
-		)
-	}
-	if cidr := StringPrompt(
+	)
+
+	awsConfig.VPCCidr = StringPrompt(
 		"Enter the CIDR block",
 		flags.Lookup("aws-vpc-cidr").Value.String(),
-	); cidr != "" {
-		vars = append(vars,
-			tfexec.Var("vpc_cidr="+cidr),
-		)
-	}
+	)
 
+	// Handle controller-trusted-role-arns flag from CLI
 	if flags.Changed("controller-trusted-role-arns") {
 		arns, err := flags.GetStringArray("controller-trusted-role-arns")
 		if err != nil {
-			return nil, fmt.Errorf("unable to get controller-trusted-role-arns: %w", err)
+			return fmt.Errorf("unable to get controller-trusted-role-arns: %w", err)
 		}
 		jsonStr, err := json.Marshal(arns)
 		if err != nil {
-			return nil, fmt.Errorf("unable to marshal controller-trusted-role-arns: %w", err)
+			return fmt.Errorf("unable to marshal controller-trusted-role-arns: %w", err)
 		}
-		vars = append(vars, tfexec.Var("controller_trusted_role_arns="+string(jsonStr)))
+		awsConfig.ControllerTrustedRoleArns = string(jsonStr)
 	}
 
+	// Handle iam-trusted-role-arns flag from CLI
 	if flags.Changed("iam-trusted-role-arns") {
 		arns, err := flags.GetStringArray("iam-trusted-role-arns")
 		if err != nil {
-			return nil, fmt.Errorf("unable to get iam-trusted-role-arns: %w", err)
+			return fmt.Errorf("unable to get iam-trusted-role-arns: %w", err)
 		}
 		jsonStr, err := json.Marshal(arns)
 		if err != nil {
-			return nil, fmt.Errorf("unable to marshal iam-trusted-role-arns: %w", err)
+			return fmt.Errorf("unable to marshal iam-trusted-role-arns: %w", err)
 		}
-		vars = append(vars, tfexec.Var("iam_trusted_role_arns="+string(jsonStr)))
+		awsConfig.IAMTrustedRoleArns = string(jsonStr)
 	}
 
-	return vars, nil
+	// Set Account ID
+	getAccountID(awsConfig)
+	return nil
+}
+
+// AWSBackendConfig implements TerraformBackendConfig for AWS
+type AWSBackendConfig struct {
+	BucketName string
+	Region     string
+	KeyPrefix  string
+}
+
+func (c *AWSBackendConfig) BackendConfigFile() (string, error) {
+	return `terraform {
+  backend "s3" {}
+}
+`, nil
+}
+
+func (c *AWSBackendConfig) GetBackendConfig() ([]tfexec.InitOption, error) {
+	return []tfexec.InitOption{
+		tfexec.BackendConfig(fmt.Sprintf("bucket=%s", c.BucketName)),
+		tfexec.BackendConfig(fmt.Sprintf("region=%s", c.Region)),
+		tfexec.BackendConfig(fmt.Sprintf("key=%s", c.KeyPrefix)),
+	}, nil
+}
+
+func (c *AWSBackendConfig) GetBackendType() string {
+	return "s3"
 }
