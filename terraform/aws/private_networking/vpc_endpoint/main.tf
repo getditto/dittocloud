@@ -1,9 +1,3 @@
-variable "private_dns_enabled" {
-  description = "Whether to associate a private hosted zone with the specified VPC for the endpoint service. Defaults to true to preserve existing behavior."
-  type        = bool
-  default     = true
-}
-
 # VPC Endpoint for accessing the Endpoint Service
 resource "aws_vpc_endpoint" "main" {
   vpc_id              = var.vpc_id

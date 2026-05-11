@@ -224,7 +224,7 @@ func TestEndpointServiceCmd(t *testing.T) {
 		cmd, mock := setupEndpointServiceTest(t, []string{
 			"--big-peer-name=test-big-peer",
 			"--private-dns-name=test.example.com",
-			"--allowed-principal=arn:aws:iam::123456789012:root",
+			"--allowed-principals=arn:aws:iam::123456789012:root",
 			"--aws-profile=test-profile",
 			"--aws-region=us-west-2",
 			"--state=/tmp/test-endpoint-service.tfstate",
@@ -238,11 +238,11 @@ func TestEndpointServiceCmd(t *testing.T) {
 		assertCallCounts(t, mock, 1, 1, 0, 0)
 
 		wantVars := map[string]string{
-			"big_peer_name":     "test-big-peer",
-			"private_dns_name":  "test.example.com",
-			"allowed_principal": "arn:aws:iam::123456789012:root",
-			"profile":           "test-profile",
-			"region":            "us-west-2",
+			"big_peer_name":      "test-big-peer",
+			"private_dns_name":   "test.example.com",
+			"allowed_principals": `["arn:aws:iam::123456789012:root"]`,
+			"profile":            "test-profile",
+			"region":             "us-west-2",
 		}
 
 		for key, want := range wantVars {
@@ -256,7 +256,7 @@ func TestEndpointServiceCmd(t *testing.T) {
 		cmd, mock := setupEndpointServiceTest(t, []string{
 			"--big-peer-name=test-big-peer",
 			"--private-dns-name=test.example.com",
-			"--allowed-principal=arn:aws:iam::123456789012:root",
+			"--allowed-principals=arn:aws:iam::123456789012:root",
 			"--tf-var=custom_tag=test-value",
 			"--state=/tmp/test-endpoint-service.tfstate",
 			"--dry-run",
@@ -277,7 +277,7 @@ func TestEndpointServiceCmd(t *testing.T) {
 		cmd, _ := setupEndpointServiceTest(t, []string{
 			"--big-peer-name=test-big-peer",
 			"--private-dns-name=test.example.com",
-			"--allowed-principal=arn:aws:iam::123456789012:root",
+			"--allowed-principals=arn:aws:iam::123456789012:root",
 			"--tf-var=invalid_format_without_equals",
 			"--state=/tmp/test-endpoint-service.tfstate",
 			"--dry-run",
@@ -440,5 +440,26 @@ func TestFormatSubnetIDs(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestEndpointServiceMultiplePrincipals(t *testing.T) {
+	t.Run("should format multiple allowed principals correctly", func(t *testing.T) {
+		cmd, mock := setupEndpointServiceTest(t, []string{
+			"--big-peer-name=test-big-peer",
+			"--private-dns-name=test.example.com",
+			"--allowed-principals=arn:aws:iam::111111111111:root,arn:aws:iam::222222222222:root",
+			"--state=/tmp/test-endpoint-service.tfstate",
+			"--dry-run",
+		})
+
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error executing command: %v", err)
+		}
+
+		want := `["arn:aws:iam::111111111111:root","arn:aws:iam::222222222222:root"]`
+		if got := mock.PlanVars["allowed_principals"]; got != want {
+			t.Errorf("allowed_principals: got %q, want %q", got, want)
+		}
+	})
 }
 

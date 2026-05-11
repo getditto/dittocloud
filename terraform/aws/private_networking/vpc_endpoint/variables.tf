@@ -1,3 +1,9 @@
+variable "private_dns_enabled" {
+  description = "Whether to associate a private hosted zone with the specified VPC for the endpoint service. Defaults to true to preserve existing behavior."
+  type        = bool
+  default     = true
+}
+
 variable "profile" {
   description = "AWS profile to use"
   type        = string

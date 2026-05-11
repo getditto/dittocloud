@@ -20,9 +20,9 @@ variable "private_dns_name" {
   type        = string
 }
 
-variable "allowed_principal" {
-  description = "AWS principal allowed to create endpoint connections (e.g., AWS account ID, IAM role ARN, or principal ARN)"
-  type        = string
+variable "allowed_principals" {
+  description = "AWS principals allowed to create endpoint connections (e.g., AWS account IDs, IAM role ARNs, or principal ARNs)"
+  type        = list(string)
 }
 
 variable "tags" {

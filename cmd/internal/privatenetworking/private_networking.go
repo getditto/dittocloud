@@ -298,7 +298,7 @@ It will:
 				vars = []*tfexec.VarOption{
 					tfexec.Var("big_peer_name=" + bigPeerName),
 					tfexec.Var("private_dns_name=placeholder.example.com"),
-					tfexec.Var("allowed_principal=arn:aws:iam::000000000000:root"),
+					tfexec.Var(`allowed_principals=["arn:aws:iam::000000000000:root"]`),
 					tfexec.Var("profile=" + awsProfile),
 				}
 				if awsRegion != "" {
@@ -309,14 +309,14 @@ It will:
 				if privateDNSName == "" {
 					return fmt.Errorf("private-dns-name is required")
 				}
-				allowedPrincipal := bootstrap.FlagOrPrompt(cmd.Flags().Lookup("allowed-principal"), "Enter the allowed principal (AWS account ID, IAM role ARN, or principal ARN)", "")
-				if allowedPrincipal == "" {
-					return fmt.Errorf("allowed-principal is required")
+				allowedPrincipalsStr := bootstrap.FlagOrPrompt(cmd.Flags().Lookup("allowed-principals"), "Enter the allowed principals, comma-separated (AWS account IDs, IAM role ARNs, or principal ARNs)", "")
+				if allowedPrincipalsStr == "" {
+					return fmt.Errorf("allowed-principals is required")
 				}
 				vars = []*tfexec.VarOption{
 					tfexec.Var("big_peer_name=" + bigPeerName),
 					tfexec.Var("private_dns_name=" + privateDNSName),
-					tfexec.Var("allowed_principal=" + allowedPrincipal),
+					tfexec.Var("allowed_principals=[" + formatPrincipals(allowedPrincipalsStr) + "]"),
 					tfexec.Var("profile=" + awsProfile),
 				}
 				if awsRegion != "" {
@@ -351,7 +351,7 @@ It will:
 
 	cmd.Flags().String("big-peer-name", "", "Name of the Big Peer deployment")
 	cmd.Flags().String("private-dns-name", "", "Fully qualified domain name for the VPC Endpoint Service")
-	cmd.Flags().String("allowed-principal", "", "AWS principal allowed to create endpoint connections")
+	cmd.Flags().String("allowed-principals", "", "Comma-separated AWS principals allowed to create endpoint connections")
 	cmd.Flags().String("aws-profile", "", "AWS profile to use")
 	cmd.Flags().String("aws-region", "", "AWS region (optional, will use default region if not specified)")
 	cmd.Flags().Bool("dry-run", false, "Run terraform plan instead of terraform apply")
@@ -533,7 +533,16 @@ It will:
 
 // formatSubnetIDs formats comma-separated subnet IDs into a Terraform list literal.
 func formatSubnetIDs(subnetIDsStr string) string {
-	parts := strings.Split(subnetIDsStr, ",")
+	return formatCommaSeparated(subnetIDsStr)
+}
+
+// formatPrincipals formats comma-separated AWS principals into a Terraform list literal.
+func formatPrincipals(principalsStr string) string {
+	return formatCommaSeparated(principalsStr)
+}
+
+func formatCommaSeparated(s string) string {
+	parts := strings.Split(s, ",")
 	quoted := make([]string, len(parts))
 	for i, part := range parts {
 		quoted[i] = "\"" + strings.TrimSpace(part) + "\""
