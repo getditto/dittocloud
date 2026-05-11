@@ -165,8 +165,10 @@ func runTerraformLifecycle(cmd *cobra.Command, vars []*tfexec.VarOption, cfg lif
 			}
 		}()
 
+		destroyOpts := make([]tfexec.DestroyOption, len(vars))
+		for i, v := range vars { destroyOpts[i] = v }
 		progress.Println("Running terraform destroy...")
-		if err := tf.Destroy(cmd.Context(), toDestroyOptions(vars)...); err != nil {
+		if err := tf.Destroy(cmd.Context(), destroyOpts...); err != nil {
 			return fmt.Errorf("unable to run terraform destroy: %w", err)
 		}
 		success.Println(cfg.destroySuccess)
@@ -185,7 +187,9 @@ func runTerraformLifecycle(cmd *cobra.Command, vars []*tfexec.VarOption, cfg lif
 		tf.SetStderr(io.Discard)
 	}
 
-	planChanged, err := tf.Plan(cmd.Context(), toPlanOptions(vars)...)
+	planOpts := make([]tfexec.PlanOption, len(vars))
+	for i, v := range vars { planOpts[i] = v }
+	planChanged, err := tf.Plan(cmd.Context(), planOpts...)
 	if err != nil {
 		return fmt.Errorf("unable to run terraform plan: %w", err)
 	}
@@ -233,8 +237,10 @@ func runTerraformLifecycle(cmd *cobra.Command, vars []*tfexec.VarOption, cfg lif
 		}
 	}()
 
+	applyOpts := make([]tfexec.ApplyOption, len(vars))
+	for i, v := range vars { applyOpts[i] = v }
 	progress.Println("Running terraform apply...")
-	if err := tf.Apply(cmd.Context(), toApplyOptions(vars)...); err != nil {
+	if err := tf.Apply(cmd.Context(), applyOpts...); err != nil {
 		return fmt.Errorf("unable to run terraform apply: %w", err)
 	}
 
@@ -358,29 +364,6 @@ It will:
 	return cmd
 }
 
-func toPlanOptions(vars []*tfexec.VarOption) []tfexec.PlanOption {
-	planOpts := make([]tfexec.PlanOption, len(vars))
-	for i, v := range vars {
-		planOpts[i] = v
-	}
-	return planOpts
-}
-
-func toApplyOptions(vars []*tfexec.VarOption) []tfexec.ApplyOption {
-	applyOpts := make([]tfexec.ApplyOption, len(vars))
-	for i, v := range vars {
-		applyOpts[i] = v
-	}
-	return applyOpts
-}
-
-func toDestroyOptions(vars []*tfexec.VarOption) []tfexec.DestroyOption {
-	destroyOpts := make([]tfexec.DestroyOption, len(vars))
-	for i, v := range vars {
-		destroyOpts[i] = v
-	}
-	return destroyOpts
-}
 
 // showOutputs pretty-prints TF outputs for the endpoint-service command.
 func showOutputs(ctx context.Context, tf TerraformExecutor, success *color.Color, failure *color.Color) error {
