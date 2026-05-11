@@ -45,8 +45,10 @@ var terraformPathFinder = bootstrap.GetTerraform
 func PrivateNetworkingCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "private-networking",
-		Short: "Manage private networking for Big Peer deployments",
-		Long:  `Manage VPC Endpoint Services and VPC Endpoints for private networking access to Big Peer deployments.`,
+		Short: "Manage private networking for Big Peer deployments (AWS only)",
+		Long: `Manage VPC Endpoint Services and VPC Endpoints for private networking access to Big Peer deployments.
+
+NOTE: This command is only supported for AWS deployments. GCP is not supported.`,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			noColor, err := cmd.Flags().GetBool("no-color")
 			if err == nil {
