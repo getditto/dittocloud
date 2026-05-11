@@ -126,9 +126,18 @@ func setupEndpointServiceTest(t *testing.T, args []string) (*cobra.Command, *moc
 
 	ctx := log.WithLogger(context.Background(), log.Setup("debug"))
 
-	// Save and restore original terraform factory
+	// Save and restore original terraform factory and path finder
 	originalFactory := terraformFactory
-	t.Cleanup(func() { terraformFactory = originalFactory })
+	originalFinder := terraformPathFinder
+	t.Cleanup(func() {
+		terraformFactory = originalFactory
+		terraformPathFinder = originalFinder
+	})
+
+	// Bypass real terraform path resolution
+	terraformPathFinder = func(_ context.Context, _ bool) (string, error) {
+		return "terraform", nil
+	}
 
 	// Create mock terraform executor
 	mock := &mockTerraformExecutor{
@@ -158,9 +167,18 @@ func setupEndpointTest(t *testing.T, args []string) (*cobra.Command, *mockTerraf
 
 	ctx := log.WithLogger(context.Background(), log.Setup("debug"))
 
-	// Save and restore original terraform factory
+	// Save and restore original terraform factory and path finder
 	originalFactory := terraformFactory
-	t.Cleanup(func() { terraformFactory = originalFactory })
+	originalFinder := terraformPathFinder
+	t.Cleanup(func() {
+		terraformFactory = originalFactory
+		terraformPathFinder = originalFinder
+	})
+
+	// Bypass real terraform path resolution
+	terraformPathFinder = func(_ context.Context, _ bool) (string, error) {
+		return "terraform", nil
+	}
 
 	// Create mock terraform executor
 	mock := &mockTerraformExecutor{

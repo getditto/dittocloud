@@ -39,6 +39,9 @@ var defaultTerraformFactory TerraformFactory = func(workingDir string, execPath 
 // terraformFactory is the factory used by the code (can be replaced in tests)
 var terraformFactory = defaultTerraformFactory
 
+// terraformPathFinder resolves the terraform executable path (can be replaced in tests)
+var terraformPathFinder = bootstrap.GetTerraform
+
 func PrivateNetworkingCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "private-networking",
@@ -51,6 +54,8 @@ func PrivateNetworkingCmd() *cobra.Command {
 			}
 		},
 	}
+
+	cmd.PersistentFlags().Bool("no-color", false, "Disable color output")
 
 	cmd.AddCommand(EndpointServiceCmd())
 	cmd.AddCommand(EndpointCmd())
@@ -216,7 +221,7 @@ It will:
 			// this will be set to true if a valid terraform executable is not found
 			shouldDownload := cmd.Flag("force-terraform-download").Value.String() == "true"
 
-			execPath, err = bootstrap.GetTerraform(cmd.Context(), shouldDownload)
+			execPath, err = terraformPathFinder(cmd.Context(), shouldDownload)
 			if err != nil {
 				return fmt.Errorf("terraform executable not available: %w", err)
 			}
@@ -251,6 +256,7 @@ It will:
 					stateFileData, err := os.ReadFile(tmpStateFilePath)
 					if err != nil {
 						failure.Printf("unable to read state file from temporary directory: %v", err)
+						return
 					}
 					if err := os.WriteFile(localStateFilePath, stateFileData, 0600); err != nil {
 						failure.Printf("unable to write state file to %q: %v", localStateFilePath, err)
@@ -338,6 +344,7 @@ It will:
 				stateFileData, err := os.ReadFile(tmpStateFilePath)
 				if err != nil {
 					failure.Printf("unable to read state file from temporary directory: %v", err)
+					return
 				}
 				if err := os.WriteFile(localStateFilePath, stateFileData, 0600); err != nil {
 					failure.Printf("unable to write state file to %q: %v", localStateFilePath, err)
@@ -371,7 +378,6 @@ It will:
 	cmd.Flags().String("aws-region", "", "AWS region (optional, will use default region if not specified)")
 	cmd.Flags().Bool("dry-run", false, "Run terraform plan instead of terraform apply")
 	cmd.Flags().Bool("destroy", false, "Destroy the private networking infrastructure")
-	cmd.Flags().Bool("no-color", false, "Disable color output")
 	cmd.Flags().String("state", "terraform-endpoint-service.tfstate", "Path to the terraform state file")
 	cmd.Flags().Bool("remove-tmpdir", true, "Remove the temporary directory after running")
 	cmd.Flags().StringVar(&logLevel, "log-level", "info", "Set the log level")
@@ -631,7 +637,7 @@ It will:
 			// this will be set to true if a valid terraform executable is not found
 			shouldDownload := cmd.Flag("force-terraform-download").Value.String() == "true"
 
-			execPath, err = bootstrap.GetTerraform(cmd.Context(), shouldDownload)
+			execPath, err = terraformPathFinder(cmd.Context(), shouldDownload)
 			if err != nil {
 				return fmt.Errorf("terraform executable not available: %w", err)
 			}
@@ -666,6 +672,7 @@ It will:
 					stateFileData, err := os.ReadFile(tmpStateFilePath)
 					if err != nil {
 						failure.Printf("unable to read state file from temporary directory: %v", err)
+						return
 					}
 					if err := os.WriteFile(localStateFilePath, stateFileData, 0600); err != nil {
 						failure.Printf("unable to write state file to %q: %v", localStateFilePath, err)
@@ -753,6 +760,7 @@ It will:
 				stateFileData, err := os.ReadFile(tmpStateFilePath)
 				if err != nil {
 					failure.Printf("unable to read state file from temporary directory: %v", err)
+					return
 				}
 				if err := os.WriteFile(localStateFilePath, stateFileData, 0600); err != nil {
 					failure.Printf("unable to write state file to %q: %v", localStateFilePath, err)
@@ -780,7 +788,6 @@ It will:
 	cmd.Flags().String("aws-region", "", "AWS region (optional, will use default region if not specified)")
 	cmd.Flags().Bool("dry-run", false, "Run terraform plan instead of terraform apply")
 	cmd.Flags().Bool("destroy", false, "Destroy the VPC endpoint infrastructure")
-	cmd.Flags().Bool("no-color", false, "Disable color output")
 	cmd.Flags().String("state", "terraform-endpoint.tfstate", "Path to the terraform state file")
 	cmd.Flags().Bool("remove-tmpdir", true, "Remove the temporary directory after running")
 	cmd.Flags().StringVar(&logLevel, "log-level", "info", "Set the log level")
