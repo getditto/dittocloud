@@ -140,19 +140,23 @@ func runTerraformLifecycle(cmd *cobra.Command, vars []*tfexec.VarOption, cfg lif
 		return fmt.Errorf("unable to initialize terraform: %w", err)
 	}
 
+	autoApprove := cmd.Flag("yes").Value.String() == "true"
+
 	if destroyMode {
 		color.Red("\n⚠️  WARNING: %s\n", cfg.destroyWarning)
-		color.White("%s", color.New(color.Bold).Sprint("Are you sure you want to destroy all resources?"))
-		for {
-			v := bootstrap.StringPrompt("(y/n)", "")
-			if v == "n" || v == "no" {
-				progress.Println("Aborting...")
-				return nil
+		if !autoApprove {
+			color.White("%s", color.New(color.Bold).Sprint("Are you sure you want to destroy all resources?"))
+			for {
+				v := bootstrap.StringPrompt("(y/n)", "")
+				if v == "n" || v == "no" {
+					progress.Println("Aborting...")
+					return nil
+				}
+				if v == "y" || v == "yes" {
+					break
+				}
+				progress.Println("Only \"y\" or \"n\" inputs are accepted.")
 			}
-			if v == "y" || v == "yes" {
-				break
-			}
-			progress.Println("Only \"y\" or \"n\" inputs are accepted.")
 		}
 
 		defer func() {
@@ -214,17 +218,19 @@ func runTerraformLifecycle(cmd *cobra.Command, vars []*tfexec.VarOption, cfg lif
 		return nil
 	}
 
-	color.White("%s", color.New(color.Bold).Sprint("Are you sure you want to apply these changes?"))
-	for {
-		v := bootstrap.StringPrompt("(y/n)", "")
-		if v == "n" || v == "no" {
-			progress.Println("Aborting...")
-			return nil
+	if !autoApprove {
+		color.White("%s", color.New(color.Bold).Sprint("Are you sure you want to apply these changes?"))
+		for {
+			v := bootstrap.StringPrompt("(y/n)", "")
+			if v == "n" || v == "no" {
+				progress.Println("Aborting...")
+				return nil
+			}
+			if v == "y" || v == "yes" {
+				break
+			}
+			progress.Println("Only \"y\" or \"n\" inputs are accepted.")
 		}
-		if v == "y" || v == "yes" {
-			break
-		}
-		progress.Println("Only \"y\" or \"n\" inputs are accepted.")
 	}
 
 	defer func() {
@@ -356,6 +362,7 @@ It will:
 	cmd.Flags().String("aws-region", "", "AWS region (optional, will use default region if not specified)")
 	cmd.Flags().Bool("dry-run", false, "Run terraform plan instead of terraform apply")
 	cmd.Flags().Bool("destroy", false, "Destroy the private networking infrastructure")
+	cmd.Flags().Bool("yes", false, "Skip confirmation prompts (useful for automation)")
 	cmd.Flags().String("state", "terraform-endpoint-service.tfstate", "Path to the terraform state file")
 	cmd.Flags().Bool("remove-tmpdir", true, "Remove the temporary directory after running")
 	cmd.Flags().StringVar(&logLevel, "log-level", "info", "Set the log level")
@@ -521,6 +528,7 @@ It will:
 	cmd.Flags().String("aws-region", "", "AWS region (optional, will use default region if not specified)")
 	cmd.Flags().Bool("dry-run", false, "Run terraform plan instead of terraform apply")
 	cmd.Flags().Bool("destroy", false, "Destroy the VPC endpoint infrastructure")
+	cmd.Flags().Bool("yes", false, "Skip confirmation prompts (useful for automation)")
 	cmd.Flags().String("state", "terraform-endpoint.tfstate", "Path to the terraform state file")
 	cmd.Flags().Bool("remove-tmpdir", true, "Remove the temporary directory after running")
 	cmd.Flags().StringVar(&logLevel, "log-level", "info", "Set the log level")

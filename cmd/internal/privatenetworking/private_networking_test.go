@@ -293,9 +293,33 @@ func TestEndpointServiceCmd(t *testing.T) {
 		}
 	})
 
-	// Note: Destroy mode tests are omitted because they require interactive confirmation
-	// which is difficult to test in an automated fashion. The destroy logic uses the same
-	// variable building and terraform factory patterns that are tested above.
+	t.Run("should call destroy with correct variables when --destroy and --yes are set", func(t *testing.T) {
+		cmd, mock := setupEndpointServiceTest(t, []string{
+			"--big-peer-name=test-big-peer",
+			"--aws-profile=test-profile",
+			"--aws-region=us-west-2",
+			"--state=/tmp/test-endpoint-service.tfstate",
+			"--destroy",
+			"--yes",
+		})
+
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error executing command: %v", err)
+		}
+
+		assertCallCounts(t, mock, 1, 0, 0, 1)
+
+		wantVars := map[string]string{
+			"big_peer_name": "test-big-peer",
+			"profile":       "test-profile",
+			"region":        "us-west-2",
+		}
+		for key, want := range wantVars {
+			if got := mock.DestroyVars[key]; got != want {
+				t.Errorf("%s: got %q, want %q", key, got, want)
+			}
+		}
+	})
 }
 
 func TestEndpointCmd(t *testing.T) {
@@ -356,9 +380,35 @@ func TestEndpointCmd(t *testing.T) {
 		}
 	})
 
-	// Note: Destroy mode tests are omitted because they require interactive confirmation
-	// which is difficult to test in an automated fashion. The destroy logic uses the same
-	// variable building and terraform factory patterns that are tested above.
+	t.Run("should call destroy with correct variables when --destroy and --yes are set", func(t *testing.T) {
+		cmd, mock := setupEndpointTest(t, []string{
+			"--service-name=com.amazonaws.vpce.us-east-2.vpce-svc-123456",
+			"--vpc-id=vpc-12345678",
+			"--subnet-ids=subnet-111",
+			"--private-dns-name=test.example.com",
+			"--aws-profile=test-profile",
+			"--aws-region=us-west-2",
+			"--state=/tmp/test-endpoint.tfstate",
+			"--destroy",
+			"--yes",
+		})
+
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error executing command: %v", err)
+		}
+
+		assertCallCounts(t, mock, 1, 0, 0, 1)
+
+		wantVars := map[string]string{
+			"profile": "test-profile",
+			"region":  "us-west-2",
+		}
+		for key, want := range wantVars {
+			if got := mock.DestroyVars[key]; got != want {
+				t.Errorf("%s: got %q, want %q", key, got, want)
+			}
+		}
+	})
 
 	t.Run("should pass --tf-var values to terraform", func(t *testing.T) {
 		cmd, mock := setupEndpointTest(t, []string{
