@@ -66,9 +66,9 @@ func BootstrapCmd() *cobra.Command {
 			// Log the start of bootstrap
 			logger.Debug("Starting Ditto Cloud Bootstrap", "command", cmd.Name())
 
-			header.Println("══════════════════════════════════════════════════")
-			header.Println("               Ditto Cloud Bootstrap              ")
-			header.Println("══════════════════════════════════════════════════")
+			_, _ = header.Println("══════════════════════════════════════════════════")
+			_, _ = header.Println("               Ditto Cloud Bootstrap              ")
+			_, _ = header.Println("══════════════════════════════════════════════════")
 			return nil
 		},
 		PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
@@ -80,10 +80,10 @@ func BootstrapCmd() *cobra.Command {
 				return fmt.Errorf("unable to create temporary directory: %w", err)
 			}
 			if cmd.Flag("remove-tmpdir").Value.String() == "true" {
-				defer os.Remove(tmpDir)
+				defer func() { _ = os.Remove(tmpDir) }()
 			}
 
-			progress.Printf("Copying terraform files to temporary directory %q\n", tmpDir)
+			_, _ = progress.Printf("Copying terraform files to temporary directory %q\n", tmpDir)
 			if err := os.CopyFS(tmpDir, terraform.TerraformFiles); err != nil {
 				return fmt.Errorf("unable to copy terraform files: %w", err)
 			}
@@ -95,13 +95,13 @@ func BootstrapCmd() *cobra.Command {
 			// provider is the subcommand name
 			provider := cmd.Name()
 			workingDir := filepath.Join(tmpDir, provider)
-			progress.Printf("Using %q provider\n", provider)
+			_, _ = progress.Printf("Using %q provider\n", provider)
 
 			localStateFilePath := cmd.Flag("state").Value.String()
 			tmpStateFilePath := filepath.Join(workingDir, "terraform.tfstate")
 
 			if _, err := os.Stat(localStateFilePath); err == nil {
-				progress.Printf("Copying local state file %q to temporary directory %q\n", localStateFilePath, workingDir)
+				_, _ = progress.Printf("Copying local state file %q to temporary directory %q\n", localStateFilePath, workingDir)
 				input, err := os.ReadFile(localStateFilePath)
 				if err != nil {
 					return fmt.Errorf("unable to read local state file: %w", err)
@@ -110,7 +110,7 @@ func BootstrapCmd() *cobra.Command {
 					return fmt.Errorf("unable to write state file to temporary directory: %w", err)
 				}
 			} else {
-				progress.Printf(
+				_,_ = progress.Printf(
 					"No local state file found, new state file will be created at %q\n",
 					localStateFilePath,
 				)
@@ -129,7 +129,7 @@ func BootstrapCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("unable to create terraform instance: %w", err)
 			}
-			progress.Println("Initializing terraform...")
+			_, _ = progress.Println("Initializing terraform...")
 			if err := tf.Init(cmd.Context(), tfexec.Upgrade(true)); err != nil {
 				return fmt.Errorf("unable to initialize terraform: %w", err)
 			}
@@ -142,7 +142,7 @@ func BootstrapCmd() *cobra.Command {
 				vars = append(vars, tfexec.Var(tfVar))
 			}
 
-			progress.Println("Running terraform plan...")
+			_, _ = progress.Println("Running terraform plan...")
 
 			// Check if debug logging is enabled to show detailed plan output
 			showDetailedPlan := logger.Enabled(cmd.Context(), slog.LevelDebug)
@@ -190,7 +190,7 @@ func BootstrapCmd() *cobra.Command {
 			}
 
 			if cmd.Flag("dry-run").Value.String() == "true" {
-				progress.Println("Terraform plan complete. Run command without `--dry-run` to apply the changes.")
+				_, _ = progress.Println("Terraform plan complete. Run command without `--dry-run` to apply the changes.")
 				return nil
 			}
 
@@ -200,28 +200,28 @@ func BootstrapCmd() *cobra.Command {
 			for {
 				v := StringPrompt("(y/n)", "")
 				if v == "n" || v == "no" {
-					progress.Println("Aborting...")
+					_, _ = progress.Println("Aborting...")
 					return nil
 				}
 				if v == "y" || v == "yes" {
 					break
 				}
-				progress.Println("Only \"y\" or \"n\" inputs are accepted.")
+				_, _ = progress.Println("Only \"y\" or \"n\" inputs are accepted.")
 			}
 
 			defer func() {
 				// Copy the state file back to the original location
-				progress.Printf("Copying state file back to %q\n", localStateFilePath)
+				_, _ = progress.Printf("Copying state file back to %q\n", localStateFilePath)
 				stateFileData, err := os.ReadFile(tmpStateFilePath)
 				if err != nil {
-					failure.Printf("unable to read state file from temporary directory: %v", err)
+					_, _ = failure.Printf("unable to read state file from temporary directory: %v", err)
 				}
 				if err := os.WriteFile(localStateFilePath, stateFileData, 0600); err != nil {
-					failure.Printf("unable to write state file to %q: %v", localStateFilePath, err)
+					_, _ = failure.Printf("unable to write state file to %q: %v", localStateFilePath, err)
 				}
 			}()
 
-			progress.Println("Running terraform apply...")
+			_, _ = progress.Println("Running terraform apply...")
 			if err := tf.Apply(cmd.Context(), toApplyOptions(vars)...); err != nil {
 				return fmt.Errorf("unable to run terraform apply: %w", err)
 			}
@@ -269,9 +269,9 @@ func StringPrompt(label string, def string) string {
 	prompt := color.New(color.FgHiWhite, color.Bold)
 	var value string
 	if def != "" {
-		prompt.Printf("%s (default: %s): ", label, color.WhiteString(def))
+		_, _ = prompt.Printf("%s (default: %s): ", label, color.WhiteString(def))
 	} else {
-		prompt.Printf("%s: ", label)
+		_, _ = prompt.Printf("%s: ", label)
 	}
 	_, _ = fmt.Scanln(&value)
 	value = strings.TrimSpace(value)
@@ -289,7 +289,7 @@ func OptionsPrompt(label string, options []string) string {
 	failed := color.New(color.FgRed)
 	var value string
 	for {
-		prompt.Printf("%s %s: ", label, color.WhiteString("%v", options))
+		_, _ = prompt.Printf("%s %s: ", label, color.WhiteString("%v", options))
 		_, err := fmt.Scanln(&value)
 		if err != nil {
 			return ""
@@ -297,7 +297,7 @@ func OptionsPrompt(label string, options []string) string {
 		if slices.Contains(options, value) {
 			return value
 		}
-		failed.Println("Invalid option, please try again.")
+		_, _ = failed.Println("Invalid option, please try again.")
 	}
 }
 

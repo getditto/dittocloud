@@ -80,7 +80,7 @@ func GetTerraform(ctx context.Context, shouldDownload bool) (string, error) {
 	if shouldDownload {
 		// Inform the user that terraform is being downloaded
 		progress := color.New(color.FgMagenta)
-		progress.Printf("Terraform not found or incompatible version detected. Downloading Terraform %s\n", RequiredTerraformVersion)
+		_, _ = progress.Printf("Terraform not found or incompatible version detected. Downloading Terraform %s\n", RequiredTerraformVersion)
 		return downloadAndCacheTerraform(ctx, RequiredTerraformVersion)
 	}
 

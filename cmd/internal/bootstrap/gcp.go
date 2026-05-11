@@ -69,7 +69,7 @@ func promptGcpValues(ctx context.Context, flags *pflag.FlagSet) ([]*tfexec.VarOp
 			var val string
 			val = flag.Value.String()
 			if val == "" {
-				required.Println("Input required for flag: ", flag.Name)
+				_, _ = required.Println("Input required for flag: ", flag.Name)
 				allValuesSet = false
 				val = StringPrompt(flag.Name, val)
 			}

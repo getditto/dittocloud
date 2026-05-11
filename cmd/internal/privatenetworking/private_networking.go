@@ -99,7 +99,7 @@ func runTerraformLifecycle(cmd *cobra.Command, vars []*tfexec.VarOption, cfg lif
 		}()
 	}
 
-	progress.Printf("Copying terraform files to temporary directory %q\n", tmpDir)
+	_, _ = progress.Printf("Copying terraform files to temporary directory %q\n", tmpDir)
 	if err := os.CopyFS(tmpDir, terraform.TerraformFiles); err != nil {
 		return fmt.Errorf("unable to copy terraform files: %w", err)
 	}
@@ -108,13 +108,13 @@ func runTerraformLifecycle(cmd *cobra.Command, vars []*tfexec.VarOption, cfg lif
 	}
 
 	workingDir := filepath.Join(tmpDir, cfg.terraformSubDir)
-	progress.Printf("Using %s in %q\n", cfg.workingDirLabel, workingDir)
+	_, _ = progress.Printf("Using %s in %q\n", cfg.workingDirLabel, workingDir)
 
 	localStateFilePath := cmd.Flag("state").Value.String()
 	tmpStateFilePath := filepath.Join(workingDir, "terraform.tfstate")
 
 	if _, err := os.Stat(localStateFilePath); err == nil {
-		progress.Printf("Copying local state file %q to temporary directory %q\n", localStateFilePath, workingDir)
+		_, _ = progress.Printf("Copying local state file %q to temporary directory %q\n", localStateFilePath, workingDir)
 		input, err := os.ReadFile(localStateFilePath)
 		if err != nil {
 			return fmt.Errorf("unable to read local state file: %w", err)
@@ -123,7 +123,7 @@ func runTerraformLifecycle(cmd *cobra.Command, vars []*tfexec.VarOption, cfg lif
 			return fmt.Errorf("unable to write state file to temporary directory: %w", err)
 		}
 	} else {
-		progress.Printf("No local state file found, new state file will be created at %q\n", localStateFilePath)
+		_, _ = progress.Printf("No local state file found, new state file will be created at %q\n", localStateFilePath)
 	}
 
 	shouldDownload := cmd.Flag("force-terraform-download").Value.String() == "true"
@@ -135,7 +135,7 @@ func runTerraformLifecycle(cmd *cobra.Command, vars []*tfexec.VarOption, cfg lif
 	if err != nil {
 		return fmt.Errorf("unable to create terraform instance: %w", err)
 	}
-	progress.Println("Initializing terraform...")
+	_, _ = progress.Println("Initializing terraform...")
 	if err := tf.Init(cmd.Context(), tfexec.Upgrade(true)); err != nil {
 		return fmt.Errorf("unable to initialize terraform: %w", err)
 	}
@@ -149,39 +149,39 @@ func runTerraformLifecycle(cmd *cobra.Command, vars []*tfexec.VarOption, cfg lif
 			for {
 				v := bootstrap.StringPrompt("(y/n)", "")
 				if v == "n" || v == "no" {
-					progress.Println("Aborting...")
+					_, _ = progress.Println("Aborting...")
 					return nil
 				}
 				if v == "y" || v == "yes" {
 					break
 				}
-				progress.Println("Only \"y\" or \"n\" inputs are accepted.")
+				_, _ = progress.Println("Only \"y\" or \"n\" inputs are accepted.")
 			}
 		}
 
 		defer func() {
-			progress.Printf("Copying state file back to %q\n", localStateFilePath)
+			_, _ = progress.Printf("Copying state file back to %q\n", localStateFilePath)
 			stateFileData, err := os.ReadFile(tmpStateFilePath)
 			if err != nil {
-				failure.Printf("unable to read state file from temporary directory: %v", err)
+				_, _ = failure.Printf("unable to read state file from temporary directory: %v", err)
 				return
 			}
 			if err := os.WriteFile(localStateFilePath, stateFileData, 0600); err != nil {
-				failure.Printf("unable to write state file to %q: %v", localStateFilePath, err)
+				_, _ = failure.Printf("unable to write state file to %q: %v", localStateFilePath, err)
 			}
 		}()
 
 		destroyOpts := make([]tfexec.DestroyOption, len(vars))
 		for i, v := range vars { destroyOpts[i] = v }
-		progress.Println("Running terraform destroy...")
+		_, _ = progress.Println("Running terraform destroy...")
 		if err := tf.Destroy(cmd.Context(), destroyOpts...); err != nil {
 			return fmt.Errorf("unable to run terraform destroy: %w", err)
 		}
-		success.Println(cfg.destroySuccess)
+		_, _ = success.Println(cfg.destroySuccess)
 		return nil
 	}
 
-	progress.Println("Running terraform plan...")
+	_, _ = progress.Println("Running terraform plan...")
 
 	showDetailedPlan := logger.Enabled(cmd.Context(), slog.LevelDebug)
 	if showDetailedPlan {
@@ -214,7 +214,7 @@ func runTerraformLifecycle(cmd *cobra.Command, vars []*tfexec.VarOption, cfg lif
 	}
 
 	if cmd.Flag("dry-run").Value.String() == "true" {
-		progress.Println("Terraform plan complete. Run command without `--dry-run` to apply the changes.")
+		_, _ = progress.Println("Terraform plan complete. Run command without `--dry-run` to apply the changes.")
 		return nil
 	}
 
@@ -223,31 +223,31 @@ func runTerraformLifecycle(cmd *cobra.Command, vars []*tfexec.VarOption, cfg lif
 		for {
 			v := bootstrap.StringPrompt("(y/n)", "")
 			if v == "n" || v == "no" {
-				progress.Println("Aborting...")
+				_, _ = progress.Println("Aborting...")
 				return nil
 			}
 			if v == "y" || v == "yes" {
 				break
 			}
-			progress.Println("Only \"y\" or \"n\" inputs are accepted.")
+			_, _ = progress.Println("Only \"y\" or \"n\" inputs are accepted.")
 		}
 	}
 
 	defer func() {
-		progress.Printf("Copying state file back to %q\n", localStateFilePath)
+		_, _ = progress.Printf("Copying state file back to %q\n", localStateFilePath)
 		stateFileData, err := os.ReadFile(tmpStateFilePath)
 		if err != nil {
-			failure.Printf("unable to read state file from temporary directory: %v", err)
+			_, _ = failure.Printf("unable to read state file from temporary directory: %v", err)
 			return
 		}
 		if err := os.WriteFile(localStateFilePath, stateFileData, 0600); err != nil {
-			failure.Printf("unable to write state file to %q: %v", localStateFilePath, err)
+			_, _ = failure.Printf("unable to write state file to %q: %v", localStateFilePath, err)
 		}
 	}()
 
 	applyOpts := make([]tfexec.ApplyOption, len(vars))
 	for i, v := range vars { applyOpts[i] = v }
-	progress.Println("Running terraform apply...")
+	_, _ = progress.Println("Running terraform apply...")
 	if err := tf.Apply(cmd.Context(), applyOpts...); err != nil {
 		return fmt.Errorf("unable to run terraform apply: %w", err)
 	}
@@ -286,9 +286,9 @@ It will:
 			cmd.SetContext(log.WithLogger(cmd.Context(), logger))
 			logger.Debug("Starting Private Networking Setup", "command", cmd.Name())
 
-			header.Println("══════════════════════════════════════════════════")
-			header.Println("          VPC Endpoint Service Management         ")
-			header.Println("══════════════════════════════════════════════════")
+			_, _ = header.Println("══════════════════════════════════════════════════")
+			_, _ = header.Println("          VPC Endpoint Service Management         ")
+			_, _ = header.Println("══════════════════════════════════════════════════")
 
 			destroyMode := cmd.Flag("destroy").Value.String() == "true"
 			bigPeerName := bootstrap.FlagOrPrompt(cmd.Flags().Lookup("big-peer-name"), "Enter the Big Peer name", "")
@@ -345,9 +345,9 @@ It will:
 				destroySuccess:  "\n✅ Private networking infrastructure successfully destroyed!",
 				showOutputsFn:   showOutputs,
 				afterApplyFn: func(success *color.Color) {
-					success.Println("\n══════════════════════════════════════════════════")
-					success.Println("          Domain Verification Required            ")
-					success.Println("══════════════════════════════════════════════════")
+					_, _ = success.Println("\n══════════════════════════════════════════════════")
+					_, _ = success.Println("          Domain Verification Required            ")
+					_, _ = success.Println("══════════════════════════════════════════════════")
 					color.White("\nPlease provide the domain verification details shown above to Ditto.")
 					color.White("Ditto will set up the required TXT record to verify domain ownership.\n")
 				},
@@ -381,16 +381,16 @@ func showOutputs(ctx context.Context, tf TerraformExecutor, success *color.Color
 		return fmt.Errorf("unable to get terraform output: %w", err)
 	}
 
-	success.Println("\n══════════════════════════════════════════════════")
-	success.Println("            Private Networking Setup Complete      ")
-	success.Println("══════════════════════════════════════════════════")
+	_, _ = success.Println("\n══════════════════════════════════════════════════")
+	_, _ = success.Println("            Private Networking Setup Complete      ")
+	_, _ = success.Println("══════════════════════════════════════════════════")
 
 	if domainVerif, ok := output["domain_verification"]; ok {
-		success.Println("\nDomain Verification Details:")
-		success.Println("──────────────────────────────────────────────────")
+		_, _ = success.Println("\nDomain Verification Details:")
+		_, _ = success.Println("──────────────────────────────────────────────────")
 		raw, _ := domainVerif.Value.MarshalJSON()
 		color.Yellow("%s", string(raw))
-		success.Println("──────────────────────────────────────────────────")
+		_, _ = success.Println("──────────────────────────────────────────────────")
 	}
 
 	color.Green("\nAll Terraform Outputs:")
@@ -409,16 +409,16 @@ func showEndpointOutputs(ctx context.Context, tf TerraformExecutor, success *col
 		return fmt.Errorf("unable to get terraform output: %w", err)
 	}
 
-	success.Println("\n══════════════════════════════════════════════════")
-	success.Println("            VPC Endpoint Setup Complete            ")
-	success.Println("══════════════════════════════════════════════════")
+	_, _ = success.Println("\n══════════════════════════════════════════════════")
+	_, _ = success.Println("            VPC Endpoint Setup Complete            ")
+	_, _ = success.Println("══════════════════════════════════════════════════")
 
 	if endpointOutput, ok := output["endpoint"]; ok {
-		success.Println("\nVPC Endpoint Details:")
-		success.Println("──────────────────────────────────────────────────")
+		_, _ = success.Println("\nVPC Endpoint Details:")
+		_, _ = success.Println("──────────────────────────────────────────────────")
 		raw, _ := endpointOutput.Value.MarshalJSON()
 		color.Cyan("%s", string(raw))
-		success.Println("──────────────────────────────────────────────────")
+		_, _ = success.Println("──────────────────────────────────────────────────")
 	}
 
 	color.Green("\nAll Terraform Outputs:")
@@ -455,9 +455,9 @@ It will:
 			cmd.SetContext(log.WithLogger(cmd.Context(), logger))
 			logger.Debug("Starting VPC Endpoint Setup", "command", cmd.Name())
 
-			header.Println("══════════════════════════════════════════════════")
-			header.Println("            VPC Endpoint Management                ")
-			header.Println("══════════════════════════════════════════════════")
+			_, _ = header.Println("══════════════════════════════════════════════════")
+			_, _ = header.Println("            VPC Endpoint Management                ")
+			_, _ = header.Println("══════════════════════════════════════════════════")
 
 			destroyMode := cmd.Flag("destroy").Value.String() == "true"
 			awsProfile := cmd.Flags().Lookup("aws-profile").Value.String()
