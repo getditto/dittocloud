@@ -35,7 +35,7 @@ go test ./...
   - Provider-agnostic orchestration
   - `aws.go`: AWS-specific variable prompting and flag definitions
   - `gcp.go`: GCP-specific variable prompting and flag definitions
-  - `install.go`: Terraform version management (downloads v1.11.4 if needed, caches in `~/.cache/dittocloud/terraform/`)
+  - `install.go`: Terraform version management (downloads v1.15.2 if needed, caches in `~/.cache/dittocloud/terraform/`)
 - `privatenetworking/`: Private networking commands for Big Peer PrivateLink access (temporary stopgap solution)
   - `private_networking.go`: Parent command, endpoint-service, and endpoint commands
 
@@ -71,7 +71,7 @@ go test ./...
 
 **Interactive Prompts**: The `FlagOrPrompt()` helper checks if a flag was set; if not, prompts the user interactively
 
-**Terraform Version**: Tool requires Terraform 1.11.4 (checks system, downloads if needed, caches for reuse)
+**Terraform Version**: Tool requires Terraform 1.15.2 (checks system, downloads if needed, caches for reuse). Must match the version pinned in `.mise/config.toml` and `cmd/internal/bootstrap/install.go`.
 
 ## GCP-Specific Details
 
