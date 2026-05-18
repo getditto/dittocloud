@@ -470,9 +470,11 @@ It will:
 					tfexec.Var("vpc_id=vpc-placeholder"),
 					tfexec.Var("subnet_ids=[\"subnet-placeholder\"]"),
 					tfexec.Var("private_dns_name=placeholder.example.com"),
-					tfexec.Var("profile=" + awsProfile),
-					tfexec.Var("region=" + awsRegion),
-				}
+				tfexec.Var("profile=" + awsProfile),
+			}
+			if awsRegion != "" {
+				vars = append(vars, tfexec.Var("region="+awsRegion))
+			}
 			} else {
 				serviceName := bootstrap.FlagOrPrompt(cmd.Flags().Lookup("service-name"), "Enter the VPC Endpoint Service name (e.g., com.amazonaws.vpce.us-east-2.vpce-svc-xxx)", "")
 				if serviceName == "" {
