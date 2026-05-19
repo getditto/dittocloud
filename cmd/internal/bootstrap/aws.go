@@ -47,7 +47,7 @@ func promptAWSValues(flags *pflag.FlagSet) ([]*tfexec.VarOption, error) {
 	)
 
 	// Ask for optional
-	optional.Println("confirm parameters")
+	_, _ = optional.Println("confirm parameters")
 
 	if region := StringPrompt(
 		"Enter the AWS region",

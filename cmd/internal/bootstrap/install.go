@@ -66,9 +66,10 @@ type terraformVersionInfo struct {
 	TerraformVersion string `json:"terraform_version"`
 }
 
-const RequiredTerraformVersion = "1.11.4"
+// This must be the same as set in .mise/config.toml, otherwise the CI will fail looking for the Terraform
+const RequiredTerraformVersion = "1.15.2"
 
-func getTerraform(ctx context.Context, shouldDownload bool) (string, error) {
+func GetTerraform(ctx context.Context, shouldDownload bool) (string, error) {
 	if !shouldDownload {
 		if execPath, found := findExistingTerraform(ctx, RequiredTerraformVersion); found {
 			return execPath, nil
@@ -79,7 +80,7 @@ func getTerraform(ctx context.Context, shouldDownload bool) (string, error) {
 	if shouldDownload {
 		// Inform the user that terraform is being downloaded
 		progress := color.New(color.FgMagenta)
-		progress.Printf("Terraform not found or incompatible version detected. Downloading Terraform %s\n", RequiredTerraformVersion)
+		_, _ = progress.Printf("Terraform not found or incompatible version detected. Downloading Terraform %s\n", RequiredTerraformVersion)
 		return downloadAndCacheTerraform(ctx, RequiredTerraformVersion)
 	}
 

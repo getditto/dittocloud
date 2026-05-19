@@ -25,7 +25,7 @@ func TestGetTerraform(t *testing.T) {
 		cleanEnv := setupCleanEnvironment(t)
 		defer cleanEnv.cleanup()
 
-		execPath, err := getTerraform(ctx, true)
+		execPath, err := GetTerraform(ctx, true)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -56,7 +56,7 @@ func TestGetTerraform(t *testing.T) {
 			t.Fatalf("Failed to download and cache terraform: %v", err)
 		}
 
-		execPath, err := getTerraform(ctx, false)
+		execPath, err := GetTerraform(ctx, false)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -84,7 +84,7 @@ func TestGetTerraform(t *testing.T) {
 		systemTerraformSetup := installSystemTerraform(t, RequiredTerraformVersion)
 		defer systemTerraformSetup.cleanup()
 
-		execPath, err := getTerraform(ctx, false)
+		execPath, err := GetTerraform(ctx, false)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -114,7 +114,7 @@ func TestGetTerraform(t *testing.T) {
 		cleanEnv := setupCleanEnvironment(t)
 		defer cleanEnv.cleanup()
 
-		execPath, err := getTerraform(ctx, false)
+		execPath, err := GetTerraform(ctx, false)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -142,7 +142,7 @@ func TestGetTerraform(t *testing.T) {
 		systemTerraformSetup := installSystemTerraform(t, "1.10.0") // incompatible version
 		defer systemTerraformSetup.cleanup()
 
-		execPath, err := getTerraform(ctx, false)
+		execPath, err := GetTerraform(ctx, false)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -174,18 +174,22 @@ func setupCleanEnvironment(t *testing.T) *cleanEnvironment {
 	// Save original PATH
 	originalPath := os.Getenv("PATH")
 
-	os.Setenv("PATH", "")
+	if err := os.Setenv("PATH", ""); err != nil {
+		t.Fatalf("failed to clear PATH: %v", err)
+	}
 
 	// Create isolated cache directory for this test - only works for posix flavors that honor XDG_CACHE_HOME
 	tempCacheDir := t.TempDir()
-	os.Setenv("XDG_CACHE_HOME", tempCacheDir)
+	if err := os.Setenv("XDG_CACHE_HOME", tempCacheDir); err != nil {
+		t.Fatalf("failed to set XDG_CACHE_HOME: %v", err)
+	}
 
 	return &cleanEnvironment{
 		originalPath: originalPath,
 		cacheDir:     tempCacheDir,
 		cleanup: func() {
-			os.Setenv("PATH", originalPath)
-			os.Unsetenv("XDG_CACHE_HOME")
+			_ = os.Setenv("PATH", originalPath)
+			_ = os.Unsetenv("XDG_CACHE_HOME")
 		},
 	}
 }
@@ -228,12 +232,12 @@ func installSystemTerraform(t *testing.T, terraformVersion string) *systemTerraf
 	// Add temp dir to front of current PATH
 	currentPath := os.Getenv("PATH")
 	newPath := tempDir + string(os.PathListSeparator) + currentPath
-	os.Setenv("PATH", newPath)
+	_ = os.Setenv("PATH", newPath)
 
 	return &systemTerraformSetup{
 		dir: tempDir,
 		cleanup: func() {
-			os.Setenv("PATH", currentPath)
+			_ = os.Setenv("PATH", currentPath)
 		},
 	}
 }

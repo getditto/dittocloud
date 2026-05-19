@@ -15,6 +15,7 @@ For more information, see: https://docs.ditto.live/cloud/public-cloud/overview
 - Cross-account IAM roles for Ditto services
 - Security groups and network ACLs
 - IAM permissions for cluster management
+- (Optional) Private networking via AWS PrivateLink for secure Big Peer access
 
 **GCP:**
 - VPC network (subnets are created by CAPG during cluster deployment)
@@ -99,6 +100,64 @@ dittocloud bootstrap gcp \
   --project-id my-project-id \
   --region us-central1
 ```
+
+## Private Networking (AWS PrivateLink)
+
+> **Note**: This is a temporary stopgap solution. Future versions of Valet will natively manage private networking.
+
+The private networking feature enables secure, private access to Big Peer deployments via AWS PrivateLink, eliminating exposure to the public internet.
+
+### Setup Flow
+
+1. **Bootstrap your AWS account** (if not already done):
+   ```bash
+   dittocloud bootstrap aws --aws-profile my-profile --aws-region us-east-2
+   ```
+
+2. **Deploy Big Peer** via Valet control plane (done by Ditto)
+
+3. **Create VPC Endpoint Service** in your BYOC account:
+   ```bash
+   dittocloud private-networking endpoint-service \
+     --big-peer-name my-big-peer \
+     --private-dns-name private.example.com \
+     --allowed-principal arn:aws:iam::123456789012:root \
+     --aws-region us-east-2
+   ```
+
+   This will output domain verification details. Provide these to Ditto to set up the required TXT records.
+
+4. **Create VPC Endpoint** in your customer account (where you want to access the Big Peer):
+   ```bash
+   dittocloud private-networking endpoint \
+     --service-name com.amazonaws.vpce.us-east-2.vpce-svc-xxx \
+     --vpc-id vpc-customer123 \
+     --subnet-ids subnet-a,subnet-b,subnet-c \
+     --private-dns-name private.example.com \
+     --aws-region us-east-2
+   ```
+
+### Teardown
+
+To remove private networking:
+
+```bash
+# 1. Destroy the customer VPC endpoint
+dittocloud private-networking endpoint --destroy --aws-region us-east-2
+
+# 2. Destroy the endpoint service
+dittocloud private-networking endpoint-service --destroy \
+  --big-peer-name my-big-peer \
+  --aws-region us-east-2
+```
+
+### State Files
+
+Private networking uses separate state files:
+- `terraform-endpoint-service.tfstate` - VPC Endpoint Service
+- `terraform-endpoint.tfstate` - Customer VPC Endpoint
+
+Keep these files safe alongside your bootstrap state file.
 
 ## Output
 

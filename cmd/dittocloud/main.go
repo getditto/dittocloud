@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/getditto/dittocloud/cmd/internal/bootstrap"
+	"github.com/getditto/dittocloud/cmd/internal/privatenetworking"
 )
 
 func RootCommand() *cobra.Command {
@@ -17,6 +18,7 @@ func RootCommand() *cobra.Command {
 	}
 	cmd.AddCommand(
 		bootstrap.BootstrapCmd(),
+		privatenetworking.PrivateNetworkingCmd(),
 	)
 
 	return cmd
