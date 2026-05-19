@@ -172,7 +172,9 @@ func runTerraformLifecycle(cmd *cobra.Command, vars []*tfexec.VarOption, cfg lif
 		}()
 
 		destroyOpts := make([]tfexec.DestroyOption, len(vars))
-		for i, v := range vars { destroyOpts[i] = v }
+		for i, v := range vars {
+			destroyOpts[i] = v
+		}
 		_, _ = progress.Println("Running terraform destroy...")
 		if err := tf.Destroy(cmd.Context(), destroyOpts...); err != nil {
 			return fmt.Errorf("unable to run terraform destroy: %w", err)
@@ -194,7 +196,9 @@ func runTerraformLifecycle(cmd *cobra.Command, vars []*tfexec.VarOption, cfg lif
 	}
 
 	planOpts := make([]tfexec.PlanOption, len(vars))
-	for i, v := range vars { planOpts[i] = v }
+	for i, v := range vars {
+		planOpts[i] = v
+	}
 	planChanged, err := tf.Plan(cmd.Context(), planOpts...)
 	if err != nil {
 		return fmt.Errorf("unable to run terraform plan: %w", err)
@@ -246,7 +250,9 @@ func runTerraformLifecycle(cmd *cobra.Command, vars []*tfexec.VarOption, cfg lif
 	}()
 
 	applyOpts := make([]tfexec.ApplyOption, len(vars))
-	for i, v := range vars { applyOpts[i] = v }
+	for i, v := range vars {
+		applyOpts[i] = v
+	}
 	_, _ = progress.Println("Running terraform apply...")
 	if err := tf.Apply(cmd.Context(), applyOpts...); err != nil {
 		return fmt.Errorf("unable to run terraform apply: %w", err)
@@ -373,7 +379,6 @@ It will:
 	return cmd
 }
 
-
 // showOutputs pretty-prints TF outputs for the endpoint-service command.
 func showOutputs(ctx context.Context, tf TerraformExecutor, success *color.Color, failure *color.Color) error {
 	output, err := tf.Output(ctx)
@@ -470,11 +475,11 @@ It will:
 					tfexec.Var("vpc_id=vpc-placeholder"),
 					tfexec.Var("subnet_ids=[\"subnet-placeholder\"]"),
 					tfexec.Var("private_dns_name=placeholder.example.com"),
-				tfexec.Var("profile=" + awsProfile),
-			}
-			if awsRegion != "" {
-				vars = append(vars, tfexec.Var("region="+awsRegion))
-			}
+					tfexec.Var("profile=" + awsProfile),
+				}
+				if awsRegion != "" {
+					vars = append(vars, tfexec.Var("region="+awsRegion))
+				}
 			} else {
 				serviceName := bootstrap.FlagOrPrompt(cmd.Flags().Lookup("service-name"), "Enter the VPC Endpoint Service name (e.g., com.amazonaws.vpce.us-east-2.vpce-svc-xxx)", "")
 				if serviceName == "" {
