@@ -14,6 +14,4 @@ module "this" {
   iam_trusted_operations_condition_arns = [
     "arn:aws:iam::851725645787:role/aws-reserved/sso.amazonaws.com/*"
   ]
-
-  unrestricted = var.unrestricted
 }

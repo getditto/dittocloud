@@ -192,7 +192,7 @@ func TestBootstrap(t *testing.T) {
 			"aws",
 			"--aws-profile=test-profile",
 			`--tf-var=controller_trusted_role_arns=["arn:example1", "arn:example2"]`,
-			"--tf-var=unrestricted=true",
+			"--tf-var=create_vpc=false",
 			"--state=/tmp/test.tfstate",
 			"--dry-run",
 		})
@@ -203,8 +203,8 @@ func TestBootstrap(t *testing.T) {
 
 		assertCallCounts(t, mock, 1, 1, 0)
 
-		if got := mock.PlanVars["unrestricted"]; got != "true" {
-			t.Errorf("unrestricted: got %q, want %q", got, "true")
+		if got := mock.PlanVars["create_vpc"]; got != "false" {
+			t.Errorf("create_vpc: got %q, want %q", got, "false")
 		}
 
 		if got := mock.PlanVars["controller_trusted_role_arns"]; got != `["arn:example1", "arn:example2"]` {

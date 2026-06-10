@@ -25,10 +25,3 @@ are locked down to only allow the following actions:
 "secretsmanager:DeleteSecret",
 "secretsmanager:PutSecretValue"
 ```
-
-## Unrestricted Mode
-
-Variable to determine if the IAM role should be unrestricted. Warning this will allow Ditto to create IAM roles with any 
-permissions and with no boundaries.
-
-This variable is intended to be used internally for testing purposes only. It is defaulted to `false`.
