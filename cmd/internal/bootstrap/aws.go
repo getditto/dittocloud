@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/fatih/color"
 	"github.com/hashicorp/terraform-exec/tfexec"
@@ -17,6 +18,12 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 		Short: "Bootstrap AWS",
 		Long:  "Bootstrap AWS",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().Changed("cluster-name") {
+				stateFile := cmd.Flag("state").Value.String()
+				if _, err := os.Stat(stateFile); os.IsNotExist(err) {
+					return fmt.Errorf("--cluster-name requires an existing deployment; no state file found at %q\n\nRun bootstrap without --cluster-name first to create the initial deployment", stateFile)
+				}
+			}
 			promptedAwsVars, err := promptAWSValues(cmd.Flags())
 			if err != nil {
 				return fmt.Errorf("unable to prompt for values: %w", err)
@@ -33,6 +40,8 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 	cmd.Flags().String("aws-vpc-cidr", "10.210.0.0/16", "AWS VPC CIDR block to use")
 	cmd.Flags().StringArray("controller-trusted-role-arns", []string{}, "AWS IAM role ARNs that can assume the CAPA controller role (can be specified multiple times)")
 	cmd.Flags().StringArray("iam-trusted-role-arns", []string{}, "AWS IAM role ARNs that can assume the IAM trust editor role (can be specified multiple times)")
+	cmd.Flags().Bool("customer-managed-vpc", false, "Set when the customer provides their own VPC; omits VPC lifecycle permissions from the CAPA controller role")
+	cmd.Flags().String("cluster-name", "", "Tighten IAM conditions to a specific cluster name; requires an existing state file (re-runs only)")
 
 	return cmd
 }
@@ -96,6 +105,22 @@ func promptAWSValues(flags *pflag.FlagSet) ([]*tfexec.VarOption, error) {
 			return nil, fmt.Errorf("unable to marshal iam-trusted-role-arns: %w", err)
 		}
 		vars = append(vars, tfexec.Var("iam_trusted_role_arns="+string(jsonStr)))
+	}
+
+	if flags.Changed("customer-managed-vpc") {
+		customerManagedVPC, err := flags.GetBool("customer-managed-vpc")
+		if err != nil {
+			return nil, fmt.Errorf("unable to get customer-managed-vpc: %w", err)
+		}
+		vars = append(vars, tfexec.Var(fmt.Sprintf("customer_managed_vpc=%t", customerManagedVPC)))
+	}
+
+	if flags.Changed("cluster-name") {
+		clusterName, err := flags.GetString("cluster-name")
+		if err != nil {
+			return nil, fmt.Errorf("unable to get cluster-name: %w", err)
+		}
+		vars = append(vars, tfexec.Var("cluster_name="+clusterName))
 	}
 
 	return vars, nil

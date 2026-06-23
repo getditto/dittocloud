@@ -85,7 +85,21 @@ go test ./...
 
 **Cross-Account IAM**: The AWS module creates IAM roles that can be assumed by Ditto services running in a different AWS account (via trusted role ARNs).
 
-**VPC Module**: Creates a VPC with subnets across multiple availability zones (requires region with at least 3 AZs).
+**VPC Module**: Creates a VPC with subnets across multiple availability zones (requires region with at least 3 AZs). Omitted when `--customer-managed-vpc` is passed.
+
+**CAPA Controller Policy Split**: The CAPA controller role is granted permissions via two separate IAM policies. The base policy (`ditto-capa-controller-policy`) is always attached. The VPC lifecycle policy (`ditto-capa-controller-vpc-lifecycle-policy`) is only attached when `customer_managed_vpc = false`.
+
+**Two-Phase IAM Tightening**: The base policy ships with broad `ditto.live/managed_by = terraform` tag conditions (phase 1). A second run with `--cluster-name` switches to cluster-specific `kubernetes.io/cluster/<name>` and `elbv2.k8s.aws/cluster` conditions (phase 2). The second run requires an existing state file — the CLI enforces this with an early error before any Terraform runs.
+
+**AWS CLI Flags** (`bootstrap aws`):
+- `--aws-profile` — AWS profile
+- `--aws-region` — AWS region (default `us-east-1`)
+- `--aws-vpc-name` — VPC name (default `ditto`)
+- `--aws-vpc-cidr` — VPC CIDR block (default `10.210.0.0/16`)
+- `--controller-trusted-role-arns` — override CAPA controller trusted ARNs
+- `--iam-trusted-role-arns` — override trust editor trusted ARNs
+- `--customer-managed-vpc` — omit VPC creation and VPC lifecycle IAM permissions
+- `--cluster-name` — phase-2 lock-down; requires existing state file
 
 ## Testing
 

@@ -63,3 +63,15 @@ variable "iam_trusted_operations_condition_arns" {
     "arn:aws:iam::851725645787:role/aws-reserved/sso.amazonaws.com/*"
   ]
 }
+
+variable "customer_managed_vpc" {
+  type        = bool
+  description = "Whether the customer provides their own VPC. When true, the VPC lifecycle policy is not attached to the CAPA controller role."
+  default     = false
+}
+
+variable "cluster_name" {
+  type        = string
+  description = "When set, tightens CAPA controller IAM conditions to this specific cluster name. Requires an existing state file — use only on re-runs after the initial deployment."
+  default     = null
+}

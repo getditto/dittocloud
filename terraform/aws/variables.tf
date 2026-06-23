@@ -113,3 +113,15 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+variable "customer_managed_vpc" {
+  type        = bool
+  description = "Whether the customer provides their own VPC. When true, VPC lifecycle permissions (create/delete VPC, subnets, IGW, NAT gateways, etc.) are not granted to the CAPA controller."
+  default     = false
+}
+
+variable "cluster_name" {
+  type        = string
+  description = "When set, tightens CAPA controller IAM conditions to this specific cluster name. Requires an existing state file — use only on re-runs after the initial deployment."
+  default     = null
+}

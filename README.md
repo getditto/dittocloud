@@ -11,10 +11,10 @@ For more information, see: https://docs.ditto.live/cloud/public-cloud/overview
 ### What it creates:
 
 **AWS:**
-- VPC with proper networking configuration
+- VPC with proper networking configuration (skipped when customer provides their own VPC)
 - Cross-account IAM roles for Ditto services
 - Security groups and network ACLs
-- IAM permissions for cluster management
+- CAPA controller IAM policy scoped by Ditto-managed resource tags (tightenable to a specific cluster name on re-runs)
 - (Optional) Private networking via AWS PrivateLink for secure Big Peer access
 
 **GCP:**
@@ -88,6 +88,40 @@ dittocloud bootstrap aws \
   --aws-vpc-name ditto-vpc \
   --aws-vpc-cidr 10.0.0.0/16
 ```
+
+#### Customer-Managed VPC
+
+If your organisation provides its own VPC rather than letting Ditto create one, pass `--customer-managed-vpc`. This omits VPC lifecycle permissions (create/delete VPC, subnets, internet gateways, NAT gateways) from the CAPA controller IAM role:
+
+```bash
+dittocloud bootstrap aws \
+  --aws-profile my-profile \
+  --aws-region us-west-2 \
+  --customer-managed-vpc
+```
+
+#### Phase-2 IAM Lock-Down (Optional)
+
+After the initial bootstrap and once Ditto has provisioned your cluster, you can re-run with `--cluster-name` to tighten the CAPA controller IAM policy to that specific cluster. This changes tag-based conditions from the generic `ditto.live/managed_by` tag to cluster-specific `kubernetes.io/cluster/<name>` and `elbv2.k8s.aws/cluster` tags, so the controller can only affect resources belonging to your cluster.
+
+**Requirements:**
+- The initial bootstrap must have been run first — `--cluster-name` requires an existing state file.
+- Use the same working directory (or `--state` path) as the initial run.
+
+```bash
+# First run — creates the deployment with broad tag-based permissions
+dittocloud bootstrap aws \
+  --aws-profile my-profile \
+  --aws-region us-west-2
+
+# Second run — lock down to a specific cluster (cluster name provided by Ditto)
+dittocloud bootstrap aws \
+  --aws-profile my-profile \
+  --aws-region us-west-2 \
+  --cluster-name my-cluster-name
+```
+
+The second run is optional. Customers who do not re-run retain the initial broad permissions; both configurations are fully supported.
 
 ### Bootstrap GCP
 

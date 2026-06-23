@@ -17,7 +17,8 @@ module "cross_account_iam" {
   iam_trusted_role_arns                 = var.iam_trusted_role_arns
   iam_trusted_operations_principal_arns = var.iam_trusted_operations_principal_arns
   iam_trusted_operations_condition_arns = var.iam_trusted_operations_condition_arns
-  enable_eks                            = var.enable_eks
+  customer_managed_vpc                  = var.customer_managed_vpc
+  cluster_name                          = var.cluster_name
 }
 
 data "aws_caller_identity" "current" {}
