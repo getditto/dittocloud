@@ -16,26 +16,8 @@
       "Sid": "EC2Reads",
       "Effect": "Allow",
       "Action": [
-        "ec2:DescribeAccountAttributes",
-        "ec2:DescribeAddresses",
-        "ec2:DescribeAvailabilityZones",
-        "ec2:DescribeCoipPools",
-        "ec2:DescribeImages",
-        "ec2:DescribeInstances",
-        "ec2:DescribeInstanceTypes",
-        "ec2:DescribeInstanceTypeOfferings",
-        "ec2:DescribeInternetGateways",
-        "ec2:DescribeLaunchTemplates",
-        "ec2:DescribeLaunchTemplateVersions",
-        "ec2:DescribeNetworkInterfaces",
-        "ec2:DescribeSecurityGroups",
-        "ec2:DescribeSpotPriceHistory",
-        "ec2:DescribeSubnets",
-        "ec2:DescribeTags",
-        "ec2:DescribeVpcPeeringConnections",
-        "ec2:DescribeVpcs",
-        "ec2:GetCoipPoolUsage",
-        "ec2:GetSecurityGroupsForVpc"
+        "ec2:Describe*",
+        "ec2:Get*"
       ],
       "Resource": "*"
     },
@@ -54,7 +36,7 @@
         "StringEquals": {
           "ec2:Vpc": "${vpc_arn}"
         }
-      }%{~ endif %}
+      }%{~ endif ~}
     },
     {
       "Sid": "EC2SecurityGroupCreate",
@@ -67,7 +49,7 @@
         "StringEquals": {
           "ec2:Vpc": "${vpc_arn}"
         }
-      }%{~ endif %}
+      }%{~ endif ~}
     },
     {
       "Sid": "EC2SecurityGroupMutationsDittoProject",
@@ -190,19 +172,7 @@
       "Sid": "ELBReads",
       "Effect": "Allow",
       "Action": [
-        "elasticloadbalancing:DescribeCapacityReservation",
-        "elasticloadbalancing:DescribeListenerAttributes",
-        "elasticloadbalancing:DescribeListenerCertificates",
-        "elasticloadbalancing:DescribeListeners",
-        "elasticloadbalancing:DescribeLoadBalancerAttributes",
-        "elasticloadbalancing:DescribeLoadBalancers",
-        "elasticloadbalancing:DescribeRules",
-        "elasticloadbalancing:DescribeSSLPolicies",
-        "elasticloadbalancing:DescribeTags",
-        "elasticloadbalancing:DescribeTargetGroupAttributes",
-        "elasticloadbalancing:DescribeTargetGroups",
-        "elasticloadbalancing:DescribeTargetHealth",
-        "elasticloadbalancing:DescribeTrustStores"
+        "elasticloadbalancing:Describe*"
       ],
       "Resource": "*"
     },

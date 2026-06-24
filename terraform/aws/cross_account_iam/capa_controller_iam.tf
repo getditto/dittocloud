@@ -22,6 +22,7 @@ module "capa_controller_role" {
   policies = merge(
     {
       capa-controller-base = aws_iam_policy.capa_controller_base.arn
+      capa-controller-elb  = aws_iam_policy.capa_controller_elb.arn
     },
     !var.customer_managed_vpc ? {
       capa-controller-vpc-lifecycle = aws_iam_policy.capa_controller_vpc_lifecycle[0].arn
@@ -99,135 +100,6 @@ resource "aws_iam_policy" "capa_controller_base" {
             ]
           }
         }
-      },
-      # ELB reads — Describe* does not support resource-level permissions
-      {
-        Effect = "Allow"
-        Action = [
-          "elasticloadbalancing:DescribeListenerAttributes",
-          "elasticloadbalancing:DescribeListenerCertificates",
-          "elasticloadbalancing:DescribeListeners",
-          "elasticloadbalancing:DescribeLoadBalancerAttributes",
-          "elasticloadbalancing:DescribeLoadBalancers",
-          "elasticloadbalancing:DescribeRules",
-          "elasticloadbalancing:DescribeSSLPolicies",
-          "elasticloadbalancing:DescribeTags",
-          "elasticloadbalancing:DescribeTargetGroupAttributes",
-          "elasticloadbalancing:DescribeTargetGroups",
-          "elasticloadbalancing:DescribeTargetHealth",
-        ]
-        Resource = ["*"]
-      },
-      # ELB v2 LB + TG creates — require elbv2.k8s.aws/cluster tag at request time
-      {
-        Effect = "Allow"
-        Action = [
-          "elasticloadbalancing:CreateLoadBalancer",
-          "elasticloadbalancing:CreateTargetGroup",
-        ]
-        Resource  = ["*"]
-        Condition = local.elb_create_cond
-      },
-      # ELB listener + rule creates — listeners don't carry the cluster tag so
-      # tag conditions cannot be applied; scoped by association with tagged LBs above
-      {
-        Effect = "Allow"
-        Action = [
-          "elasticloadbalancing:CreateListener",
-          "elasticloadbalancing:CreateRule",
-        ]
-        Resource = ["*"]
-      },
-      # ELB v2 LB + TG mutations — scoped by ARN type + cluster tag on resource
-      {
-        Effect = "Allow"
-        Action = [
-          "elasticloadbalancing:DeleteLoadBalancer",
-          "elasticloadbalancing:ModifyLoadBalancerAttributes",
-          "elasticloadbalancing:SetIpAddressType",
-          "elasticloadbalancing:SetSecurityGroups",
-          "elasticloadbalancing:SetSubnets",
-          "elasticloadbalancing:DeleteTargetGroup",
-          "elasticloadbalancing:ModifyTargetGroup",
-          "elasticloadbalancing:ModifyTargetGroupAttributes",
-        ]
-        Resource = [
-          "arn:aws:elasticloadbalancing:*:*:loadbalancer/app/*/*",
-          "arn:aws:elasticloadbalancing:*:*:loadbalancer/net/*/*",
-          "arn:aws:elasticloadbalancing:*:*:targetgroup/*/*",
-        ]
-        Condition = local.elb_resource_cond
-      },
-      # ELB listener + rule mutations — scoped by ARN type only; listeners do not
-      # carry the elbv2.k8s.aws/cluster tag so resource tag conditions cannot be applied
-      {
-        Effect = "Allow"
-        Action = [
-          "elasticloadbalancing:AddListenerCertificates",
-          "elasticloadbalancing:DeleteListener",
-          "elasticloadbalancing:DeleteRule",
-          "elasticloadbalancing:ModifyListener",
-          "elasticloadbalancing:ModifyListenerAttributes",
-          "elasticloadbalancing:ModifyRule",
-          "elasticloadbalancing:RemoveListenerCertificates",
-        ]
-        Resource = [
-          "arn:aws:elasticloadbalancing:*:*:listener/app/*/*/*",
-          "arn:aws:elasticloadbalancing:*:*:listener/net/*/*/*",
-          "arn:aws:elasticloadbalancing:*:*:listener-rule/app/*/*/*",
-          "arn:aws:elasticloadbalancing:*:*:listener-rule/net/*/*/*",
-        ]
-      },
-      # ELB target registration — scoped by TG ARN + cluster tag on resource
-      {
-        Effect = "Allow"
-        Action = [
-          "elasticloadbalancing:DeregisterTargets",
-          "elasticloadbalancing:RegisterTargets",
-        ]
-        Resource  = ["arn:aws:elasticloadbalancing:*:*:targetgroup/*/*"]
-        Condition = local.elb_resource_cond
-      },
-      # ELB tag operations on LBs/TGs at creation time
-      {
-        Effect = "Allow"
-        Action = [
-          "elasticloadbalancing:AddTags",
-        ]
-        Resource = [
-          "arn:aws:elasticloadbalancing:*:*:loadbalancer/app/*/*",
-          "arn:aws:elasticloadbalancing:*:*:loadbalancer/net/*/*",
-          "arn:aws:elasticloadbalancing:*:*:targetgroup/*/*",
-        ]
-        Condition = local.elb_add_tags_create_cond
-      },
-      # ELB tag mutations on existing LBs/TGs — require cluster tag on resource
-      {
-        Effect = "Allow"
-        Action = [
-          "elasticloadbalancing:AddTags",
-          "elasticloadbalancing:RemoveTags",
-        ]
-        Resource = [
-          "arn:aws:elasticloadbalancing:*:*:loadbalancer/app/*/*",
-          "arn:aws:elasticloadbalancing:*:*:loadbalancer/net/*/*",
-          "arn:aws:elasticloadbalancing:*:*:targetgroup/*/*",
-        ]
-        Condition = local.elb_tag_mutation_cond
-      },
-      # ELB tag mutations on listeners/rules — scoped by ARN type only
-      {
-        Effect = "Allow"
-        Action = [
-          "elasticloadbalancing:AddTags",
-          "elasticloadbalancing:RemoveTags",
-        ]
-        Resource = [
-          "arn:aws:elasticloadbalancing:*:*:listener/app/*/*/*",
-          "arn:aws:elasticloadbalancing:*:*:listener/net/*/*/*",
-          "arn:aws:elasticloadbalancing:*:*:listener-rule/app/*/*/*",
-          "arn:aws:elasticloadbalancing:*:*:listener-rule/net/*/*/*",
-        ]
       },
       # Security group rule mutations — phase-2: scoped to cluster-managed SGs
       merge(
@@ -387,6 +259,147 @@ resource "aws_iam_policy" "capa_controller_base" {
         Resource = [
           "arn:aws:s3:::ditto-issuer-*/.well-known/openid-configuration",
           "arn:aws:s3:::ditto-issuer-*/openid/v1/jwks",
+        ]
+      },
+    ]
+  })
+}
+
+# ELB / Load Balancer Controller permissions — always attached alongside capa_controller_base.
+# Split into a separate policy so that base + ELB each stay under the 6144-char AWS limit.
+resource "aws_iam_policy" "capa_controller_elb" {
+  name = "ditto-capa-controller-elb-policy"
+  tags = local.tags
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      # ELB reads — Describe* does not support resource-level permissions
+      {
+        Effect = "Allow"
+        Action = [
+          "elasticloadbalancing:DescribeListenerAttributes",
+          "elasticloadbalancing:DescribeListenerCertificates",
+          "elasticloadbalancing:DescribeListeners",
+          "elasticloadbalancing:DescribeLoadBalancerAttributes",
+          "elasticloadbalancing:DescribeLoadBalancers",
+          "elasticloadbalancing:DescribeRules",
+          "elasticloadbalancing:DescribeSSLPolicies",
+          "elasticloadbalancing:DescribeTags",
+          "elasticloadbalancing:DescribeTargetGroupAttributes",
+          "elasticloadbalancing:DescribeTargetGroups",
+          "elasticloadbalancing:DescribeTargetHealth",
+        ]
+        Resource = ["*"]
+      },
+      # ELB v2 LB + TG creates — require elbv2.k8s.aws/cluster tag at request time
+      {
+        Effect = "Allow"
+        Action = [
+          "elasticloadbalancing:CreateLoadBalancer",
+          "elasticloadbalancing:CreateTargetGroup",
+        ]
+        Resource  = ["*"]
+        Condition = local.elb_create_cond
+      },
+      # ELB listener + rule creates — listeners don't carry the cluster tag so
+      # tag conditions cannot be applied; scoped by association with tagged LBs above
+      {
+        Effect = "Allow"
+        Action = [
+          "elasticloadbalancing:CreateListener",
+          "elasticloadbalancing:CreateRule",
+        ]
+        Resource = ["*"]
+      },
+      # ELB v2 LB + TG mutations — scoped by ARN type + cluster tag on resource
+      {
+        Effect = "Allow"
+        Action = [
+          "elasticloadbalancing:DeleteLoadBalancer",
+          "elasticloadbalancing:ModifyLoadBalancerAttributes",
+          "elasticloadbalancing:SetIpAddressType",
+          "elasticloadbalancing:SetSecurityGroups",
+          "elasticloadbalancing:SetSubnets",
+          "elasticloadbalancing:DeleteTargetGroup",
+          "elasticloadbalancing:ModifyTargetGroup",
+          "elasticloadbalancing:ModifyTargetGroupAttributes",
+        ]
+        Resource = [
+          "arn:aws:elasticloadbalancing:*:*:loadbalancer/app/*/*",
+          "arn:aws:elasticloadbalancing:*:*:loadbalancer/net/*/*",
+          "arn:aws:elasticloadbalancing:*:*:targetgroup/*/*",
+        ]
+        Condition = local.elb_resource_cond
+      },
+      # ELB listener + rule mutations — scoped by ARN type only; listeners do not
+      # carry the elbv2.k8s.aws/cluster tag so resource tag conditions cannot be applied
+      {
+        Effect = "Allow"
+        Action = [
+          "elasticloadbalancing:AddListenerCertificates",
+          "elasticloadbalancing:DeleteListener",
+          "elasticloadbalancing:DeleteRule",
+          "elasticloadbalancing:ModifyListener",
+          "elasticloadbalancing:ModifyListenerAttributes",
+          "elasticloadbalancing:ModifyRule",
+          "elasticloadbalancing:RemoveListenerCertificates",
+        ]
+        Resource = [
+          "arn:aws:elasticloadbalancing:*:*:listener/app/*/*/*",
+          "arn:aws:elasticloadbalancing:*:*:listener/net/*/*/*",
+          "arn:aws:elasticloadbalancing:*:*:listener-rule/app/*/*/*",
+          "arn:aws:elasticloadbalancing:*:*:listener-rule/net/*/*/*",
+        ]
+      },
+      # ELB target registration — scoped by TG ARN + cluster tag on resource
+      {
+        Effect = "Allow"
+        Action = [
+          "elasticloadbalancing:DeregisterTargets",
+          "elasticloadbalancing:RegisterTargets",
+        ]
+        Resource  = ["arn:aws:elasticloadbalancing:*:*:targetgroup/*/*"]
+        Condition = local.elb_resource_cond
+      },
+      # ELB tag operations on LBs/TGs at creation time
+      {
+        Effect = "Allow"
+        Action = [
+          "elasticloadbalancing:AddTags",
+        ]
+        Resource = [
+          "arn:aws:elasticloadbalancing:*:*:loadbalancer/app/*/*",
+          "arn:aws:elasticloadbalancing:*:*:loadbalancer/net/*/*",
+          "arn:aws:elasticloadbalancing:*:*:targetgroup/*/*",
+        ]
+        Condition = local.elb_add_tags_create_cond
+      },
+      # ELB tag mutations on existing LBs/TGs — require cluster tag on resource
+      {
+        Effect = "Allow"
+        Action = [
+          "elasticloadbalancing:AddTags",
+          "elasticloadbalancing:RemoveTags",
+        ]
+        Resource = [
+          "arn:aws:elasticloadbalancing:*:*:loadbalancer/app/*/*",
+          "arn:aws:elasticloadbalancing:*:*:loadbalancer/net/*/*",
+          "arn:aws:elasticloadbalancing:*:*:targetgroup/*/*",
+        ]
+        Condition = local.elb_tag_mutation_cond
+      },
+      # ELB tag mutations on listeners/rules — scoped by ARN type only
+      {
+        Effect = "Allow"
+        Action = [
+          "elasticloadbalancing:AddTags",
+          "elasticloadbalancing:RemoveTags",
+        ]
+        Resource = [
+          "arn:aws:elasticloadbalancing:*:*:listener/app/*/*/*",
+          "arn:aws:elasticloadbalancing:*:*:listener/net/*/*/*",
+          "arn:aws:elasticloadbalancing:*:*:listener-rule/app/*/*/*",
+          "arn:aws:elasticloadbalancing:*:*:listener-rule/net/*/*/*",
         ]
       },
     ]

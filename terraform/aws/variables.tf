@@ -125,3 +125,9 @@ variable "cluster_name" {
   description = "When set, tightens CAPA controller IAM conditions to this specific cluster name. Requires an existing state file — use only on re-runs after the initial deployment."
   default     = null
 }
+
+variable "vpc_id" {
+  type        = string
+  description = "When set, adds ec2:Vpc conditions to CAPA EC2 create/mutate operations, confining the controller to this specific VPC."
+  default     = null
+}

@@ -19,6 +19,7 @@ module "cross_account_iam" {
   iam_trusted_operations_condition_arns = var.iam_trusted_operations_condition_arns
   customer_managed_vpc                  = var.customer_managed_vpc
   cluster_name                          = var.cluster_name
+  vpc_id                                = var.vpc_id
 }
 
 data "aws_caller_identity" "current" {}
