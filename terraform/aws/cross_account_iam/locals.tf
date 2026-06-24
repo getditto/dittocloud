@@ -1,30 +1,43 @@
 
 locals {
   tags = {
-    "ditto.live/managed_by" = "terraform"
+    "ditto.live/managed_by" = "dittocloud"
   }
 
   # Phase-2 lock-down: when cluster_name is set, IAM conditions switch from generic
   # Ditto tags to cluster-specific tags so the CAPA controller can only affect
   # resources belonging to this one cluster.
+  # VPC confinement: when vpc_id is set, EC2 conditions also include an ec2:Vpc
+  # constraint so the controller cannot create or modify resources outside that VPC.
   #
-  # jsondecode(jsonencode(...)) coerces the ternary branches to a dynamic type,
-  # which is required when the two branches have different object shapes
-  # (e.g. {Null={...}} vs {StringEquals={...}}).
+  # Both constraints use StringEquals and are merged into a single Condition block —
+  # IAM does not allow duplicate Condition operator keys in one statement.
+
+  # ec2:Vpc StringEquals entries — empty map when vpc_id is not set
+  ec2_vpc_string_equals = var.vpc_id != null ? {
+    "ec2:Vpc" = "arn:aws:ec2:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:vpc/${var.vpc_id}"
+  } : {}
 
   # EC2 creates (RunInstances, CreateSecurityGroup, CreateLaunchTemplate)
-  ec2_create_cond = jsondecode(
-    var.cluster_name != null
-    ? jsonencode({ StringEquals = { "aws:RequestTag/kubernetes.io/cluster/${var.cluster_name}" = "owned" } })
-    : jsonencode({ StringEquals = { "aws:RequestTag/ditto.live/managed_by" = "terraform" } })
+  # Cluster scope added in phase-2; VPC scope added when vpc_id is set.
+  # Nil when neither is set (phase-1, no vpc_id) → no condition applied.
+  ec2_create_cond_entries = merge(
+    var.cluster_name != null ? { "aws:RequestTag/kubernetes.io/cluster/${var.cluster_name}" = "owned" } : {},
+    local.ec2_vpc_string_equals
   )
+  ec2_create_cond = length(local.ec2_create_cond_entries) > 0 ? {
+    StringEquals = local.ec2_create_cond_entries
+  } : null
 
   # EC2 resource mutations — terminate, delete, modify on existing resources
-  ec2_resource_cond = jsondecode(
-    var.cluster_name != null
-    ? jsonencode({ StringEquals = { "ec2:ResourceTag/kubernetes.io/cluster/${var.cluster_name}" = "owned" } })
-    : jsonencode({ StringEquals = { "ec2:ResourceTag/ditto.live/managed_by" = "terraform" } })
+  # Cluster scope added in phase-2; VPC scope added when vpc_id is set.
+  ec2_resource_cond_entries = merge(
+    var.cluster_name != null ? { "ec2:ResourceTag/kubernetes.io/cluster/${var.cluster_name}" = "owned" } : {},
+    local.ec2_vpc_string_equals
   )
+  ec2_resource_cond = length(local.ec2_resource_cond_entries) > 0 ? {
+    StringEquals = local.ec2_resource_cond_entries
+  } : null
 
   # ELB LB/TG creates — cluster tag must be present (phase 1) or match exactly (phase 2)
   elb_create_cond = jsondecode(

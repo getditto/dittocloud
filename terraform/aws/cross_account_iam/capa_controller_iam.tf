@@ -67,19 +67,38 @@ resource "aws_iam_policy" "capa_controller_base" {
         ]
         Resource = ["*"]
       },
-      # Route and tag mutations — cannot add ResourceTag: route tables may be customer-owned
-      # in BYO-VPC, and CreateTags/DeleteTags must reach resources of any type
+      # Route mutations — cannot add ResourceTag: route tables may be customer-owned in BYO-VPC
       {
         Effect = "Allow"
         Action = [
           "ec2:CreateRoute",
-          "ec2:CreateTags",
           "ec2:DeleteRoute",
-          "ec2:DeleteTags",
           "ec2:ModifyNetworkInterfaceAttribute",
           "ec2:ReplaceRoute",
         ]
         Resource = ["*"]
+      },
+      # Tag mutations — must reach all resource types (VPC, subnets, instances, SGs, etc.),
+      # including client-owned resources in BYO-VPC, so resource conditions can't be used.
+      # Scoped by tag key namespace instead: only kubernetes.io/*, k8s.io/*,
+      # sigs.k8s.io/*, and ditto.live/* keys may be added or removed.
+      {
+        Effect = "Allow"
+        Action = [
+          "ec2:CreateTags",
+          "ec2:DeleteTags",
+        ]
+        Resource = ["*"]
+        Condition = {
+          "ForAllValues:StringLike" = {
+            "aws:TagKeys" = [
+              "kubernetes.io/*",
+              "k8s.io/*",
+              "sigs.k8s.io/*",
+              "ditto.live/*",
+            ]
+          }
+        }
       },
       # ELB reads — Describe* does not support resource-level permissions
       {
@@ -210,70 +229,84 @@ resource "aws_iam_policy" "capa_controller_base" {
           "arn:aws:elasticloadbalancing:*:*:listener-rule/net/*/*/*",
         ]
       },
-      # Security group rule mutations — scoped to cluster-managed SGs
-      {
-        Effect = "Allow"
-        Action = [
-          "ec2:AuthorizeSecurityGroupIngress",
-          "ec2:RevokeSecurityGroupEgress",
-          "ec2:RevokeSecurityGroupIngress",
-        ]
-        Resource  = ["arn:aws:ec2:*:*:security-group/*"]
-        Condition = local.ec2_resource_cond
-      },
-      # Instance attribute mutations — scoped to cluster-managed instances
-      {
-        Effect    = "Allow"
-        Action    = ["ec2:ModifyInstanceAttribute"]
-        Resource  = ["arn:aws:ec2:*:*:instance/*"]
-        Condition = local.ec2_resource_cond
-      },
-      # Create operations — require cluster ownership tag at request time
-      {
-        Effect = "Allow"
-        Action = [
-          "ec2:CreateLaunchTemplate",
-          "ec2:CreateLaunchTemplateVersion",
-          "ec2:CreateSecurityGroup",
-          "ec2:RunInstances",
-        ]
-        Resource  = ["*"]
-        Condition = local.ec2_create_cond
-      },
-      # Instance termination — scoped to cluster-managed instances by ARN + resource tag
-      {
-        Effect    = "Allow"
-        Action    = ["ec2:TerminateInstances"]
-        Resource  = ["arn:aws:ec2:*:*:instance/*"]
-        Condition = local.ec2_resource_cond
-      },
-      # Security group deletion — scoped to cluster-managed SGs by ARN + resource tag
-      {
-        Effect    = "Allow"
-        Action    = ["ec2:DeleteSecurityGroup"]
-        Resource  = ["arn:aws:ec2:*:*:security-group/*"]
-        Condition = local.ec2_resource_cond
-      },
-      # Network interface deletion — scoped to cluster-managed NICs by ARN + resource tag
-      {
-        Effect = "Allow"
-        Action = [
-          "ec2:DeleteNetworkInterface",
-          "ec2:DetachNetworkInterface",
-        ]
-        Resource  = ["arn:aws:ec2:*:*:network-interface/*"]
-        Condition = local.ec2_resource_cond
-      },
-      # Launch template deletion — scoped to cluster-managed templates by ARN + resource tag
-      {
-        Effect = "Allow"
-        Action = [
-          "ec2:DeleteLaunchTemplate",
-          "ec2:DeleteLaunchTemplateVersions",
-        ]
-        Resource  = ["arn:aws:ec2:*:*:launch-template/*"]
-        Condition = local.ec2_resource_cond
-      },
+      # Security group rule mutations — phase-2: scoped to cluster-managed SGs
+      merge(
+        {
+          Effect = "Allow"
+          Action = [
+            "ec2:AuthorizeSecurityGroupIngress",
+            "ec2:RevokeSecurityGroupEgress",
+            "ec2:RevokeSecurityGroupIngress",
+          ]
+          Resource = ["arn:aws:ec2:*:*:security-group/*"]
+        },
+        local.ec2_resource_cond != null ? { Condition = local.ec2_resource_cond } : {}
+      ),
+      # Instance attribute mutations — phase-2: scoped to cluster-managed instances
+      merge(
+        {
+          Effect   = "Allow"
+          Action   = ["ec2:ModifyInstanceAttribute"]
+          Resource = ["arn:aws:ec2:*:*:instance/*"]
+        },
+        local.ec2_resource_cond != null ? { Condition = local.ec2_resource_cond } : {}
+      ),
+      # Create operations — phase-2: require cluster ownership tag at request time
+      merge(
+        {
+          Effect = "Allow"
+          Action = [
+            "ec2:CreateLaunchTemplate",
+            "ec2:CreateLaunchTemplateVersion",
+            "ec2:CreateSecurityGroup",
+            "ec2:RunInstances",
+          ]
+          Resource = ["*"]
+        },
+        local.ec2_create_cond != null ? { Condition = local.ec2_create_cond } : {}
+      ),
+      # Instance termination — phase-2: scoped to cluster-managed instances
+      merge(
+        {
+          Effect   = "Allow"
+          Action   = ["ec2:TerminateInstances"]
+          Resource = ["arn:aws:ec2:*:*:instance/*"]
+        },
+        local.ec2_resource_cond != null ? { Condition = local.ec2_resource_cond } : {}
+      ),
+      # Security group deletion — phase-2: scoped to cluster-managed SGs
+      merge(
+        {
+          Effect   = "Allow"
+          Action   = ["ec2:DeleteSecurityGroup"]
+          Resource = ["arn:aws:ec2:*:*:security-group/*"]
+        },
+        local.ec2_resource_cond != null ? { Condition = local.ec2_resource_cond } : {}
+      ),
+      # Network interface deletion — phase-2: scoped to cluster-managed NICs
+      merge(
+        {
+          Effect = "Allow"
+          Action = [
+            "ec2:DeleteNetworkInterface",
+            "ec2:DetachNetworkInterface",
+          ]
+          Resource = ["arn:aws:ec2:*:*:network-interface/*"]
+        },
+        local.ec2_resource_cond != null ? { Condition = local.ec2_resource_cond } : {}
+      ),
+      # Launch template deletion — phase-2: scoped to cluster-managed templates
+      merge(
+        {
+          Effect = "Allow"
+          Action = [
+            "ec2:DeleteLaunchTemplate",
+            "ec2:DeleteLaunchTemplateVersions",
+          ]
+          Resource = ["arn:aws:ec2:*:*:launch-template/*"]
+        },
+        local.ec2_resource_cond != null ? { Condition = local.ec2_resource_cond } : {}
+      ),
       # IAM service-linked roles — each scoped to its specific service ARN
       {
         Effect   = "Allow"
@@ -385,7 +418,7 @@ resource "aws_iam_policy" "capa_controller_vpc_lifecycle" {
         Resource = ["*"]
         Condition = {
           StringEquals = {
-            "aws:RequestTag/ditto.live/managed_by" = "terraform"
+            "aws:RequestTag/ditto.live/managed_by" = "dittocloud"
           }
         }
       },
@@ -421,7 +454,7 @@ resource "aws_iam_policy" "capa_controller_vpc_lifecycle" {
         Resource = ["*"]
         Condition = {
           StringEquals = {
-            "ec2:ResourceTag/ditto.live/managed_by" = "terraform"
+            "ec2:ResourceTag/ditto.live/managed_by" = "dittocloud"
           }
         }
       },

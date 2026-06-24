@@ -75,3 +75,15 @@ variable "cluster_name" {
   description = "When set, tightens CAPA controller IAM conditions to this specific cluster name. Requires an existing state file — use only on re-runs after the initial deployment."
   default     = null
 }
+
+variable "vpc_id" {
+  type        = string
+  description = "When set, restricts CAPA EC2 operations (instance launches, security group creates) to this specific VPC. Intended for BYO-VPC deployments where the controller must not affect resources outside the cluster VPC."
+  default     = null
+}
+
+variable "ec2_project_tag" {
+  type        = string
+  description = "Value for the ec2:ResourceTag/ditto:project condition in the cluster resources boundary policy. Controls which tagged EC2 security groups the boundary policy allows ingress/egress modifications on."
+  default     = "ditto"
+}

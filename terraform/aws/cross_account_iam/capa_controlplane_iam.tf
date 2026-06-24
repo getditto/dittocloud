@@ -3,9 +3,9 @@ resource "aws_iam_instance_profile" "capa_control_plane" {
   role = aws_iam_role.capa_control_plane.name
 }
 
-# Control plane instance policy — destructive operations are gated by the
-# ditto.live/managed_by=terraform resource tag (phase 1) or cluster-specific
-# kubernetes.io/cluster/<name> tag (phase 2), same as the controller policy.
+# Control plane instance policy — phase-1 allows broad EC2 mutations; phase-2
+# (cluster_name set) scopes destructive operations to cluster-owned resources via
+# kubernetes.io/cluster/<name> tag conditions.
 resource "aws_iam_policy" "capa_control_plane" {
   description = "Cluster API Control Plane instances"
   name        = "control-plane.cluster-api-provider-aws.sigs.k8s.io"
@@ -46,47 +46,55 @@ resource "aws_iam_policy" "capa_control_plane" {
         ]
         Resource = ["*"]
       },
-      # EC2 creates — require cluster ownership tag at request time
-      {
-        Effect = "Allow"
-        Action = [
-          "ec2:CreateSecurityGroup",
-          "ec2:CreateVolume",
-        ]
-        Resource  = ["*"]
-        Condition = local.ec2_create_cond
-      },
-      # Security group mutations — scoped to cluster-managed SGs
-      {
-        Effect = "Allow"
-        Action = [
-          "ec2:AuthorizeSecurityGroupIngress",
-          "ec2:DeleteSecurityGroup",
-          "ec2:RevokeSecurityGroupIngress",
-        ]
-        Resource  = ["arn:aws:ec2:*:*:security-group/*"]
-        Condition = local.ec2_resource_cond
-      },
-      # Volume mutations — scoped to cluster-managed volumes.
+      # EC2 creates — phase-2: require cluster ownership tag at request time
+      merge(
+        {
+          Effect = "Allow"
+          Action = [
+            "ec2:CreateSecurityGroup",
+            "ec2:CreateVolume",
+          ]
+          Resource = ["*"]
+        },
+        local.ec2_create_cond != null ? { Condition = local.ec2_create_cond } : {}
+      ),
+      # Security group mutations — phase-2: scoped to cluster-managed SGs
+      merge(
+        {
+          Effect = "Allow"
+          Action = [
+            "ec2:AuthorizeSecurityGroupIngress",
+            "ec2:DeleteSecurityGroup",
+            "ec2:RevokeSecurityGroupIngress",
+          ]
+          Resource = ["arn:aws:ec2:*:*:security-group/*"]
+        },
+        local.ec2_resource_cond != null ? { Condition = local.ec2_resource_cond } : {}
+      ),
+      # Volume mutations — phase-2: scoped to cluster-managed volumes.
       # AttachVolume/DetachVolume are intentionally omitted: AWS requires both the
       # volume and the instance resource to be authorized, and AmazonEBSCSIDriverPolicy
       # (also attached to this role) covers them on Resource = ["*"].
-      {
-        Effect = "Allow"
-        Action = [
-          "ec2:DeleteVolume",
-          "ec2:ModifyVolume",
-        ]
-        Resource  = ["arn:aws:ec2:*:*:volume/*"]
-        Condition = local.ec2_resource_cond
-      },
-      # Instance attribute mutations — scoped to cluster-managed instances
-      {
-        Effect    = "Allow"
-        Action    = ["ec2:ModifyInstanceAttribute"]
-        Resource  = ["arn:aws:ec2:*:*:instance/*"]
-        Condition = local.ec2_resource_cond
-      },
+      merge(
+        {
+          Effect = "Allow"
+          Action = [
+            "ec2:DeleteVolume",
+            "ec2:ModifyVolume",
+          ]
+          Resource = ["arn:aws:ec2:*:*:volume/*"]
+        },
+        local.ec2_resource_cond != null ? { Condition = local.ec2_resource_cond } : {}
+      ),
+      # Instance attribute mutations — phase-2: scoped to cluster-managed instances
+      merge(
+        {
+          Effect   = "Allow"
+          Action   = ["ec2:ModifyInstanceAttribute"]
+          Resource = ["arn:aws:ec2:*:*:instance/*"]
+        },
+        local.ec2_resource_cond != null ? { Condition = local.ec2_resource_cond } : {}
+      ),
       # ELB reads — Describe* does not support resource-level permissions
       {
         Effect = "Allow"

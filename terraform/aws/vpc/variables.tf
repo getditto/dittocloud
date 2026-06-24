@@ -14,6 +14,18 @@ variable "region" {
   default     = null
 }
 
+variable "enable_database_subnets" {
+  description = "Whether to create database subnets (/24 per AZ) and a database subnet group."
+  type        = bool
+  default     = false
+}
+
+variable "kubernetes_cluster_name" {
+  description = "Name used for kubernetes.io/cluster/* subnet tags. Defaults to vpc_name when not set."
+  type        = string
+  default     = null
+}
+
 variable "tags" {
   type = map(string)
   default = {

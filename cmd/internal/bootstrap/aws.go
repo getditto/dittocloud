@@ -18,6 +18,14 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 		Short: "Bootstrap AWS",
 		Long:  "Bootstrap AWS",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().Changed("customer-managed-vpc") {
+				if cmd.Flags().Changed("aws-vpc-name") {
+					return fmt.Errorf("--aws-vpc-name cannot be used with --customer-managed-vpc; VPC name is only relevant when Ditto creates the VPC")
+				}
+				if cmd.Flags().Changed("aws-vpc-cidr") {
+					return fmt.Errorf("--aws-vpc-cidr cannot be used with --customer-managed-vpc; VPC CIDR is only relevant when Ditto creates the VPC")
+				}
+			}
 			if cmd.Flags().Changed("cluster-name") {
 				stateFile := cmd.Flag("state").Value.String()
 				if _, err := os.Stat(stateFile); os.IsNotExist(err) {
@@ -41,6 +49,7 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 	cmd.Flags().StringArray("controller-trusted-role-arns", []string{}, "AWS IAM role ARNs that can assume the CAPA controller role (can be specified multiple times)")
 	cmd.Flags().StringArray("iam-trusted-role-arns", []string{}, "AWS IAM role ARNs that can assume the IAM trust editor role (can be specified multiple times)")
 	cmd.Flags().Bool("customer-managed-vpc", false, "Set when the customer provides their own VPC; omits VPC lifecycle permissions from the CAPA controller role")
+	cmd.Flags().String("vpc-id", "", "Restrict CAPA EC2 operations to a specific VPC; use with --customer-managed-vpc when the VPC already exists")
 	cmd.Flags().String("cluster-name", "", "Tighten IAM conditions to a specific cluster name; requires an existing state file (re-runs only)")
 
 	return cmd
@@ -113,6 +122,14 @@ func promptAWSValues(flags *pflag.FlagSet) ([]*tfexec.VarOption, error) {
 			return nil, fmt.Errorf("unable to get customer-managed-vpc: %w", err)
 		}
 		vars = append(vars, tfexec.Var(fmt.Sprintf("customer_managed_vpc=%t", customerManagedVPC)))
+	}
+
+	if flags.Changed("vpc-id") {
+		vpcID, err := flags.GetString("vpc-id")
+		if err != nil {
+			return nil, fmt.Errorf("unable to get vpc-id: %w", err)
+		}
+		vars = append(vars, tfexec.Var("vpc_id="+vpcID))
 	}
 
 	if flags.Changed("cluster-name") {
