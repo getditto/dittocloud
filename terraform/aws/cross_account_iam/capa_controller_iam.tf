@@ -25,10 +25,14 @@ module "capa_controller_role" {
     }
   }
 
-  policies = {
-    capa-controller     = aws_iam_policy.capa_controller_policy.arn
-    capa-controller-eks = aws_iam_policy.capa_controller_eks_policy.arn
-  }
+  policies = merge(
+    {
+      capa-controller = aws_iam_policy.capa_controller_policy.arn
+    },
+    var.enable_eks ? {
+      capa-controller-eks = aws_iam_policy.capa_controller_eks_policy[0].arn
+    } : {}
+  )
 }
 
 
@@ -51,6 +55,7 @@ resource "aws_iam_policy" "capa_controller_policy" {
 # --document AWSIAMManagedPolicyControllersEKS`, plus the access-entry and
 # OpenIDConnectProvider statements CAPA >= v2.10 needs that clusterawsadm omits.
 resource "aws_iam_policy" "capa_controller_eks_policy" {
+  count  = var.enable_eks ? 1 : 0
   name   = "ditto-capa-controller-eks-policy"
   policy = file("${path.module}/policies/capa-controller-eks-policy.json")
   tags   = local.tags
