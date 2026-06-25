@@ -1,3 +1,9 @@
+variable "enable_eks" {
+  type        = bool
+  description = "Provision EKS IAM: the CAPA controller EKS policy and the Karpenter controller permissions on the cluster-resources boundary."
+  default     = false
+}
+
 variable "controller_trusted_role_arns" {
   type = list(string)
 

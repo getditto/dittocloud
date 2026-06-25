@@ -52,9 +52,47 @@ resource "aws_iam_policy" "iam_trust_editor_policy" {
 }
 
 # @todo: The boundary policy should restrict Ec2 resources to appropriate tagged resources.
+# When enable_eks is set, widen the boundary so the Crossplane-created Karpenter
+# controller role can manage instance profiles, pass the CAPA node role, and read the
+# SSM/pricing/eks metadata it needs. The boundary only caps a role's permissions; the
+# Karpenter role still grants these via its own policy.
+data "aws_iam_policy_document" "cluster_resources_boundary" {
+  source_policy_documents = [file("${path.module}/policies/cluster-resources-boundary-policy.json")]
+
+  dynamic "statement" {
+    for_each = var.enable_eks ? [1] : []
+    content {
+      sid    = "KarpenterController"
+      effect = "Allow"
+      actions = [
+        "ssm:GetParameter",
+        "pricing:GetProducts",
+        "eks:DescribeCluster",
+        "iam:CreateInstanceProfile",
+        "iam:AddRoleToInstanceProfile",
+        "iam:RemoveRoleFromInstanceProfile",
+        "iam:DeleteInstanceProfile",
+        "iam:GetInstanceProfile",
+        "iam:TagInstanceProfile",
+      ]
+      resources = ["*"]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.enable_eks ? [1] : []
+    content {
+      sid       = "KarpenterPassNodeRole"
+      effect    = "Allow"
+      actions   = ["iam:PassRole"]
+      resources = ["arn:aws:iam::*:role/nodes.cluster-api-provider-aws.sigs.k8s.io"]
+    }
+  }
+}
+
 resource "aws_iam_policy" "cluster_resources_boundary_policy" {
   name   = "ditto-cluster-resources-boundary-policy"
-  policy = file("${path.module}/policies/cluster-resources-boundary-policy.json")
+  policy = data.aws_iam_policy_document.cluster_resources_boundary.json
   tags   = local.tags
 }
 

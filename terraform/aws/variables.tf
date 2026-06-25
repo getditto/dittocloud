@@ -28,6 +28,12 @@ variable "create_vpc" {
   default     = true
 }
 
+variable "enable_eks" {
+  type        = bool
+  description = "Whether to provision EKS IAM: the CAPA controller EKS policy (managed control plane, node groups, addons, access entries, OIDC provider) and the Karpenter controller permissions on the cluster-resources boundary. Opt-in per account."
+  default     = false
+}
+
 variable "controller_trusted_role_arns" {
   type = list(string)
 
