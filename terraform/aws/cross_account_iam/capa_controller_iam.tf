@@ -63,7 +63,9 @@ resource "aws_iam_policy" "capa_controller_base" {
           "ec2:DescribeVolumes",
           "ec2:DescribeVpcAttribute",
           "ec2:DescribeVpcEndpoints",
+          "ec2:DescribeTags",
           "ec2:DescribeVpcs",
+          "ec2:GetSecurityGroupsForVpc",
           "tag:GetResources",
         ]
         Resource = ["*"]
@@ -97,6 +99,8 @@ resource "aws_iam_policy" "capa_controller_base" {
               "k8s.io/*",
               "sigs.k8s.io/*",
               "ditto.live/*",
+              "Name",
+              "MachineName",
             ]
           }
         }
@@ -291,15 +295,16 @@ resource "aws_iam_policy" "capa_controller_elb" {
         ]
         Resource = ["*"]
       },
-      # ELB v2 LB + TG creates — require elbv2.k8s.aws/cluster tag at request time
+      # ELB v2 LB + TG creates — no tag condition: CAPA creates the control plane NLB
+      # with sigs.k8s.io/* tags (not elbv2.k8s.aws/cluster), so the LBC-specific
+      # tag condition would block it. Mutations and deletes are still tag-scoped below.
       {
         Effect = "Allow"
         Action = [
           "elasticloadbalancing:CreateLoadBalancer",
           "elasticloadbalancing:CreateTargetGroup",
         ]
-        Resource  = ["*"]
-        Condition = local.elb_create_cond
+        Resource = ["*"]
       },
       # ELB listener + rule creates — listeners don't carry the cluster tag so
       # tag conditions cannot be applied; scoped by association with tagged LBs above
@@ -311,7 +316,9 @@ resource "aws_iam_policy" "capa_controller_elb" {
         ]
         Resource = ["*"]
       },
-      # ELB v2 LB + TG mutations — scoped by ARN type + cluster tag on resource
+      # ELB v2 LB + TG mutations — scoped by ARN type only; CAPA-created resources
+      # carry sigs.k8s.io/* tags (not elbv2.k8s.aws/cluster), so a resource tag
+      # condition would deny CAPA's own NLB/TG mutations.
       {
         Effect = "Allow"
         Action = [
@@ -329,7 +336,6 @@ resource "aws_iam_policy" "capa_controller_elb" {
           "arn:aws:elasticloadbalancing:*:*:loadbalancer/net/*/*",
           "arn:aws:elasticloadbalancing:*:*:targetgroup/*/*",
         ]
-        Condition = local.elb_resource_cond
       },
       # ELB listener + rule mutations — scoped by ARN type only; listeners do not
       # carry the elbv2.k8s.aws/cluster tag so resource tag conditions cannot be applied
@@ -351,17 +357,19 @@ resource "aws_iam_policy" "capa_controller_elb" {
           "arn:aws:elasticloadbalancing:*:*:listener-rule/net/*/*/*",
         ]
       },
-      # ELB target registration — scoped by TG ARN + cluster tag on resource
+      # ELB target registration — scoped by TG ARN only; freshly created TGs don't
+      # carry elbv2.k8s.aws/cluster yet so a resource tag condition would deny CAPA.
       {
         Effect = "Allow"
         Action = [
           "elasticloadbalancing:DeregisterTargets",
           "elasticloadbalancing:RegisterTargets",
         ]
-        Resource  = ["arn:aws:elasticloadbalancing:*:*:targetgroup/*/*"]
-        Condition = local.elb_resource_cond
+        Resource = ["arn:aws:elasticloadbalancing:*:*:targetgroup/*/*"]
       },
-      # ELB tag operations on LBs/TGs at creation time
+      # ELB tag operations on LBs/TGs at creation time — CAPA tags NLBs with
+      # sigs.k8s.io/* keys (not elbv2.k8s.aws/cluster), so the LBC-specific
+      # request tag condition is dropped; CreateAction scope is still enforced.
       {
         Effect = "Allow"
         Action = [
@@ -372,9 +380,16 @@ resource "aws_iam_policy" "capa_controller_elb" {
           "arn:aws:elasticloadbalancing:*:*:loadbalancer/net/*/*",
           "arn:aws:elasticloadbalancing:*:*:targetgroup/*/*",
         ]
-        Condition = local.elb_add_tags_create_cond
+        Condition = {
+          StringEquals = {
+            "elasticloadbalancing:CreateAction" = [
+              "CreateLoadBalancer",
+              "CreateTargetGroup",
+            ]
+          }
+        }
       },
-      # ELB tag mutations on existing LBs/TGs — require cluster tag on resource
+      # ELB tag mutations on existing LBs/TGs — scoped by ARN type only.
       {
         Effect = "Allow"
         Action = [
@@ -386,7 +401,6 @@ resource "aws_iam_policy" "capa_controller_elb" {
           "arn:aws:elasticloadbalancing:*:*:loadbalancer/net/*/*",
           "arn:aws:elasticloadbalancing:*:*:targetgroup/*/*",
         ]
-        Condition = local.elb_tag_mutation_cond
       },
       # ELB tag mutations on listeners/rules — scoped by ARN type only
       {

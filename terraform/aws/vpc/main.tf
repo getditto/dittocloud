@@ -3,7 +3,7 @@ data "aws_region" "current" {}
 
 locals {
   name   = var.vpc_name
-  region = coalesce(var.region, data.aws_region.current.id)
+  region = coalesce(var.region, data.aws_region.current.region)
 
   vpc_cidr = var.vpc_cidr
   azs      = slice(data.aws_availability_zones.available.names, 0, 3)

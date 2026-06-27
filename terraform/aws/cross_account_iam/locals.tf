@@ -15,7 +15,7 @@ locals {
 
   # ec2:Vpc StringEquals entries — empty map when vpc_id is not set
   ec2_vpc_string_equals = var.vpc_id != null ? {
-    "ec2:Vpc" = "arn:aws:ec2:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:vpc/${var.vpc_id}"
+    "ec2:Vpc" = "arn:aws:ec2:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:vpc/${var.vpc_id}"
   } : {}
 
   # EC2 creates (RunInstances, CreateSecurityGroup, CreateLaunchTemplate)

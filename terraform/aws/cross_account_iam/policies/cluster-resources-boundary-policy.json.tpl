@@ -66,35 +66,24 @@
       }
     },
     {
-      "Sid": "EC2SecurityGroupCreateTags",
-      "Effect": "Allow",
-      "Action": [
-        "ec2:CreateTags"
-      ],
-      "Resource": "arn:aws:ec2:*:*:security-group/*",
-      "Condition": {
-        "StringEquals": {
-          "ec2:CreateAction": "CreateSecurityGroup"
-        },
-        "Null": {
-          "aws:RequestTag/elbv2.k8s.aws/cluster": "false"
-        }
-      }
-    },
-    {
-      "Sid": "EC2SecurityGroupTagMutations",
+      "Sid": "EC2TagMutations",
       "Effect": "Allow",
       "Action": [
         "ec2:CreateTags",
         "ec2:DeleteTags"
       ],
-      "Resource": "arn:aws:ec2:*:*:security-group/*",
-      "Condition": {
-        "Null": {
-          "aws:RequestTag/elbv2.k8s.aws/cluster": "true",
-          "aws:ResourceTag/elbv2.k8s.aws/cluster": "false"
-        }
-      }
+      "Resource": [
+        "arn:aws:ec2:*:*:instance/*",
+        "arn:aws:ec2:*:*:volume/*",
+        "arn:aws:ec2:*:*:network-interface/*",
+        "arn:aws:ec2:*:*:launch-template/*",
+        "arn:aws:ec2:*:*:natgateway/*",
+        "arn:aws:ec2:*:*:security-group/*",
+        "arn:aws:ec2:*:*:subnet/*",
+        "arn:aws:ec2:*:*:vpc/*",
+        "arn:aws:ec2:*:*:internet-gateway/*",
+        "arn:aws:ec2:*:*:route-table/*"
+      ]
     },
     {
       "Sid": "EC2SecurityGroupMutationsELBCluster",
@@ -219,12 +208,7 @@
         "elasticloadbalancing:CreateLoadBalancer",
         "elasticloadbalancing:CreateTargetGroup"
       ],
-      "Resource": "*",
-      "Condition": {
-        "Null": {
-          "aws:RequestTag/elbv2.k8s.aws/cluster": "false"
-        }
-      }
+      "Resource": "*"
     },
     {
       "Sid": "ELBListenerRuleMutations",
@@ -284,12 +268,7 @@
         "elasticloadbalancing:SetSecurityGroups",
         "elasticloadbalancing:SetSubnets"
       ],
-      "Resource": "*",
-      "Condition": {
-        "Null": {
-          "aws:ResourceTag/elbv2.k8s.aws/cluster": "false"
-        }
-      }
+      "Resource": "*"
     },
     {
       "Sid": "ELBAddTagsAtCreation",
@@ -308,9 +287,6 @@
             "CreateLoadBalancer",
             "CreateTargetGroup"
           ]
-        },
-        "Null": {
-          "aws:RequestTag/elbv2.k8s.aws/cluster": "false"
         }
       }
     },
@@ -323,6 +299,7 @@
       ],
       "Resource": "arn:aws:elasticloadbalancing:*:*:targetgroup/*/*"
     },
+
     {
       "Sid": "ELBListenerACLMutations",
       "Effect": "Allow",
