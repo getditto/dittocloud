@@ -184,7 +184,24 @@ module "vpc_endpoints" {
 ################################################################################
 
 data "aws_iam_policy_document" "generic_endpoint_policy" {
+  # An endpoint policy grants nothing unless it includes an explicit Allow, so the
+  # deny-if-outside-VPC guardrail below must be paired with an allow for in-VPC traffic.
+  # Without this, ECR pulls (e.g. ecr:GetAuthorizationToken) from inside the VPC are
+  # implicitly denied, which blocks EKS nodes from pulling images and joining.
   statement {
+    sid       = "AllowAllInVpc"
+    effect    = "Allow"
+    actions   = ["*"]
+    resources = ["*"]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+  }
+
+  statement {
+    sid       = "DenyOutsideVpc"
     effect    = "Deny"
     actions   = ["*"]
     resources = ["*"]
