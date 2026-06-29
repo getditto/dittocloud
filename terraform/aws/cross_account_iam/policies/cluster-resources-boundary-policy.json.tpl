@@ -86,19 +86,14 @@
       ]
     },
     {
-      "Sid": "EC2SecurityGroupMutationsELBCluster",
+      "Sid": "EC2SecurityGroupMutations",
       "Effect": "Allow",
       "Action": [
         "ec2:AuthorizeSecurityGroupIngress",
         "ec2:RevokeSecurityGroupIngress",
         "ec2:DeleteSecurityGroup"
       ],
-      "Resource": "*",
-      "Condition": {
-        "Null": {
-          "aws:ResourceTag/elbv2.k8s.aws/cluster": "false"
-        }
-      }
+      "Resource": "*"
     },
     {
       "Sid": "KarpenterSSM",
