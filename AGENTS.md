@@ -85,7 +85,22 @@ go test ./...
 
 **Cross-Account IAM**: The AWS module creates IAM roles that can be assumed by Ditto services running in a different AWS account (via trusted role ARNs).
 
-**VPC Module**: Creates a VPC with subnets across multiple availability zones (requires region with at least 3 AZs).
+**VPC Module**: Creates a VPC with subnets across multiple availability zones (requires region with at least 3 AZs). Omitted when `--customer-managed-vpc` is passed.
+
+**CAPA Controller Policy Split**: The CAPA controller role is granted permissions via two separate IAM policies. The base policy (`ditto-capa-controller-policy`) is always attached. The VPC lifecycle policy (`ditto-capa-controller-vpc-lifecycle-policy`) is only attached when `customer_managed_vpc = false`.
+
+**Two-Phase IAM Tightening**: Phase 1 (default, no `--cluster-name`) is condition-free for EC2 resource mutations — broad access needed because existing CAPA resources may not carry `ditto.live/managed_by`. `ec2:CreateTags`/`ec2:DeleteTags` are scoped by tag key namespace (`kubernetes.io/*`, `k8s.io/*`, `sigs.k8s.io/*`, `ditto.live/*`) to support BYO-VPC tagging without allowing arbitrary tag writes on client resources. VPC lifecycle creates/deletes are gated on `ditto.live/managed_by = dittocloud`. Phase 2 (`--cluster-name` set) switches EC2 conditions to cluster-specific `kubernetes.io/cluster/<name>` tags; ELBv2 conditions use `elbv2.k8s.aws/cluster = <name>`. The second run requires an existing state file — the CLI enforces this with an early error before any Terraform runs.
+
+**AWS CLI Flags** (`bootstrap aws`):
+- `--aws-profile` — AWS profile
+- `--aws-region` — AWS region (default `us-east-1`)
+- `--aws-vpc-name` — VPC name (default `ditto`)
+- `--aws-vpc-cidr` — VPC CIDR block (default `10.210.0.0/16`)
+- `--controller-trusted-role-arns` — override CAPA controller trusted ARNs
+- `--iam-trusted-role-arns` — override trust editor trusted ARNs
+- `--customer-managed-vpc` — omit VPC creation and VPC lifecycle IAM permissions
+- `--vpc-id` — restrict CAPA EC2 create/mutate operations to a specific VPC via `ec2:Vpc` condition; can be combined with either phase; mutually exclusive with `--aws-vpc-name`/`--aws-vpc-cidr`
+- `--cluster-name` — phase-2 lock-down; requires existing state file
 
 ## Testing
 

@@ -3,7 +3,7 @@ data "aws_region" "current" {}
 
 locals {
   name   = var.vpc_name
-  region = coalesce(var.region, data.aws_region.current.id)
+  region = coalesce(var.region, data.aws_region.current.region)
 
   vpc_cidr = var.vpc_cidr
   azs      = slice(data.aws_availability_zones.available.names, 0, 3)
@@ -28,18 +28,22 @@ locals {
     }
   }
 
-  # db_subnets = {
-  #   for az in local.azs :
-  #   "db-${az}" => {
-  #     name    = "db-${az}"
-  #     netmask = 24
-  #     type    = "Database"
-  #     zone    = az
-  #   }
-  # }
+  db_subnets = var.enable_database_subnets ? {
+    for az in local.azs :
+    "db-${az}" => {
+      name    = "db-${az}"
+      netmask = 24
+      type    = "Database"
+      zone    = az
+    }
+  } : {}
+
+  kubernetes_cluster_name = coalesce(var.kubernetes_cluster_name, var.vpc_name)
 
   // us-east-1 uses ec2.internal, all other regions use <region>.compute.internal
   dhcp_domain = local.region == "us-east-1" ? "ec2.internal" : "${local.region}.compute.internal"
+
+  tags = merge({ "ditto.live/managed_by" = "dittocloud" }, var.tags)
 }
 
 
@@ -54,11 +58,11 @@ module "subnets" {
   base_cidr_block = local.vpc_cidr
 
   networks = flatten([
-    # [for sub in local.db_subnets :
-    #   {
-    #     name    = sub.name,
-    #     netmask = sub.netmask
-    # }],
+    [for sub in local.db_subnets :
+      {
+        name    = sub.name,
+        netmask = sub.netmask
+    }],
     [for sub in local.public_subnets :
       {
         name    = sub.name,
@@ -69,7 +73,6 @@ module "subnets" {
         name    = sub.name,
         netmask = sub.netmask
     }],
-
   ])
 }
 
@@ -88,23 +91,24 @@ module "vpc" {
   azs             = local.azs
   private_subnets = [for subnet in local.private_subnets : module.subnets.network_cidr_blocks[subnet.name]]
   public_subnets  = [for subnet in local.public_subnets : module.subnets.network_cidr_blocks[subnet.name]]
-  # database_subnets = [for subnet in local.db_subnets : module.subnets.network_cidr_blocks[subnet.name]]
 
   private_subnet_tags = {
-    "kubernetes.io/cluster/ditto"     = "shared"
-    "kubernetes.io/role/internal-elb" = "1"
+    "kubernetes.io/cluster/${local.kubernetes_cluster_name}" = "shared"
+    "kubernetes.io/role/internal-elb"                        = "1"
   }
 
   public_subnet_tags = {
-    "kubernetes.io/cluster/ditto" = "shared"
-    "kubernetes.io/role/elb"      = "1"
+    "kubernetes.io/cluster/${local.kubernetes_cluster_name}" = "shared"
+    "kubernetes.io/role/elb"                                 = "1"
   }
 
   # Capi might delete those ^
 
+  database_subnets = var.enable_database_subnets ? [for subnet in local.db_subnets : module.subnets.network_cidr_blocks[subnet.name]] : []
+
   create_elasticache_subnet_group = false
   create_redshift_subnet_group    = false
-  create_database_subnet_group    = true
+  create_database_subnet_group    = var.enable_database_subnets
   manage_default_network_acl      = true
   manage_default_route_table      = true
   manage_default_security_group   = true
@@ -129,7 +133,7 @@ module "vpc" {
   # create_flow_log_cloudwatch_iam_role   = false
   # flow_log_max_aggregation_interval     = 60
 
-  tags = var.tags
+  tags = local.tags
 }
 
 ################################################################################
@@ -176,7 +180,7 @@ module "vpc_endpoints" {
     },
   }
 
-  tags = var.tags
+  tags = local.tags
 }
 
 ################################################################################
@@ -222,8 +226,28 @@ data "aws_iam_policy_document" "generic_endpoint_policy" {
 
 output "vpc" {
   value = {
-    private_subnets = module.vpc.private_subnets,
-    public_subnets  = module.vpc.public_subnets,
-    vpc_id          = module.vpc.vpc_id,
+    private_subnets  = module.vpc.private_subnets
+    public_subnets   = module.vpc.public_subnets
+    database_subnets = module.vpc.database_subnets
+    vpc_id           = module.vpc.vpc_id
+  }
+}
+
+output "vpc_id" {
+  value = module.vpc.vpc_id
+}
+
+output "subnets" {
+  value = module.subnets
+}
+
+output "valet_web_config" {
+  value = {
+    id = local.region
+    vpc = [{
+      id             = module.vpc.vpc_id
+      privateSubnets = module.vpc.private_subnets
+      publicSubnets  = module.vpc.public_subnets
+    }]
   }
 }

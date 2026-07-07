@@ -17,7 +17,9 @@ module "cross_account_iam" {
   iam_trusted_role_arns                 = var.iam_trusted_role_arns
   iam_trusted_operations_principal_arns = var.iam_trusted_operations_principal_arns
   iam_trusted_operations_condition_arns = var.iam_trusted_operations_condition_arns
-  enable_eks                            = var.enable_eks
+  customer_managed_vpc                  = var.customer_managed_vpc
+  cluster_name                          = var.cluster_name
+  vpc_id                                = var.vpc_id
 }
 
 data "aws_caller_identity" "current" {}
@@ -26,7 +28,7 @@ data "aws_region" "current" {}
 output "aws" {
   value = {
     account_id = data.aws_caller_identity.current.account_id
-    region     = coalesce(var.region, data.aws_region.current.id)
+    region     = coalesce(var.region, data.aws_region.current.region)
     vpc        = module.vpc
   }
 }
