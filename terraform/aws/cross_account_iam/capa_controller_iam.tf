@@ -134,12 +134,21 @@ resource "aws_iam_policy" "capa_controller_base" {
           Action = [
             "ec2:CreateLaunchTemplate",
             "ec2:CreateLaunchTemplateVersion",
-            "ec2:CreateSecurityGroup",
             "ec2:RunInstances",
           ]
           Resource = ["*"]
         },
         local.ec2_create_cond != null ? { Condition = local.ec2_create_cond } : {}
+      ),
+      # Security group creation is authorized against the target VPC ARN. CAPA
+      # supplies sigs.k8s.io request tags for phase-2 cluster scoping.
+      merge(
+        {
+          Effect   = "Allow"
+          Action   = ["ec2:CreateSecurityGroup"]
+          Resource = local.vpc_arn != null ? [local.vpc_arn] : ["*"]
+        },
+        local.ec2_security_group_create_cond != null ? { Condition = local.ec2_security_group_create_cond } : {}
       ),
       # Instance termination — phase-2: scoped to cluster-managed instances
       merge(

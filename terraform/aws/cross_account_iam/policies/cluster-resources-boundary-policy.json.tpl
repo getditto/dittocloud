@@ -44,12 +44,7 @@
       "Action": [
         "ec2:CreateSecurityGroup"
       ],
-      "Resource": "*"%{~ if vpc_arn != null ~},
-      "Condition": {
-        "StringEquals": {
-          "ec2:Vpc": "${vpc_arn}"
-        }
-      }%{~ endif ~}
+      "Resource": %{~ if vpc_arn != null ~}"${vpc_arn}"%{~ else ~}"*"%{~ endif ~}
     },
     {
       "Sid": "EC2SecurityGroupMutationsDittoProject",

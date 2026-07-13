@@ -9,16 +9,20 @@ locals {
   # resources belonging to this one cluster.
   # VPC confinement: when vpc_id is set, EC2 conditions also include an ec2:Vpc
   # constraint so the controller cannot create or modify resources outside that VPC.
+  # CreateSecurityGroup is special: AWS authorizes it against the target VPC ARN,
+  # so that statement uses vpc_arn as its Resource instead of an ec2:Vpc condition.
   #
   # Both constraints use StringEquals and are merged into a single Condition block —
   # IAM does not allow duplicate Condition operator keys in one statement.
 
+  vpc_arn = var.vpc_id != null ? "arn:aws:ec2:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:vpc/${var.vpc_id}" : null
+
   # ec2:Vpc StringEquals entries — empty map when vpc_id is not set
   ec2_vpc_string_equals = var.vpc_id != null ? {
-    "ec2:Vpc" = "arn:aws:ec2:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:vpc/${var.vpc_id}"
+    "ec2:Vpc" = local.vpc_arn
   } : {}
 
-  # EC2 creates (RunInstances, CreateSecurityGroup, CreateLaunchTemplate)
+  # EC2 creates (RunInstances, CreateLaunchTemplate)
   # Cluster scope added in phase-2; VPC scope added when vpc_id is set.
   # Nil when neither is set (phase-1, no vpc_id) → no condition applied.
   ec2_create_cond_entries = merge(
@@ -27,6 +31,14 @@ locals {
   )
   ec2_create_cond = length(local.ec2_create_cond_entries) > 0 ? {
     StringEquals = local.ec2_create_cond_entries
+  } : null
+
+  # Security group creates are authorized on the VPC resource and carry CAPA tags
+  # using the sigs.k8s.io namespace, not the kubernetes.io node ownership tag.
+  ec2_security_group_create_cond = var.cluster_name != null ? {
+    StringEquals = {
+      "aws:RequestTag/sigs.k8s.io/cluster-api-provider-aws/cluster/${var.cluster_name}" = "owned"
+    }
   } : null
 
   # EC2 resource mutations — terminate, delete, modify on existing resources
