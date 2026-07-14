@@ -128,6 +128,6 @@ variable "cluster_name" {
 
 variable "vpc_id" {
   type        = string
-  description = "When set, adds ec2:Vpc conditions to CAPA EC2 create/mutate operations, confining the controller to this specific VPC."
+  description = "When set, scopes security-group creation to this VPC and applies ec2:Vpc only to EC2 action/resource combinations that support it."
   default     = null
 }

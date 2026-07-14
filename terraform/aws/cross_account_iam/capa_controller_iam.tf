@@ -105,7 +105,8 @@ resource "aws_iam_policy" "capa_controller_base" {
           }
         }
       },
-      # Security group rule mutations — phase-2: scoped to cluster-managed SGs
+      # Security group rule mutations — cluster scoped in phase-2 and VPC scoped
+      # when vpc_id is set. Security groups expose the ec2:Vpc condition key.
       merge(
         {
           Effect = "Allow"
@@ -116,7 +117,7 @@ resource "aws_iam_policy" "capa_controller_base" {
           ]
           Resource = ["arn:aws:ec2:*:*:security-group/*"]
         },
-        local.ec2_resource_cond != null ? { Condition = local.ec2_resource_cond } : {}
+        local.ec2_vpc_resource_cond != null ? { Condition = local.ec2_vpc_resource_cond } : {}
       ),
       # Instance attribute mutations — phase-2: scoped to cluster-managed instances
       merge(
@@ -127,20 +128,76 @@ resource "aws_iam_policy" "capa_controller_base" {
         },
         local.ec2_resource_cond != null ? { Condition = local.ec2_resource_cond } : {}
       ),
-      # Create operations — phase-2: require cluster ownership tag at request time
+      # Launch template creation supports request tags but not ec2:Vpc.
       merge(
         {
-          Effect = "Allow"
-          Action = [
-            "ec2:CreateLaunchTemplate",
-            "ec2:CreateLaunchTemplateVersion",
-            "ec2:CreateSecurityGroup",
-            "ec2:RunInstances",
-          ]
-          Resource = ["*"]
+          Effect   = "Allow"
+          Action   = ["ec2:CreateLaunchTemplate"]
+          Resource = ["arn:aws:ec2:*:*:launch-template/*"]
         },
         local.ec2_create_cond != null ? { Condition = local.ec2_create_cond } : {}
       ),
+      # A launch template version mutates an existing template. AWS exposes
+      # ResourceTag, not RequestTag, for this action.
+      merge(
+        {
+          Effect   = "Allow"
+          Action   = ["ec2:CreateLaunchTemplateVersion"]
+          Resource = ["arn:aws:ec2:*:*:launch-template/*"]
+        },
+        local.ec2_resource_cond != null ? { Condition = local.ec2_resource_cond } : {}
+      ),
+      # Security group creation authorizes the new security group and its target
+      # VPC separately. Request-tag conditions only apply to the SG resource.
+      merge(
+        {
+          Effect   = "Allow"
+          Action   = ["ec2:CreateSecurityGroup"]
+          Resource = ["arn:aws:ec2:*:*:security-group/*"]
+        },
+        local.ec2_create_cond != null ? { Condition = local.ec2_create_cond } : {}
+      ),
+      {
+        Effect   = "Allow"
+        Action   = ["ec2:CreateSecurityGroup"]
+        Resource = [local.ec2_vpc_arn != null ? local.ec2_vpc_arn : "arn:aws:ec2:*:*:vpc/*"]
+      },
+      # RunInstances authorizes several resource types. Require the ownership tag
+      # only on the instance created by the request.
+      merge(
+        {
+          Effect   = "Allow"
+          Action   = ["ec2:RunInstances"]
+          Resource = ["arn:aws:ec2:*:*:instance/*"]
+        },
+        local.ec2_create_cond != null ? { Condition = local.ec2_create_cond } : {}
+      ),
+      # Subnets, security groups, and network interfaces expose ec2:Vpc.
+      merge(
+        {
+          Effect = "Allow"
+          Action = ["ec2:RunInstances"]
+          Resource = [
+            "arn:aws:ec2:*:*:network-interface/*",
+            "arn:aws:ec2:*:*:security-group/*",
+            "arn:aws:ec2:*:*:subnet/*",
+          ]
+        },
+        local.ec2_vpc_cond != null ? { Condition = local.ec2_vpc_cond } : {}
+      ),
+      # Permit every other RunInstances resource context (for example AMIs,
+      # volumes, key pairs, snapshots, and launch templates) without applying
+      # condition keys those resource types do not expose.
+      {
+        Effect = "Allow"
+        Action = ["ec2:RunInstances"]
+        NotResource = [
+          "arn:aws:ec2:*:*:instance/*",
+          "arn:aws:ec2:*:*:network-interface/*",
+          "arn:aws:ec2:*:*:security-group/*",
+          "arn:aws:ec2:*:*:subnet/*",
+        ]
+      },
       # Instance termination — phase-2: scoped to cluster-managed instances
       merge(
         {
@@ -157,7 +214,7 @@ resource "aws_iam_policy" "capa_controller_base" {
           Action   = ["ec2:DeleteSecurityGroup"]
           Resource = ["arn:aws:ec2:*:*:security-group/*"]
         },
-        local.ec2_resource_cond != null ? { Condition = local.ec2_resource_cond } : {}
+        local.ec2_vpc_resource_cond != null ? { Condition = local.ec2_vpc_resource_cond } : {}
       ),
       # Network interface deletion — phase-2: scoped to cluster-managed NICs
       merge(
@@ -169,7 +226,7 @@ resource "aws_iam_policy" "capa_controller_base" {
           ]
           Resource = ["arn:aws:ec2:*:*:network-interface/*"]
         },
-        local.ec2_resource_cond != null ? { Condition = local.ec2_resource_cond } : {}
+        local.ec2_vpc_resource_cond != null ? { Condition = local.ec2_vpc_resource_cond } : {}
       ),
       # Launch template deletion — phase-2: scoped to cluster-managed templates
       merge(

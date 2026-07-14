@@ -53,7 +53,7 @@ Permission boundaries are defined in the `policies/` folder. They constrain the 
 |----------|------|---------|-------------|
 | `customer_managed_vpc` | bool | `false` | When `true`, omits the VPC lifecycle policy from the CAPA controller role |
 | `cluster_name` | string | `null` | When set, tightens IAM conditions to this specific cluster name |
-| `vpc_id` | string | `null` | When set, adds `ec2:Vpc` conditions to EC2 create/mutate operations — restricts CAPA and addon roles to this specific VPC |
+| `vpc_id` | string | `null` | Scopes security-group creation to the selected VPC and applies `ec2:Vpc` to supported resources such as subnets, security groups, and network interfaces |
 | `ec2_project_tag` | string | `"ditto"` | Value for the `ec2:ResourceTag/ditto:project` condition in the cluster resources boundary policy |
 | `controller_trusted_role_arns` | list(string) | Ditto control-plane roles | ARNs allowed to assume the CAPA controller role |
 | `iam_trusted_role_arns` | list(string) | Ditto trust-editor roles | ARNs allowed to assume the IAM trust editor role |
@@ -83,7 +83,7 @@ dittocloud bootstrap aws \
   --cluster-name <cluster-name>
 ```
 
-**Step 3 — VPC confinement.** Add `--vpc-id` to further restrict the CAPA controller and addon role boundary to a single VPC. EC2 create and mutate operations are gated on `ec2:Vpc`. Use the VPC ID created in Step 1 (available in the Terraform outputs).
+**Step 3 — VPC confinement.** Add `--vpc-id` to further restrict the CAPA controller and addon role boundary. Security-group creation is authorized against the selected VPC resource, while `ec2:Vpc` is applied only to action/resource combinations that expose it, such as `RunInstances` subnet, security-group, and network-interface authorization. Launch templates, volumes, and instances remain cluster-tag scoped because AWS does not expose `ec2:Vpc` for those resource types. Use the VPC ID created in Step 1 (available in the Terraform outputs).
 
 ```sh
 dittocloud bootstrap aws \
@@ -135,8 +135,8 @@ dittocloud bootstrap aws \
 |---|---|---|---|
 | Ditto VPC — Step 1 | Ditto-managed | broad (phase 1) | none |
 | Ditto VPC — Step 2 | Ditto-managed | cluster tag (phase 2) | none |
-| Ditto VPC — Step 3 | Ditto-managed | cluster tag (phase 2) | `ec2:Vpc` condition |
-| Customer VPC — Step 1 | omitted | broad (phase 1) | `ec2:Vpc` condition |
-| Customer VPC — Step 2 | omitted | cluster tag (phase 2) | `ec2:Vpc` condition |
+| Ditto VPC — Step 3 | Ditto-managed | cluster tag (phase 2) | VPC resource + supported `ec2:Vpc` conditions |
+| Customer VPC — Step 1 | omitted | broad (phase 1) | VPC resource + supported `ec2:Vpc` conditions |
+| Customer VPC — Step 2 | omitted | cluster tag (phase 2) | VPC resource + supported `ec2:Vpc` conditions |
 
 > **Note:** `--cluster-name` always requires an existing state file. Run the initial deployment first, then re-run to tighten. The CLI enforces this and will exit with an error if no state file is found.

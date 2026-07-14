@@ -78,7 +78,7 @@ variable "cluster_name" {
 
 variable "vpc_id" {
   type        = string
-  description = "When set, restricts CAPA EC2 operations (instance launches, security group creates) to this specific VPC. Intended for BYO-VPC deployments where the controller must not affect resources outside the cluster VPC."
+  description = "When set, scopes security-group creation to this VPC and applies ec2:Vpc only to EC2 action/resource combinations that support it."
   default     = null
 }
 

@@ -46,19 +46,32 @@ resource "aws_iam_policy" "capa_control_plane" {
         ]
         Resource = ["*"]
       },
-      # EC2 creates — phase-2: require cluster ownership tag at request time
+      # Security group creation authorizes the new security group and its target
+      # VPC separately. Request-tag conditions only apply to the SG resource.
       merge(
         {
-          Effect = "Allow"
-          Action = [
-            "ec2:CreateSecurityGroup",
-            "ec2:CreateVolume",
-          ]
-          Resource = ["*"]
+          Effect   = "Allow"
+          Action   = ["ec2:CreateSecurityGroup"]
+          Resource = ["arn:aws:ec2:*:*:security-group/*"]
         },
         local.ec2_create_cond != null ? { Condition = local.ec2_create_cond } : {}
       ),
-      # Security group mutations — phase-2: scoped to cluster-managed SGs
+      {
+        Effect   = "Allow"
+        Action   = ["ec2:CreateSecurityGroup"]
+        Resource = [local.ec2_vpc_arn != null ? local.ec2_vpc_arn : "arn:aws:ec2:*:*:vpc/*"]
+      },
+      # EBS volumes support request tags but have no VPC context.
+      merge(
+        {
+          Effect   = "Allow"
+          Action   = ["ec2:CreateVolume"]
+          Resource = ["arn:aws:ec2:*:*:volume/*"]
+        },
+        local.ec2_create_cond != null ? { Condition = local.ec2_create_cond } : {}
+      ),
+      # Security group mutations — cluster scoped in phase-2 and VPC scoped
+      # when vpc_id is set.
       merge(
         {
           Effect = "Allow"
@@ -69,7 +82,7 @@ resource "aws_iam_policy" "capa_control_plane" {
           ]
           Resource = ["arn:aws:ec2:*:*:security-group/*"]
         },
-        local.ec2_resource_cond != null ? { Condition = local.ec2_resource_cond } : {}
+        local.ec2_vpc_resource_cond != null ? { Condition = local.ec2_vpc_resource_cond } : {}
       ),
       # Volume mutations — phase-2: scoped to cluster-managed volumes.
       # AttachVolume/DetachVolume are intentionally omitted: AWS requires both the

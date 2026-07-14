@@ -22,18 +22,25 @@
       "Resource": "*"
     },
     {
-      "Sid": "EC2KarpenterNodeManagement",
+      "Sid": "EC2KarpenterResourceManagement",
       "Effect": "Allow",
       "Action": [
         "ec2:CreateFleet",
         "ec2:CreateLaunchTemplate",
         "ec2:DeleteLaunchTemplate",
-        "ec2:RunInstances",
         "ec2:TerminateInstances"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "EC2KarpenterRunInstances",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:RunInstances"
       ],
       "Resource": "*"%{~ if vpc_arn != null ~},
       "Condition": {
-        "StringEquals": {
+        "StringEqualsIfExists": {
           "ec2:Vpc": "${vpc_arn}"
         }
       }%{~ endif ~}
@@ -44,12 +51,15 @@
       "Action": [
         "ec2:CreateSecurityGroup"
       ],
-      "Resource": "*"%{~ if vpc_arn != null ~},
-      "Condition": {
-        "StringEquals": {
-          "ec2:Vpc": "${vpc_arn}"
-        }
-      }%{~ endif ~}
+      "Resource": "arn:aws:ec2:*:*:security-group/*"
+    },
+    {
+      "Sid": "EC2SecurityGroupCreateVpc",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateSecurityGroup"
+      ],
+      "Resource": "%{~ if vpc_arn != null ~}${vpc_arn}%{~ else ~}arn:aws:ec2:*:*:vpc/*%{~ endif ~}"
     },
     {
       "Sid": "EC2SecurityGroupMutationsDittoProject",
