@@ -21,6 +21,16 @@ This module implements a flexible cloud infrastructure setup with the following 
 This architecture enables cloud provider flexibility while maintaining consistent
 infrastructure configuration patterns.
 
+### Resource Import Workflow
+
+Bootstrap commands accept repeated `--import-resource address=id` values for
+resources already represented by the embedded Terraform configuration. After
+Terraform initialization, Dittocloud imports each resource with the same variable
+set used by plan/apply and persists the temporary state to the configured `--state`
+path after every successful import. It then displays a detailed post-import plan
+and exits without applying infrastructure changes. A normal bootstrap run is
+required to apply any differences shown by that plan.
+
 ## Cloud Provider Configuration
 
 ### AWS
