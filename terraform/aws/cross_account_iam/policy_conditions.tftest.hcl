@@ -152,6 +152,42 @@ run "vpc_and_cluster_conditions_match_supported_resources" {
 
   assert {
     condition = length([
+      for statement in jsondecode(aws_iam_policy.iam_trust_editor_policy.policy).Statement : statement
+      if statement.Effect == "Allow" &&
+      contains(try(statement.Action, []), "iam:CreateRole") &&
+      try(statement.Resource, null) == "arn:aws:iam::520778242457:role/dittocluster/*" &&
+      toset(try(statement.Condition.StringEquals["iam:PermissionsBoundary"], [])) == toset([
+        "arn:aws:iam::520778242457:policy/ditto-cluster-resources-boundary-policy",
+        "arn:aws:iam::520778242457:policy/ditto-cluster-external-resources-boundary-policy",
+      ])
+    ]) == 1
+    error_message = "The trust editor must require an approved Ditto permissions boundary when creating a role."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.iam_trust_editor_policy.policy).Statement : statement
+      if statement.Effect == "Allow" &&
+      contains(try(statement.Action, []), "iam:PutRolePermissionsBoundary")
+    ]) == 0
+    error_message = "The trust editor must not allow replacing a role permissions boundary after creation."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.iam_trust_editor_policy.policy).Statement : statement
+      if statement.Effect == "Deny" &&
+      try(statement.Resource, null) == "arn:aws:iam::520778242457:role/dittocluster/*" &&
+      toset(try(statement.Action, [])) == toset([
+        "iam:DeleteRolePermissionsBoundary",
+        "iam:PutRolePermissionsBoundary",
+      ])
+    ]) == 1
+    error_message = "The trust editor must explicitly deny permissions-boundary replacement and removal for managed roles."
+  }
+
+  assert {
+    condition = length([
       for statement in jsondecode(aws_iam_policy.capa_controller_base.policy).Statement : statement
       if try(statement.Condition.StringEquals["ec2:Vpc"], null) != null && length(setintersection(
         toset(try(statement.Action, [])),

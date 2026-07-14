@@ -34,7 +34,7 @@ Phase 2 requires an existing deployment. Pass `--cluster-name` on a re-run after
 
 ### IAM Trust Editor Role (`trust-editor.ditto.live`)
 
-Allows the Ditto control plane to create IAM roles within the customer account. All roles created through this role must carry a mandatory permission boundary, enforced by IAM conditions on the trust editor role itself.
+Allows the Ditto control plane to create IAM roles within the customer account. All roles created through this role must carry one of the two approved Ditto permission boundaries, enforced by the `iam:PermissionsBoundary` condition on `CreateRole`. The trust editor explicitly denies both replacing and removing the role boundary after creation.
 
 ## Boundaries
 
