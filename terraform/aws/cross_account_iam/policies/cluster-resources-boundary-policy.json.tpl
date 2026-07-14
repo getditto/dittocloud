@@ -66,9 +66,10 @@
       "Effect": "Allow",
       "Action": [
         "ec2:AuthorizeSecurityGroupIngress",
-        "ec2:RevokeSecurityGroupIngress"
+        "ec2:RevokeSecurityGroupIngress",
+        "ec2:DeleteSecurityGroup"
       ],
-      "Resource": "*",
+      "Resource": "arn:aws:ec2:*:*:security-group/*",
       "Condition": {
         "StringEquals": {
           "ec2:ResourceTag/ditto:project": "${ec2_project_tag}"
@@ -95,16 +96,23 @@
         "arn:aws:ec2:*:*:route-table/*"
       ]
     },
+%{~ if vpc_arn != null ~}
     {
-      "Sid": "EC2SecurityGroupMutations",
+      "Sid": "EC2SecurityGroupMutationsInVpc",
       "Effect": "Allow",
       "Action": [
         "ec2:AuthorizeSecurityGroupIngress",
         "ec2:RevokeSecurityGroupIngress",
         "ec2:DeleteSecurityGroup"
       ],
-      "Resource": "*"
+      "Resource": "arn:aws:ec2:*:*:security-group/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:Vpc": "${vpc_arn}"
+        }
+      }
     },
+%{~ endif ~}
     {
       "Sid": "KarpenterSSM",
       "Effect": "Allow",

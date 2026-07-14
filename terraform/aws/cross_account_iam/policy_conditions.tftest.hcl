@@ -135,7 +135,77 @@ run "vpc_and_cluster_conditions_match_supported_resources" {
   }
 
   assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.cluster_resources_boundary_policy.policy).Statement : statement
+      if length(setintersection(
+        toset(try(statement.Action, [])),
+        toset([
+          "ec2:AuthorizeSecurityGroupIngress",
+          "ec2:RevokeSecurityGroupIngress",
+          "ec2:DeleteSecurityGroup",
+        ])
+      )) > 0 &&
+      try(statement.Condition.StringEquals["ec2:ResourceTag/ditto:project"], null) == null &&
+      try(statement.Condition.StringEquals["ec2:Vpc"], null) == null
+    ]) == 0
+    error_message = "Every boundary statement that mutates security groups must be restricted by the Ditto project tag or selected VPC."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.cluster_resources_boundary_policy.policy).Statement : statement
+      if try(statement.Sid, null) == "EC2SecurityGroupMutationsDittoProject" &&
+      try(statement.Resource, null) == "arn:aws:ec2:*:*:security-group/*" &&
+      try(statement.Condition.StringEquals["ec2:ResourceTag/ditto:project"], null) == "ditto" &&
+      toset(try(statement.Action, [])) == toset([
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ec2:RevokeSecurityGroupIngress",
+        "ec2:DeleteSecurityGroup",
+      ])
+    ]) == 1
+    error_message = "The project-tagged security-group mutation path must cover ingress changes and deletion."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.cluster_resources_boundary_policy.policy).Statement : statement
+      if try(statement.Sid, null) == "EC2SecurityGroupMutationsInVpc" &&
+      try(statement.Resource, null) == "arn:aws:ec2:*:*:security-group/*" &&
+      try(statement.Condition.StringEquals["ec2:Vpc"], null) == "arn:aws:ec2:us-west-2:520778242457:vpc/vpc-09e877f9012f52241"
+    ]) == 1
+    error_message = "The untagged load-balancer-controller security-group path must be confined to the selected VPC."
+  }
+
+  assert {
     condition     = length(jsonencode(jsondecode(aws_iam_policy.cluster_resources_boundary_policy.policy))) <= 6144
     error_message = "The cluster resources boundary managed policy exceeds AWS's 6,144-character limit."
+  }
+}
+
+run "security_group_mutations_without_vpc_require_project_tag" {
+  command = plan
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.cluster_resources_boundary_policy.policy).Statement : statement
+      if length(setintersection(
+        toset(try(statement.Action, [])),
+        toset([
+          "ec2:AuthorizeSecurityGroupIngress",
+          "ec2:RevokeSecurityGroupIngress",
+          "ec2:DeleteSecurityGroup",
+        ])
+      )) > 0 &&
+      try(statement.Condition.StringEquals["ec2:ResourceTag/ditto:project"], null) != "ditto"
+    ]) == 0
+    error_message = "Without a selected VPC, every security-group mutation must require the Ditto project tag."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.cluster_resources_boundary_policy.policy).Statement : statement
+      if try(statement.Sid, null) == "EC2SecurityGroupMutationsInVpc"
+    ]) == 0
+    error_message = "The VPC-scoped security-group exception must not exist when vpc_id is unset."
   }
 }
