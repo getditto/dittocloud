@@ -85,9 +85,13 @@ dittocloud bootstrap aws
 dittocloud bootstrap aws \
   --aws-profile my-profile \
   --aws-region us-west-2 \
+  --create-vpc=true \
   --aws-vpc-name ditto-vpc \
   --aws-vpc-cidr 10.0.0.0/16
 ```
+
+Kubeadm is the default. Add `--enable-eks` only when provisioning an EKS
+cluster and its supporting IAM resources.
 
 #### Customer-Managed VPC
 
@@ -102,13 +106,13 @@ dittocloud bootstrap aws \
 ```
 
 To skip Terraform VPC creation while retaining VPC lifecycle permissions for
-Cluster API, set `create_vpc=false` without enabling `--customer-managed-vpc`:
+Cluster API, set `--create-vpc=false` without enabling `--customer-managed-vpc`:
 
 ```bash
 dittocloud bootstrap aws \
   --aws-profile my-profile \
   --aws-region us-west-2 \
-  --tf-var=create_vpc=false
+  --create-vpc=false
 ```
 
 #### Phase-2 IAM Lock-Down (Optional)

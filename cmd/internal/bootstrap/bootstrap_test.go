@@ -132,6 +132,8 @@ func TestBootstrap(t *testing.T) {
 			"--aws-region=us-west-2",
 			"--aws-vpc-name=test-vpc",
 			"--aws-vpc-cidr=10.0.0.0/16",
+			"--create-vpc=true",
+			"--enable-eks=true",
 			"--state=/tmp/test.tfstate",
 			"--dry-run",
 		})
@@ -143,16 +145,49 @@ func TestBootstrap(t *testing.T) {
 		assertCallCounts(t, mock, 1, 1, 0)
 
 		wantVars := map[string]string{
-			"profile":  "test-profile",
-			"region":   "us-west-2",
-			"vpc_name": "test-vpc",
-			"vpc_cidr": "10.0.0.0/16",
+			"profile":    "test-profile",
+			"region":     "us-west-2",
+			"vpc_name":   "test-vpc",
+			"vpc_cidr":   "10.0.0.0/16",
+			"create_vpc": "true",
+			"enable_eks": "true",
 		}
 
 		for key, want := range wantVars {
 			if got := mock.PlanVars[key]; got != want {
 				t.Errorf("%s: got %q, want %q", key, got, want)
 			}
+		}
+	})
+
+	t.Run("should expose Cluster API VPC and EKS modes as first-class flags", func(t *testing.T) {
+		cmd, mock := setupBootstrapTest(t, []string{
+			"aws",
+			"--aws-profile=test-profile",
+			"--aws-region=us-west-2",
+			"--create-vpc=false",
+			"--enable-eks=false",
+			"--state=/tmp/test.tfstate",
+			"--dry-run",
+		})
+
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error executing command: %v", err)
+		}
+
+		assertCallCounts(t, mock, 1, 1, 0)
+
+		if got := mock.PlanVars["create_vpc"]; got != "false" {
+			t.Errorf("create_vpc: got %q, want %q", got, "false")
+		}
+		if got := mock.PlanVars["enable_eks"]; got != "false" {
+			t.Errorf("enable_eks: got %q, want %q", got, "false")
+		}
+		if got, ok := mock.PlanVars["vpc_name"]; ok {
+			t.Errorf("vpc_name should not be set when Cluster API creates the VPC, got %q", got)
+		}
+		if got, ok := mock.PlanVars["vpc_cidr"]; ok {
+			t.Errorf("vpc_cidr should not be set when Cluster API creates the VPC, got %q", got)
 		}
 	})
 
@@ -210,6 +245,49 @@ func TestBootstrap(t *testing.T) {
 		assertCallCounts(t, mock, 0, 0, 0)
 	})
 
+	t.Run("should reject Terraform VPC creation with a customer-managed VPC", func(t *testing.T) {
+		cmd, mock := setupBootstrapTest(t, []string{
+			"aws",
+			"--aws-profile=test-profile",
+			"--customer-managed-vpc",
+			"--vpc-id=vpc-09e877f9012f52241",
+			"--create-vpc=true",
+			"--state=/tmp/test.tfstate",
+			"--dry-run",
+		})
+
+		err := cmd.Execute()
+		if err == nil {
+			t.Fatal("expected an error for contradictory VPC ownership flags")
+		}
+		if !strings.Contains(err.Error(), "--create-vpc=true cannot be used with --customer-managed-vpc") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		assertCallCounts(t, mock, 0, 0, 0)
+	})
+
+	t.Run("should reject VPC configuration when Cluster API creates the VPC", func(t *testing.T) {
+		cmd, mock := setupBootstrapTest(t, []string{
+			"aws",
+			"--aws-profile=test-profile",
+			"--create-vpc=false",
+			"--aws-vpc-name=unused",
+			"--state=/tmp/test.tfstate",
+			"--dry-run",
+		})
+
+		err := cmd.Execute()
+		if err == nil {
+			t.Fatal("expected an error for VPC configuration in Cluster API mode")
+		}
+		if !strings.Contains(err.Error(), "--aws-vpc-name can only be used when --create-vpc=true") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		assertCallCounts(t, mock, 0, 0, 0)
+	})
+
 	t.Run("should pass correct variables to terraform for GCP", func(t *testing.T) {
 		cmd, mock := setupBootstrapTest(t, []string{
 			"gcp",
@@ -246,7 +324,6 @@ func TestBootstrap(t *testing.T) {
 			"aws",
 			"--aws-profile=test-profile",
 			`--tf-var=controller_trusted_role_arns=["arn:example1", "arn:example2"]`,
-			"--tf-var=create_vpc=false",
 			"--state=/tmp/test.tfstate",
 			"--dry-run",
 		})
@@ -256,10 +333,6 @@ func TestBootstrap(t *testing.T) {
 		}
 
 		assertCallCounts(t, mock, 1, 1, 0)
-
-		if got := mock.PlanVars["create_vpc"]; got != "false" {
-			t.Errorf("create_vpc: got %q, want %q", got, "false")
-		}
 
 		if got := mock.PlanVars["controller_trusted_role_arns"]; got != `["arn:example1", "arn:example2"]` {
 			t.Errorf("controller_trusted_role_arns: got %q, want %q", got, `["arn:example1", "arn:example2"]`)

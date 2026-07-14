@@ -23,7 +23,14 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("unable to get customer-managed-vpc: %w", err)
 			}
+			createVPC, err := cmd.Flags().GetBool("create-vpc")
+			if err != nil {
+				return fmt.Errorf("unable to get create-vpc: %w", err)
+			}
 			if customerManagedVPC {
+				if cmd.Flags().Changed("create-vpc") && createVPC {
+					return fmt.Errorf("--create-vpc=true cannot be used with --customer-managed-vpc")
+				}
 				vpcID, err := cmd.Flags().GetString("vpc-id")
 				if err != nil {
 					return fmt.Errorf("unable to get vpc-id: %w", err)
@@ -31,11 +38,13 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 				if strings.TrimSpace(vpcID) == "" {
 					return fmt.Errorf("--vpc-id is required with --customer-managed-vpc so IAM permissions can be restricted to the existing VPC")
 				}
+			}
+			if customerManagedVPC || !createVPC {
 				if cmd.Flags().Changed("aws-vpc-name") {
-					return fmt.Errorf("--aws-vpc-name cannot be used with --customer-managed-vpc; VPC name is only relevant when Ditto creates the VPC")
+					return fmt.Errorf("--aws-vpc-name can only be used when --create-vpc=true")
 				}
 				if cmd.Flags().Changed("aws-vpc-cidr") {
-					return fmt.Errorf("--aws-vpc-cidr cannot be used with --customer-managed-vpc; VPC CIDR is only relevant when Ditto creates the VPC")
+					return fmt.Errorf("--aws-vpc-cidr can only be used when --create-vpc=true")
 				}
 			}
 			if cmd.Flags().Changed("cluster-name") {
@@ -58,6 +67,8 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 	cmd.Flags().String("aws-region", "us-east-1", "AWS region to use")
 	cmd.Flags().String("aws-vpc-name", "ditto", "AWS VPC name to use")
 	cmd.Flags().String("aws-vpc-cidr", "10.210.0.0/16", "AWS VPC CIDR block to use")
+	cmd.Flags().Bool("create-vpc", true, "Create the VPC with Dittocloud; set false to retain VPC lifecycle permissions for Cluster API to create it")
+	cmd.Flags().Bool("enable-eks", false, "Provision EKS IAM permissions and enforce the EKS account-level IMDSv2 default")
 	cmd.Flags().StringArray("controller-trusted-role-arns", []string{}, "AWS IAM role ARNs that can assume the CAPA controller role (can be specified multiple times)")
 	cmd.Flags().StringArray("iam-trusted-role-arns", []string{}, "AWS IAM role ARNs that can assume the IAM trust editor role (can be specified multiple times)")
 	cmd.Flags().Bool("customer-managed-vpc", false, "Set when the customer provides their own VPC; skips VPC creation and omits VPC lifecycle permissions from the CAPA controller role")
@@ -72,6 +83,10 @@ func promptAWSValues(flags *pflag.FlagSet) ([]*tfexec.VarOption, error) {
 	customerManagedVPC, err := flags.GetBool("customer-managed-vpc")
 	if err != nil {
 		return nil, fmt.Errorf("unable to get customer-managed-vpc: %w", err)
+	}
+	createVPC, err := flags.GetBool("create-vpc")
+	if err != nil {
+		return nil, fmt.Errorf("unable to get create-vpc: %w", err)
 	}
 
 	optional := color.New(color.FgYellow)
@@ -91,7 +106,7 @@ func promptAWSValues(flags *pflag.FlagSet) ([]*tfexec.VarOption, error) {
 			tfexec.Var("region="+region),
 		)
 	}
-	if !customerManagedVPC {
+	if createVPC && !customerManagedVPC {
 		if vpcName := StringPrompt(
 			"Enter the VPC name",
 			flags.Lookup("aws-vpc-name").Value.String(),
@@ -139,6 +154,16 @@ func promptAWSValues(flags *pflag.FlagSet) ([]*tfexec.VarOption, error) {
 	}
 	if customerManagedVPC {
 		vars = append(vars, tfexec.Var("create_vpc=false"))
+	} else if flags.Changed("create-vpc") {
+		vars = append(vars, tfexec.Var(fmt.Sprintf("create_vpc=%t", createVPC)))
+	}
+
+	if flags.Changed("enable-eks") {
+		enableEKS, err := flags.GetBool("enable-eks")
+		if err != nil {
+			return nil, fmt.Errorf("unable to get enable-eks: %w", err)
+		}
+		vars = append(vars, tfexec.Var(fmt.Sprintf("enable_eks=%t", enableEKS)))
 	}
 
 	if flags.Changed("vpc-id") {

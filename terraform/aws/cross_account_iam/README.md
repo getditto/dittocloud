@@ -132,15 +132,15 @@ dittocloud bootstrap aws \
 ### Cluster API-managed VPC
 
 To skip Terraform VPC creation while retaining the VPC lifecycle permissions
-that Cluster API needs to create one, set `create_vpc=false` without setting
-`customer_managed_vpc=true`:
+that Cluster API needs to create one, set `--create-vpc=false` without setting
+`--customer-managed-vpc`:
 
 ```sh
 dittocloud bootstrap aws \
   --aws-profile <profile> \
   --controller-trusted-role-arns <capa-role-arn> \
   --iam-trusted-role-arns <trust-editor-role-arn> \
-  --tf-var=create_vpc=false
+  --create-vpc=false
 ```
 
 This mode cannot be VPC-ID confined initially because the VPC does not exist
