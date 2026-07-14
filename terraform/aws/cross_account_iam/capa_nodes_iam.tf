@@ -22,16 +22,24 @@ resource "aws_iam_policy" "capa_nodes" {
         ]
         Resource = ["*"]
       },
-      # EC2 tag and IPv6 mutations — cannot add resource conditions;
-      # CreateTags is needed by VPC CNI to tag network interfaces
-      {
-        Effect = "Allow"
-        Action = [
-          "ec2:AssignIpv6Addresses",
-          "ec2:CreateTags",
-        ]
-        Resource = ["*"]
-      },
+      # VPC CNI only needs these permissions for network interfaces. AWS exposes
+      # their VPC context, so both operations can be confined when vpc_id is set.
+      merge(
+        {
+          Effect   = "Allow"
+          Action   = ["ec2:AssignIpv6Addresses"]
+          Resource = ["arn:aws:ec2:*:*:network-interface/*"]
+        },
+        local.ec2_vpc_cond != null ? { Condition = local.ec2_vpc_cond } : {}
+      ),
+      merge(
+        {
+          Effect   = "Allow"
+          Action   = ["ec2:CreateTags"]
+          Resource = ["arn:aws:ec2:*:*:network-interface/*"]
+        },
+        local.ec2_vpc_cond != null ? { Condition = local.ec2_vpc_cond } : {}
+      ),
       # ECR reads — GetAuthorizationToken is account-level; remaining operations
       # require Resource = ["*"] so nodes can pull from any ECR repository
       {

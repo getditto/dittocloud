@@ -33,18 +33,51 @@ resource "aws_iam_policy" "capa_control_plane" {
         ]
         Resource = ["*"]
       },
-      # Route, tag, and IPv6 mutations — cannot add resource conditions;
-      # route tables may be customer-owned in BYO-VPC, and CreateTags must
-      # reach resources of any type
+      # Route tables can be customer-owned, so do not require ownership tags;
+      # confine them using the VPC context AWS exposes instead.
+      merge(
+        {
+          Effect   = "Allow"
+          Action   = ["ec2:CreateRoute", "ec2:DeleteRoute"]
+          Resource = ["arn:aws:ec2:*:*:route-table/*"]
+        },
+        local.ec2_vpc_cond != null ? { Condition = local.ec2_vpc_cond } : {}
+      ),
+      merge(
+        {
+          Effect   = "Allow"
+          Action   = ["ec2:AssignIpv6Addresses"]
+          Resource = ["arn:aws:ec2:*:*:network-interface/*"]
+        },
+        local.ec2_vpc_cond != null ? { Condition = local.ec2_vpc_cond } : {}
+      ),
+      # Restrict VPC-aware tag targets to the configured VPC and explicitly
+      # enumerate the remaining resource types that lack VPC context.
+      merge(
+        {
+          Effect = "Allow"
+          Action = ["ec2:CreateTags"]
+          Resource = [
+            "arn:aws:ec2:*:*:network-interface/*",
+            "arn:aws:ec2:*:*:route-table/*",
+            "arn:aws:ec2:*:*:security-group/*",
+            "arn:aws:ec2:*:*:subnet/*",
+          ]
+        },
+        local.ec2_vpc_cond != null ? { Condition = local.ec2_vpc_cond } : {}
+      ),
+      {
+        Effect   = "Allow"
+        Action   = ["ec2:CreateTags"]
+        Resource = [local.ec2_vpc_arn != null ? local.ec2_vpc_arn : "arn:aws:ec2:*:*:vpc/*"]
+      },
       {
         Effect = "Allow"
-        Action = [
-          "ec2:AssignIpv6Addresses",
-          "ec2:CreateRoute",
-          "ec2:CreateTags",
-          "ec2:DeleteRoute",
+        Action = ["ec2:CreateTags"]
+        Resource = [
+          "arn:aws:ec2:*:*:instance/*",
+          "arn:aws:ec2:*:*:volume/*",
         ]
-        Resource = ["*"]
       },
       # Security group creation authorizes the new security group and its target
       # VPC separately. Request-tag conditions only apply to the SG resource.
@@ -120,13 +153,18 @@ resource "aws_iam_policy" "capa_control_plane" {
         ]
         Resource = ["*"]
       },
-      # ELBv2 LB + TG creates — require cluster tag at request time
+      # Require the cluster tag and, when configured, keep every selected load
+      # balancer subnet inside the chosen VPC.
       {
-        Effect = "Allow"
-        Action = [
-          "elasticloadbalancing:CreateLoadBalancer",
-          "elasticloadbalancing:CreateTargetGroup",
-        ]
+        Effect    = "Allow"
+        Action    = ["elasticloadbalancing:CreateLoadBalancer"]
+        Resource  = ["*"]
+        Condition = local.elb_create_load_balancer_cond
+      },
+      # ELB IAM exposes no VPC or subnet condition for CreateTargetGroup.
+      {
+        Effect    = "Allow"
+        Action    = ["elasticloadbalancing:CreateTargetGroup"]
         Resource  = ["*"]
         Condition = local.elb_create_cond
       },

@@ -52,12 +52,13 @@ resource "aws_iam_policy" "iam_trust_editor_policy" {
 }
 
 resource "aws_iam_policy" "cluster_resources_boundary_policy" {
-  name   = "ditto-cluster-resources-boundary-policy"
+  name = "ditto-cluster-resources-boundary-policy"
   policy = templatefile("${path.module}/policies/cluster-resources-boundary-policy.json.tpl", {
     ec2_project_tag = var.ec2_project_tag
     vpc_arn         = var.vpc_id != null ? "arn:aws:ec2:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:vpc/${var.vpc_id}" : null
+    vpc_subnet_ids  = var.vpc_subnet_ids
   })
-  tags   = local.tags
+  tags = local.tags
 }
 
 resource "aws_iam_policy" "cluster_external_resources_boundary_policy" {

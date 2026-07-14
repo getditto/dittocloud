@@ -25,6 +25,129 @@ run "vpc_and_cluster_conditions_match_supported_resources" {
   variables {
     cluster_name = "test-cluster"
     vpc_id       = "vpc-09e877f9012f52241"
+    vpc_subnet_ids = [
+      "subnet-00000000000000001",
+      "subnet-00000000000000002",
+      "subnet-00000000000000003",
+      "subnet-00000000000000004",
+      "subnet-00000000000000005",
+      "subnet-00000000000000006",
+    ]
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.capa_controller_network.policy).Statement : statement
+      if contains(try(statement.Action, []), "ec2:CreateRoute") &&
+      try(statement.Resource, null) == ["arn:aws:ec2:*:*:route-table/*"] &&
+      try(statement.Condition.StringEquals["ec2:Vpc"], null) == "arn:aws:ec2:us-west-2:520778242457:vpc/vpc-09e877f9012f52241"
+    ]) == 1
+    error_message = "CAPA route mutations must be scoped to route-table ARNs in the selected VPC."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.capa_controller_network.policy).Statement : statement
+      if contains(try(statement.Action, []), "ec2:ModifyNetworkInterfaceAttribute") &&
+      try(statement.Resource, null) == ["arn:aws:ec2:*:*:network-interface/*"] &&
+      try(statement.Condition.StringEquals["ec2:Vpc"], null) == "arn:aws:ec2:us-west-2:520778242457:vpc/vpc-09e877f9012f52241"
+    ]) == 1
+    error_message = "CAPA network-interface mutations must be scoped to network-interface ARNs in the selected VPC."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.capa_control_plane.policy).Statement : statement
+      if contains(try(statement.Action, []), "ec2:CreateRoute") &&
+      try(statement.Resource, null) == ["arn:aws:ec2:*:*:route-table/*"] &&
+      try(statement.Condition.StringEquals["ec2:Vpc"], null) == "arn:aws:ec2:us-west-2:520778242457:vpc/vpc-09e877f9012f52241"
+    ]) == 1
+    error_message = "Control-plane route mutations must be scoped to route-table ARNs in the selected VPC."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.capa_nodes.policy).Statement : statement
+      if contains(try(statement.Action, []), "ec2:AssignIpv6Addresses") &&
+      try(statement.Resource, null) == ["arn:aws:ec2:*:*:network-interface/*"] &&
+      try(statement.Condition.StringEquals["ec2:Vpc"], null) == "arn:aws:ec2:us-west-2:520778242457:vpc/vpc-09e877f9012f52241"
+    ]) == 1
+    error_message = "Node IPv6 assignment must be confined to network interfaces in the selected VPC."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.capa_controller_network.policy).Statement : statement
+      if contains(try(statement.Action, []), "ec2:CreateTags") &&
+      contains(try(statement.Resource, []), "arn:aws:ec2:*:*:subnet/*") &&
+      try(statement.Condition.StringEquals["ec2:Vpc"], null) == "arn:aws:ec2:us-west-2:520778242457:vpc/vpc-09e877f9012f52241"
+    ]) == 1
+    error_message = "CAPA tagging of VPC-aware EC2 resources must be confined to the selected VPC."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.capa_controller_elb.policy).Statement : statement
+      if contains(try(statement.Action, []), "elasticloadbalancing:CreateLoadBalancer") &&
+      toset(try(statement.Condition["ForAllValues:StringEquals"]["elasticloadbalancing:Subnet"], [])) == toset([
+        "subnet-00000000000000001",
+        "subnet-00000000000000002",
+        "subnet-00000000000000003",
+        "subnet-00000000000000004",
+        "subnet-00000000000000005",
+        "subnet-00000000000000006",
+      ]) &&
+      try(statement.Condition.Null["elasticloadbalancing:Subnet"], null) == "false"
+    ]) == 1
+    error_message = "CAPA load-balancer creation must require every selected subnet to belong to the configured VPC."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.capa_controller_elb.policy).Statement : statement
+      if contains(try(statement.Action, []), "elasticloadbalancing:SetSubnets") &&
+      toset(try(statement.Condition["ForAllValues:StringEquals"]["elasticloadbalancing:Subnet"], [])) == toset([
+        "subnet-00000000000000001",
+        "subnet-00000000000000002",
+        "subnet-00000000000000003",
+        "subnet-00000000000000004",
+        "subnet-00000000000000005",
+        "subnet-00000000000000006",
+      ])
+    ]) == 1
+    error_message = "CAPA SetSubnets must keep every load-balancer subnet inside the configured VPC."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.cluster_resources_boundary_policy.policy).Statement : statement
+      if contains(try(statement.Action, []), "elasticloadbalancing:CreateLoadBalancer") &&
+      toset(try(statement.Condition["ForAllValues:StringEquals"]["elasticloadbalancing:Subnet"], [])) == toset([
+        "subnet-00000000000000001",
+        "subnet-00000000000000002",
+        "subnet-00000000000000003",
+        "subnet-00000000000000004",
+        "subnet-00000000000000005",
+        "subnet-00000000000000006",
+      ])
+    ]) == 1
+    error_message = "The cluster boundary must confine load-balancer creation to subnets in the configured VPC."
+  }
+
+  assert {
+    condition = alltrue([
+      for action in [
+        "elasticloadbalancing:CreateTargetGroup",
+        "elasticloadbalancing:CreateListener",
+        "elasticloadbalancing:CreateRule",
+        "elasticloadbalancing:RegisterTargets",
+        "elasticloadbalancing:SetSecurityGroups",
+        "elasticloadbalancing:SetSubnets",
+        ] : contains(flatten([
+          for statement in jsondecode(aws_iam_policy.cluster_resources_boundary_policy.policy).Statement : try(statement.Action, [])
+      ]), action)
+    ])
+    error_message = "VPC confinement must preserve the AWS Load Balancer Controller operations needed to reconcile Kubernetes Services and Ingresses."
   }
 
   assert {
@@ -112,6 +235,21 @@ run "vpc_and_cluster_conditions_match_supported_resources" {
   }
 
   assert {
+    condition     = length(aws_iam_policy.capa_controller_network.policy) <= 6144
+    error_message = "The CAPA controller network managed policy exceeds AWS's 6,144-character limit."
+  }
+
+  assert {
+    condition     = length(aws_iam_policy.capa_controller_elb.policy) <= 6144
+    error_message = "The CAPA controller ELB managed policy exceeds AWS's 6,144-character limit."
+  }
+
+  assert {
+    condition     = length(aws_iam_policy.capa_nodes.policy) <= 6144
+    error_message = "The CAPA node managed policy exceeds AWS's 6,144-character limit."
+  }
+
+  assert {
     condition     = length(aws_iam_policy.capa_control_plane.policy) <= 6144
     error_message = "The CAPA control-plane managed policy exceeds AWS's 6,144-character limit."
   }
@@ -154,8 +292,7 @@ run "vpc_and_cluster_conditions_match_supported_resources" {
   assert {
     condition = length([
       for statement in jsondecode(aws_iam_policy.cluster_resources_boundary_policy.policy).Statement : statement
-      if try(statement.Sid, null) == "EC2SecurityGroupMutationsDittoProject" &&
-      try(statement.Resource, null) == "arn:aws:ec2:*:*:security-group/*" &&
+      if try(statement.Resource, null) == "arn:aws:ec2:*:*:security-group/*" &&
       try(statement.Condition.StringEquals["ec2:ResourceTag/ditto:project"], null) == "ditto" &&
       toset(try(statement.Action, [])) == toset([
         "ec2:AuthorizeSecurityGroupIngress",
@@ -169,8 +306,7 @@ run "vpc_and_cluster_conditions_match_supported_resources" {
   assert {
     condition = length([
       for statement in jsondecode(aws_iam_policy.cluster_resources_boundary_policy.policy).Statement : statement
-      if try(statement.Sid, null) == "EC2SecurityGroupMutationsInVpc" &&
-      try(statement.Resource, null) == "arn:aws:ec2:*:*:security-group/*" &&
+      if try(statement.Resource, null) == "arn:aws:ec2:*:*:security-group/*" &&
       try(statement.Condition.StringEquals["ec2:Vpc"], null) == "arn:aws:ec2:us-west-2:520778242457:vpc/vpc-09e877f9012f52241"
     ]) == 1
     error_message = "The untagged load-balancer-controller security-group path must be confined to the selected VPC."
@@ -204,8 +340,22 @@ run "security_group_mutations_without_vpc_require_project_tag" {
   assert {
     condition = length([
       for statement in jsondecode(aws_iam_policy.cluster_resources_boundary_policy.policy).Statement : statement
-      if try(statement.Sid, null) == "EC2SecurityGroupMutationsInVpc"
+      if toset(try(statement.Action, [])) == toset([
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ec2:RevokeSecurityGroupIngress",
+        "ec2:DeleteSecurityGroup",
+      ]) &&
+      try(statement.Condition.StringEquals["ec2:Vpc"], null) != null
     ]) == 0
     error_message = "The VPC-scoped security-group exception must not exist when vpc_id is unset."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.cluster_resources_boundary_policy.policy).Statement : statement
+      if contains(try(statement.Action, []), "elasticloadbalancing:CreateLoadBalancer") &&
+      try(statement.Condition["ForAllValues:StringEquals"]["elasticloadbalancing:Subnet"], null) != null
+    ]) == 0
+    error_message = "The subnet condition must be omitted in Cluster API-managed VPC mode because no VPC or subnet IDs exist yet."
   }
 }

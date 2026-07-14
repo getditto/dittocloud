@@ -52,11 +52,52 @@ locals {
     StringEquals = local.ec2_vpc_string_equals
   } : null
 
+  ec2_tag_keys_cond = {
+    "ForAllValues:StringLike" = {
+      "aws:TagKeys" = [
+        "kubernetes.io/*",
+        "k8s.io/*",
+        "sigs.k8s.io/*",
+        "ditto.live/*",
+        "Name",
+        "MachineName",
+      ]
+    }
+  }
+
+  # ELB does not expose a VPC condition key for load balancers. It does expose
+  # the selected subnet IDs on CreateLoadBalancer and SetSubnets, so require
+  # every requested subnet to belong to the configured VPC. An empty subnet
+  # list fails closed when a VPC ID is configured.
+  elb_vpc_subnet_cond = var.vpc_id != null ? {
+    "ForAllValues:StringEquals" = {
+      "elasticloadbalancing:Subnet" = var.vpc_subnet_ids
+    }
+    Null = {
+      "elasticloadbalancing:Subnet" = "false"
+    }
+  } : null
+
   # ELB LB/TG creates — cluster tag must be present (phase 1) or match exactly (phase 2)
   elb_create_cond = jsondecode(
     var.cluster_name != null
     ? jsonencode({ StringEquals = { "aws:RequestTag/elbv2.k8s.aws/cluster" = var.cluster_name } })
     : jsonencode({ Null = { "aws:RequestTag/elbv2.k8s.aws/cluster" = "false" } })
+  )
+
+  elb_create_load_balancer_cond = merge(
+    local.elb_create_cond,
+    jsondecode(
+      local.elb_vpc_subnet_cond != null
+      ? jsonencode({
+        "ForAllValues:StringEquals" = local.elb_vpc_subnet_cond["ForAllValues:StringEquals"]
+        Null = merge(
+          try(local.elb_create_cond.Null, {}),
+          local.elb_vpc_subnet_cond.Null,
+        )
+      })
+      : jsonencode({})
+    ),
   )
 
   # ELB LB/TG/target-group mutations — cluster tag on existing resource

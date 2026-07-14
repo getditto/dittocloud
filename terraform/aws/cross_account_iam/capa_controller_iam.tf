@@ -21,8 +21,9 @@ module "capa_controller_role" {
 
   policies = merge(
     {
-      capa-controller-base = aws_iam_policy.capa_controller_base.arn
-      capa-controller-elb  = aws_iam_policy.capa_controller_elb.arn
+      capa-controller-base    = aws_iam_policy.capa_controller_base.arn
+      capa-controller-elb     = aws_iam_policy.capa_controller_elb.arn
+      capa-controller-network = aws_iam_policy.capa_controller_network.arn
     },
     !var.customer_managed_vpc ? {
       capa-controller-vpc-lifecycle = aws_iam_policy.capa_controller_vpc_lifecycle[0].arn
@@ -69,41 +70,6 @@ resource "aws_iam_policy" "capa_controller_base" {
           "tag:GetResources",
         ]
         Resource = ["*"]
-      },
-      # Route mutations — cannot add ResourceTag: route tables may be customer-owned in BYO-VPC
-      {
-        Effect = "Allow"
-        Action = [
-          "ec2:CreateRoute",
-          "ec2:DeleteRoute",
-          "ec2:ModifyNetworkInterfaceAttribute",
-          "ec2:ReplaceRoute",
-        ]
-        Resource = ["*"]
-      },
-      # Tag mutations — must reach all resource types (VPC, subnets, instances, SGs, etc.),
-      # including client-owned resources in BYO-VPC, so resource conditions can't be used.
-      # Scoped by tag key namespace instead: only kubernetes.io/*, k8s.io/*,
-      # sigs.k8s.io/*, and ditto.live/* keys may be added or removed.
-      {
-        Effect = "Allow"
-        Action = [
-          "ec2:CreateTags",
-          "ec2:DeleteTags",
-        ]
-        Resource = ["*"]
-        Condition = {
-          "ForAllValues:StringLike" = {
-            "aws:TagKeys" = [
-              "kubernetes.io/*",
-              "k8s.io/*",
-              "sigs.k8s.io/*",
-              "ditto.live/*",
-              "Name",
-              "MachineName",
-            ]
-          }
-        }
       },
       # Security group rule mutations — cluster scoped in phase-2 and VPC scoped
       # when vpc_id is set. Security groups expose the ec2:Vpc condition key.
@@ -328,6 +294,69 @@ resource "aws_iam_policy" "capa_controller_base" {
 
 # ELB / Load Balancer Controller permissions — always attached alongside capa_controller_base.
 # Split into a separate policy so that base + ELB each stay under the 6144-char AWS limit.
+# Split from the base policy to stay below AWS's 6,144-character managed-policy
+# limit while retaining resource-level route, network-interface, and tag scope.
+resource "aws_iam_policy" "capa_controller_network" {
+  name = "ditto-capa-controller-network-policy"
+  tags = local.tags
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      merge(
+        {
+          Effect   = "Allow"
+          Action   = ["ec2:CreateRoute", "ec2:DeleteRoute", "ec2:ReplaceRoute"]
+          Resource = ["arn:aws:ec2:*:*:route-table/*"]
+        },
+        local.ec2_vpc_cond != null ? { Condition = local.ec2_vpc_cond } : {}
+      ),
+      merge(
+        {
+          Effect   = "Allow"
+          Action   = ["ec2:ModifyNetworkInterfaceAttribute"]
+          Resource = ["arn:aws:ec2:*:*:network-interface/*"]
+        },
+        local.ec2_vpc_resource_cond != null ? { Condition = local.ec2_vpc_resource_cond } : {}
+      ),
+      {
+        Effect    = "Allow"
+        Action    = ["ec2:CreateTags", "ec2:DeleteTags"]
+        Resource  = [local.ec2_vpc_arn != null ? local.ec2_vpc_arn : "arn:aws:ec2:*:*:vpc/*"]
+        Condition = local.ec2_tag_keys_cond
+      },
+      {
+        Effect = "Allow"
+        Action = ["ec2:CreateTags", "ec2:DeleteTags"]
+        Resource = [
+          "arn:aws:ec2:*:*:network-interface/*",
+          "arn:aws:ec2:*:*:route-table/*",
+          "arn:aws:ec2:*:*:security-group/*",
+          "arn:aws:ec2:*:*:subnet/*",
+        ]
+        Condition = merge(
+          local.ec2_tag_keys_cond,
+          local.ec2_vpc_cond != null ? local.ec2_vpc_cond : {},
+        )
+      },
+      {
+        Effect = "Allow"
+        Action = ["ec2:CreateTags", "ec2:DeleteTags"]
+        Resource = [
+          "arn:aws:ec2:*:*:elastic-ip/*",
+          "arn:aws:ec2:*:*:instance/*",
+          "arn:aws:ec2:*:*:internet-gateway/*",
+          "arn:aws:ec2:*:*:launch-template/*",
+          "arn:aws:ec2:*:*:natgateway/*",
+          "arn:aws:ec2:*:*:snapshot/*",
+          "arn:aws:ec2:*:*:volume/*",
+          "arn:aws:ec2:*:*:vpc-endpoint/*",
+        ]
+        Condition = local.ec2_tag_keys_cond
+      },
+    ]
+  })
+}
+
 resource "aws_iam_policy" "capa_controller_elb" {
   name = "ditto-capa-controller-elb-policy"
   tags = local.tags
@@ -352,15 +381,20 @@ resource "aws_iam_policy" "capa_controller_elb" {
         ]
         Resource = ["*"]
       },
-      # ELB v2 LB + TG creates — no tag condition: CAPA creates the control plane NLB
-      # with sigs.k8s.io/* tags (not elbv2.k8s.aws/cluster), so the LBC-specific
-      # tag condition would block it. Mutations and deletes are still tag-scoped below.
+      # CAPA uses sigs.k8s.io/* tags rather than the LBC cluster tag. Preserve
+      # creation, but confine load-balancer subnet selection to the chosen VPC.
+      merge(
+        {
+          Effect   = "Allow"
+          Action   = ["elasticloadbalancing:CreateLoadBalancer"]
+          Resource = ["*"]
+        },
+        local.elb_vpc_subnet_cond != null ? { Condition = local.elb_vpc_subnet_cond } : {}
+      ),
+      # ELB IAM exposes no VPC or subnet condition for CreateTargetGroup.
       {
-        Effect = "Allow"
-        Action = [
-          "elasticloadbalancing:CreateLoadBalancer",
-          "elasticloadbalancing:CreateTargetGroup",
-        ]
+        Effect   = "Allow"
+        Action   = ["elasticloadbalancing:CreateTargetGroup"]
         Resource = ["*"]
       },
       # ELB listener + rule creates — listeners don't carry the cluster tag so
@@ -383,7 +417,6 @@ resource "aws_iam_policy" "capa_controller_elb" {
           "elasticloadbalancing:ModifyLoadBalancerAttributes",
           "elasticloadbalancing:SetIpAddressType",
           "elasticloadbalancing:SetSecurityGroups",
-          "elasticloadbalancing:SetSubnets",
           "elasticloadbalancing:DeleteTargetGroup",
           "elasticloadbalancing:ModifyTargetGroup",
           "elasticloadbalancing:ModifyTargetGroupAttributes",
@@ -394,6 +427,17 @@ resource "aws_iam_policy" "capa_controller_elb" {
           "arn:aws:elasticloadbalancing:*:*:targetgroup/*/*",
         ]
       },
+      merge(
+        {
+          Effect = "Allow"
+          Action = ["elasticloadbalancing:SetSubnets"]
+          Resource = [
+            "arn:aws:elasticloadbalancing:*:*:loadbalancer/app/*/*",
+            "arn:aws:elasticloadbalancing:*:*:loadbalancer/net/*/*",
+          ]
+        },
+        local.elb_vpc_subnet_cond != null ? { Condition = local.elb_vpc_subnet_cond } : {}
+      ),
       # ELB listener + rule mutations — scoped by ARN type only; listeners do not
       # carry the elbv2.k8s.aws/cluster tag so resource tag conditions cannot be applied
       {

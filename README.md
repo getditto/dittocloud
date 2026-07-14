@@ -91,7 +91,7 @@ dittocloud bootstrap aws \
 
 #### Customer-Managed VPC
 
-If your organisation provides an existing VPC rather than letting Ditto create one, pass `--customer-managed-vpc` together with the required `--vpc-id`. This skips VPC creation, restricts supported EC2 operations to that VPC, and omits VPC lifecycle permissions (create/delete VPC, subnets, internet gateways, NAT gateways) from the CAPA controller IAM role:
+If your organisation provides an existing VPC rather than letting Ditto create one, pass `--customer-managed-vpc` together with the required `--vpc-id`. This skips VPC creation, restricts supported EC2 operations to that VPC, confines load-balancer subnet selection to the Kubernetes-role-tagged subnets discovered in that VPC, and omits VPC lifecycle permissions (create/delete VPC, subnets, internet gateways, NAT gateways) from the CAPA controller IAM role:
 
 ```bash
 dittocloud bootstrap aws \
