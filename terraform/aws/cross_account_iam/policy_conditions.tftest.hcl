@@ -441,6 +441,15 @@ run "vpc_and_cluster_conditions_match_supported_resources" {
     condition     = length(jsonencode(jsondecode(aws_iam_policy.cluster_resources_boundary_policy.policy))) <= 6144
     error_message = "The cluster resources boundary managed policy exceeds AWS's 6,144-character limit."
   }
+
+  assert {
+    condition = (
+      length(aws_iam_policy.capa_controller_eks_policy) == 0 &&
+      length(aws_iam_role.capa_eks_control_plane) == 0 &&
+      !contains(keys(local.capa_controller_policies), "capa-controller-eks")
+    )
+    error_message = "EKS IAM resources and controller attachment must remain absent when enable_eks is false."
+  }
 }
 
 run "security_group_mutations_without_vpc_require_project_tag" {
@@ -493,5 +502,29 @@ run "security_group_mutations_without_vpc_require_project_tag" {
       try(statement.Condition.Null["ec2:ResourceTag/sigs.k8s.io/cluster-api-provider-aws/role"], null) != "false"
     ]) == 0
     error_message = "Phase 1 direct CAPA tagging must require the existing bootstrap role tag even before the cluster name is known."
+  }
+}
+
+run "eks_permissions_are_attached_when_enabled" {
+  command = plan
+
+  variables {
+    enable_eks = true
+  }
+
+  assert {
+    condition = (
+      length(aws_iam_policy.capa_controller_eks_policy) == 1 &&
+      contains(keys(local.capa_controller_policies), "capa-controller-eks")
+    )
+    error_message = "enable_eks must create and attach the CAPA controller EKS policy."
+  }
+
+  assert {
+    condition = (
+      length(aws_iam_role.capa_eks_control_plane) == 1 &&
+      length(aws_iam_role_policy_attachment.capa_eks_control_plane) == 1
+    )
+    error_message = "enable_eks must create the EKS control-plane service role and attach AmazonEKSClusterPolicy."
   }
 }

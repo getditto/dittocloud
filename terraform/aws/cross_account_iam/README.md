@@ -10,7 +10,7 @@ Assumed by the Ditto control plane to create and manage Kubernetes cluster infra
 
 #### Policies
 
-Four IAM policies are managed; the VPC lifecycle policy is conditional:
+Five IAM policies are managed; the VPC lifecycle and EKS policies are conditional:
 
 | Policy name | Variable | Description |
 |-------------|----------|-------------|
@@ -18,6 +18,7 @@ Four IAM policies are managed; the VPC lifecycle policy is conditional:
 | `ditto-capa-controller-network-policy` | always attached | VPC-aware route, network-interface, and EC2 tagging permissions |
 | `ditto-capa-controller-elb-policy` | always attached | ELBv2 load balancer, target group, listener, rule, target registration, and tagging permissions |
 | `ditto-capa-controller-vpc-lifecycle-policy` | `customer_managed_vpc = false` | VPC, subnet, IGW, NAT gateway, and route table lifecycle |
+| `ditto-capa-controller-eks-policy` | `enable_eks = true` | EKS managed control planes, node groups, addons, access entries, and OIDC providers |
 
 #### Tag Conditions
 
@@ -55,6 +56,7 @@ Permission boundaries are defined in the `policies/` folder. They constrain the 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
 | `customer_managed_vpc` | bool | `false` | When `true`, uses an existing VPC and omits the VPC lifecycle policy from the CAPA controller role |
+| `enable_eks` | bool | `false` | Creates the EKS control-plane service role and attaches the CAPA controller EKS policy |
 | `cluster_name` | string | `null` | When set, tightens IAM conditions to this specific cluster name |
 | `vpc_id` | string | `null` | Scopes security-group creation to the selected VPC and applies `ec2:Vpc` to supported resources such as subnets, security groups, and network interfaces |
 | `vpc_subnet_ids` | list(string) | `[]` | Subnets in `vpc_id` that ELB load balancers may select; populated automatically by the root AWS module |

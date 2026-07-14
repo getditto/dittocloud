@@ -1,3 +1,19 @@
+locals {
+  capa_controller_policies = merge(
+    {
+      capa-controller-base    = aws_iam_policy.capa_controller_base.arn
+      capa-controller-elb     = aws_iam_policy.capa_controller_elb.arn
+      capa-controller-network = aws_iam_policy.capa_controller_network.arn
+    },
+    !var.customer_managed_vpc ? {
+      capa-controller-vpc-lifecycle = aws_iam_policy.capa_controller_vpc_lifecycle[0].arn
+    } : {},
+    var.enable_eks ? {
+      capa-controller-eks = aws_iam_policy.capa_controller_eks_policy[0].arn
+    } : {},
+  )
+}
+
 module "capa_controller_role" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-role"
   version = "6.4.0"
@@ -19,16 +35,7 @@ module "capa_controller_role" {
     }
   }
 
-  policies = merge(
-    {
-      capa-controller-base    = aws_iam_policy.capa_controller_base.arn
-      capa-controller-elb     = aws_iam_policy.capa_controller_elb.arn
-      capa-controller-network = aws_iam_policy.capa_controller_network.arn
-    },
-    !var.customer_managed_vpc ? {
-      capa-controller-vpc-lifecycle = aws_iam_policy.capa_controller_vpc_lifecycle[0].arn
-    } : {}
-  )
+  policies = local.capa_controller_policies
 }
 
 # Core CAPA controller permissions — always attached regardless of VPC ownership.
