@@ -266,6 +266,90 @@ run "vpc_and_cluster_conditions_match_supported_resources" {
   }
 
   assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.capa_controller_network.policy).Statement : statement
+      if statement.Effect == "Allow" &&
+      contains(try(statement.Action, []), "ec2:CreateTags") &&
+      try(statement.Resource, null) == ["*"] &&
+      contains(try(statement.Condition.StringLike["ec2:CreateAction"], []), "RunInstances")
+    ]) == 1
+    error_message = "CAPA must authorize initial EC2 tags only through the creation-time ec2:CreateAction path."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.capa_controller_network.policy).Statement : statement
+      if statement.Effect == "Allow" &&
+      contains(try(statement.Action, []), "ec2:CreateTags") &&
+      try(statement.Condition.StringLike["ec2:CreateAction"], null) == null &&
+      (
+        try(statement.Condition.Null["ec2:ResourceTag/sigs.k8s.io/cluster-api-provider-aws/role"], null) != "false" ||
+        try(statement.Condition.StringEquals["ec2:ResourceTag/sigs.k8s.io/cluster-api-provider-aws/cluster/test-cluster"], null) != "owned"
+      )
+    ]) == 0
+    error_message = "Every CAPA direct CreateTags path must require the immutable role marker and the phase-2 cluster owner tag."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.capa_controller_network.policy).Statement : statement
+      if statement.Effect == "Deny" &&
+      contains(try(statement.Action, []), "ec2:CreateTags") &&
+      contains(try(statement.Condition["ForAnyValue:StringLike"]["aws:TagKeys"], []), "sigs.k8s.io/cluster-api-provider-aws/role") &&
+      contains(try(statement.Condition["ForAnyValue:StringLike"]["aws:TagKeys"], []), "kubernetes.io/cluster/*") &&
+      try(statement.Condition.Null["ec2:CreateAction"], null) == "true" &&
+      try(statement.Condition.Null["ec2:ResourceTag/sigs.k8s.io/cluster-api-provider-aws/role"], null) == "true"
+    ]) == 1
+    error_message = "CAPA must deny direct ownership-tag assignment when the existing resource lacks its bootstrap role tag."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.capa_control_plane_tags.policy).Statement : statement
+      if statement.Effect == "Allow" &&
+      contains(try(statement.Action, []), "ec2:CreateTags") &&
+      try(statement.Condition.StringLike["ec2:CreateAction"], null) == null &&
+      try(statement.Condition.Null["ec2:ResourceTag/sigs.k8s.io/cluster-api-provider-aws/role"], null) != "false"
+    ]) == 0
+    error_message = "Control-plane direct CreateTags paths must require CAPA's existing bootstrap role tag."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.capa_nodes.policy).Statement : statement
+      if statement.Effect == "Deny" &&
+      contains(try(statement.Action, []), "ec2:CreateTags") &&
+      contains(try(statement.Condition["ForAnyValue:StringLike"]["aws:TagKeys"], []), "ditto.live/managed_by") &&
+      contains(try(statement.Condition["ForAnyValue:StringLike"]["aws:TagKeys"], []), "ditto:project") &&
+      try(statement.Condition.Null["ec2:CreateAction"], null) == "true" &&
+      try(statement.Condition.Null["ec2:ResourceTag/sigs.k8s.io/cluster-api-provider-aws/role"], null) == "true"
+    ]) == 1
+    error_message = "The shared node policy must override AWS managed tag grants that could self-assign ownership to existing resources."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.cluster_resources_boundary_policy.policy).Statement : statement
+      if statement.Effect == "Allow" &&
+      contains(try(statement.Action, []), "ec2:CreateTags") &&
+      try(statement.Resource, null) == "*" &&
+      contains(try(statement.Condition.StringLike["ec2:CreateAction"], []), "RunInstances")
+    ]) == 1
+    error_message = "The cluster boundary must allow initial EC2 tags only during resource creation."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.cluster_resources_boundary_policy.policy).Statement : statement
+      if statement.Effect == "Allow" &&
+      contains(try(statement.Action, []), "ec2:CreateTags") &&
+      try(statement.Condition.StringLike["ec2:CreateAction"], null) == null &&
+      try(statement.Condition.StringEquals["ec2:ResourceTag/ditto:project"], null) != "ditto"
+    ]) == 0
+    error_message = "The cluster boundary must not permit direct tagging until the existing resource has the Ditto project marker."
+  }
+
+  assert {
     condition     = length(aws_iam_policy.capa_controller_base.policy) <= 6144
     error_message = "The CAPA controller base managed policy exceeds AWS's 6,144-character limit."
   }
@@ -288,6 +372,11 @@ run "vpc_and_cluster_conditions_match_supported_resources" {
   assert {
     condition     = length(aws_iam_policy.capa_control_plane.policy) <= 6144
     error_message = "The CAPA control-plane managed policy exceeds AWS's 6,144-character limit."
+  }
+
+  assert {
+    condition     = length(aws_iam_policy.capa_control_plane_tags.policy) <= 6144
+    error_message = "The CAPA control-plane tag managed policy exceeds AWS's 6,144-character limit."
   }
 
   assert {
@@ -393,5 +482,16 @@ run "security_group_mutations_without_vpc_require_project_tag" {
       try(statement.Condition["ForAllValues:StringEquals"]["elasticloadbalancing:Subnet"], null) != null
     ]) == 0
     error_message = "The subnet condition must be omitted in Cluster API-managed VPC mode because no VPC or subnet IDs exist yet."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.capa_controller_network.policy).Statement : statement
+      if statement.Effect == "Allow" &&
+      contains(try(statement.Action, []), "ec2:CreateTags") &&
+      try(statement.Condition.StringLike["ec2:CreateAction"], null) == null &&
+      try(statement.Condition.Null["ec2:ResourceTag/sigs.k8s.io/cluster-api-provider-aws/role"], null) != "false"
+    ]) == 0
+    error_message = "Phase 1 direct CAPA tagging must require the existing bootstrap role tag even before the cluster name is known."
   }
 }

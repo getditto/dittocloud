@@ -51,34 +51,6 @@ resource "aws_iam_policy" "capa_control_plane" {
         },
         local.ec2_vpc_cond != null ? { Condition = local.ec2_vpc_cond } : {}
       ),
-      # Restrict VPC-aware tag targets to the configured VPC and explicitly
-      # enumerate the remaining resource types that lack VPC context.
-      merge(
-        {
-          Effect = "Allow"
-          Action = ["ec2:CreateTags"]
-          Resource = [
-            "arn:aws:ec2:*:*:network-interface/*",
-            "arn:aws:ec2:*:*:route-table/*",
-            "arn:aws:ec2:*:*:security-group/*",
-            "arn:aws:ec2:*:*:subnet/*",
-          ]
-        },
-        local.ec2_vpc_cond != null ? { Condition = local.ec2_vpc_cond } : {}
-      ),
-      {
-        Effect   = "Allow"
-        Action   = ["ec2:CreateTags"]
-        Resource = [local.ec2_vpc_arn != null ? local.ec2_vpc_arn : "arn:aws:ec2:*:*:vpc/*"]
-      },
-      {
-        Effect = "Allow"
-        Action = ["ec2:CreateTags"]
-        Resource = [
-          "arn:aws:ec2:*:*:instance/*",
-          "arn:aws:ec2:*:*:volume/*",
-        ]
-      },
       # Security group creation authorizes the new security group and its target
       # VPC separately. Request-tag conditions only apply to the SG resource.
       merge(
@@ -251,6 +223,51 @@ resource "aws_iam_policy" "capa_control_plane" {
   })
 }
 
+# Keep EC2 tag authorization separate so the control-plane policy remains under
+# AWS's 6,144-character managed-policy limit.
+resource "aws_iam_policy" "capa_control_plane_tags" {
+  description = "Cluster API Control Plane EC2 tagging"
+  name        = "control-plane-tags.cluster-api-provider-aws.sigs.k8s.io"
+  tags        = local.tags
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect    = "Allow"
+        Action    = ["ec2:CreateTags"]
+        Resource  = ["*"]
+        Condition = local.ec2_create_tag_cond
+      },
+      {
+        Effect = "Allow"
+        Action = ["ec2:CreateTags"]
+        Resource = [
+          "arn:aws:ec2:*:*:network-interface/*",
+          "arn:aws:ec2:*:*:route-table/*",
+          "arn:aws:ec2:*:*:security-group/*",
+          "arn:aws:ec2:*:*:subnet/*",
+        ]
+        Condition = local.ec2_existing_vpc_tag_cond
+      },
+      {
+        Effect    = "Allow"
+        Action    = ["ec2:CreateTags"]
+        Resource  = [local.ec2_vpc_arn != null ? local.ec2_vpc_arn : "arn:aws:ec2:*:*:vpc/*"]
+        Condition = local.ec2_existing_tag_cond
+      },
+      {
+        Effect = "Allow"
+        Action = ["ec2:CreateTags"]
+        Resource = [
+          "arn:aws:ec2:*:*:instance/*",
+          "arn:aws:ec2:*:*:volume/*",
+        ]
+        Condition = local.ec2_existing_tag_cond
+      },
+    ]
+  })
+}
+
 # Configure the AWS EBS CSI Permissions to enable backups and updates to snapshots
 data "aws_iam_policy" "aws_ebs_csi_policy" {
   arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
@@ -275,6 +292,11 @@ resource "aws_iam_role" "capa_control_plane" {
 resource "aws_iam_role_policy_attachment" "capa_control_plane" {
   role       = aws_iam_role.capa_control_plane.name
   policy_arn = aws_iam_policy.capa_control_plane.arn
+}
+
+resource "aws_iam_role_policy_attachment" "capa_control_plane_tags" {
+  role       = aws_iam_role.capa_control_plane.name
+  policy_arn = aws_iam_policy.capa_control_plane_tags.arn
 }
 
 // ControlPlane nodes also need the nodes policy.

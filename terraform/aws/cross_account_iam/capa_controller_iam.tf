@@ -318,11 +318,26 @@ resource "aws_iam_policy" "capa_controller_network" {
         },
         local.ec2_vpc_resource_cond != null ? { Condition = local.ec2_vpc_resource_cond } : {}
       ),
+      # Allow initial tags only as part of an EC2 resource-creating API. Direct
+      # tagging of existing resources is handled by the bootstrap-marker paths
+      # below.
+      {
+        Effect    = "Allow"
+        Action    = ["ec2:CreateTags"]
+        Resource  = ["*"]
+        Condition = local.ec2_create_tag_cond
+      },
+      {
+        Effect    = "Deny"
+        Action    = ["ec2:CreateTags"]
+        Resource  = ["*"]
+        Condition = local.ec2_protected_tag_assignment_deny_cond
+      },
       {
         Effect    = "Allow"
         Action    = ["ec2:CreateTags", "ec2:DeleteTags"]
         Resource  = [local.ec2_vpc_arn != null ? local.ec2_vpc_arn : "arn:aws:ec2:*:*:vpc/*"]
-        Condition = local.ec2_tag_keys_cond
+        Condition = local.ec2_existing_tag_cond
       },
       {
         Effect = "Allow"
@@ -333,10 +348,7 @@ resource "aws_iam_policy" "capa_controller_network" {
           "arn:aws:ec2:*:*:security-group/*",
           "arn:aws:ec2:*:*:subnet/*",
         ]
-        Condition = merge(
-          local.ec2_tag_keys_cond,
-          local.ec2_vpc_cond != null ? local.ec2_vpc_cond : {},
-        )
+        Condition = local.ec2_existing_vpc_tag_cond
       },
       {
         Effect = "Allow"
@@ -351,7 +363,7 @@ resource "aws_iam_policy" "capa_controller_network" {
           "arn:aws:ec2:*:*:volume/*",
           "arn:aws:ec2:*:*:vpc-endpoint/*",
         ]
-        Condition = local.ec2_tag_keys_cond
+        Condition = local.ec2_existing_tag_cond
       },
     ]
   })

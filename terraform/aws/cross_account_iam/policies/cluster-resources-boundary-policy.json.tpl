@@ -72,6 +72,22 @@
     {
       "Effect": "Allow",
       "Action": [
+        "ec2:CreateTags"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringLike": {
+          "ec2:CreateAction": [
+            "Create*",
+            "RunInstances",
+            "AllocateAddress"
+          ]
+        }
+      }
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
         "ec2:CreateTags",
         "ec2:DeleteTags"
       ],
@@ -86,7 +102,12 @@
         "arn:aws:ec2:*:*:vpc/*",
         "arn:aws:ec2:*:*:internet-gateway/*",
         "arn:aws:ec2:*:*:route-table/*"
-      ]
+      ],
+      "Condition": {
+        "StringEquals": {
+          "ec2:ResourceTag/ditto:project": "${ec2_project_tag}"
+        }
+      }
     },
 %{~ if vpc_arn != null ~}
     {

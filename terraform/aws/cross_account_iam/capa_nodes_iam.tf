@@ -22,8 +22,8 @@ resource "aws_iam_policy" "capa_nodes" {
         ]
         Resource = ["*"]
       },
-      # VPC CNI only needs these permissions for network interfaces. AWS exposes
-      # their VPC context, so both operations can be confined when vpc_id is set.
+      # VPC CNI only needs IPv6 assignment here; AmazonEKS_CNI_Policy supplies
+      # its network-interface CreateTags permission.
       merge(
         {
           Effect   = "Allow"
@@ -32,14 +32,15 @@ resource "aws_iam_policy" "capa_nodes" {
         },
         local.ec2_vpc_cond != null ? { Condition = local.ec2_vpc_cond } : {}
       ),
-      merge(
-        {
-          Effect   = "Allow"
-          Action   = ["ec2:CreateTags"]
-          Resource = ["arn:aws:ec2:*:*:network-interface/*"]
-        },
-        local.ec2_vpc_cond != null ? { Condition = local.ec2_vpc_cond } : {}
-      ),
+      # This policy is attached to worker and control-plane roles. Deny direct
+      # assignment of CAPA ownership/bootstrap tags to an existing resource
+      # unless CAPA established its role marker during resource creation.
+      {
+        Effect    = "Deny"
+        Action    = ["ec2:CreateTags"]
+        Resource  = ["*"]
+        Condition = local.ec2_protected_tag_assignment_deny_cond
+      },
       # ECR reads — GetAuthorizationToken is account-level; remaining operations
       # require Resource = ["*"] so nodes can pull from any ECR repository
       {

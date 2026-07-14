@@ -65,6 +65,64 @@ locals {
     }
   }
 
+  # CAPA writes this namespaced role tag in each managed resource's create
+  # request. Treat its presence as an immutable bootstrap marker: creation-time
+  # tagging may establish it, but a later CreateTags call cannot add the marker
+  # to an arbitrary existing resource and then self-assign ownership.
+  capa_role_tag_key = "sigs.k8s.io/cluster-api-provider-aws/role"
+
+  ec2_existing_tag_string_equals = var.cluster_name != null ? {
+    "ec2:ResourceTag/sigs.k8s.io/cluster-api-provider-aws/cluster/${var.cluster_name}" = "owned"
+  } : {}
+
+  ec2_existing_tag_cond = merge(
+    local.ec2_tag_keys_cond,
+    {
+      Null = {
+        "ec2:ResourceTag/${local.capa_role_tag_key}" = "false"
+      }
+    },
+    length(local.ec2_existing_tag_string_equals) > 0 ? {
+      StringEquals = local.ec2_existing_tag_string_equals
+    } : {},
+  )
+
+  ec2_existing_vpc_tag_cond = merge(
+    local.ec2_existing_tag_cond,
+    length(merge(local.ec2_existing_tag_string_equals, local.ec2_vpc_string_equals)) > 0 ? {
+      StringEquals = merge(local.ec2_existing_tag_string_equals, local.ec2_vpc_string_equals)
+    } : {},
+  )
+
+  # EC2 performs a separate CreateTags authorization when tags are supplied to
+  # a resource-creating API. ec2:CreateAction makes this path unusable for a
+  # direct CreateTags call against an existing resource.
+  ec2_create_tag_cond = merge(local.ec2_tag_keys_cond, {
+    StringLike = {
+      "ec2:CreateAction" = ["Create*", "RunInstances", "AllocateAddress"]
+    }
+  })
+
+  # The node policy is also attached to control-plane instances, alongside AWS
+  # managed policies that independently grant CreateTags. An explicit deny is
+  # therefore required to stop those grants from establishing an ownership or
+  # permission-gating tag on an existing resource without CAPA's bootstrap tag.
+  ec2_protected_tag_assignment_deny_cond = {
+    "ForAnyValue:StringLike" = {
+      "aws:TagKeys" = [
+        local.capa_role_tag_key,
+        "sigs.k8s.io/cluster-api-provider-aws/cluster/*",
+        "kubernetes.io/cluster/*",
+        "ditto.live/managed_by",
+        "ditto:project",
+      ]
+    }
+    Null = {
+      "ec2:CreateAction"                           = "true"
+      "ec2:ResourceTag/${local.capa_role_tag_key}" = "true"
+    }
+  }
+
   # ELB does not expose a VPC condition key for load balancers. It does expose
   # the selected subnet IDs on CreateLoadBalancer and SetSubnets, so require
   # every requested subnet to belong to the configured VPC. An empty subnet

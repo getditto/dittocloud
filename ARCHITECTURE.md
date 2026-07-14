@@ -51,11 +51,12 @@ All destructive and mutating operations in both policies are gated by resource t
 
 ##### Two-Phase Permission Tightening
 
-**Phase 1 (initial bootstrap):** Conditions use the `ditto.live/managed_by = terraform` tag. This is broad enough to cover all Ditto-managed resources without knowing the cluster name in advance.
+**Phase 1 (initial bootstrap):** Initial EC2 tags are allowed only through the `ec2:CreateAction` creation path. Direct tag updates require CAPA's existing `sigs.k8s.io/cluster-api-provider-aws/role` bootstrap marker, and ownership or permission-gating tags cannot establish that marker on an arbitrary existing resource.
 
 **Phase 2 (optional re-run with `--cluster-name`):** Once the cluster name is known, conditions switch to cluster-specific tags:
 
 - EC2 creates and resource mutations: `kubernetes.io/cluster/<name> = owned` (set by CAPA on every resource it provisions)
+- Direct EC2 tag updates: `sigs.k8s.io/cluster-api-provider-aws/cluster/<name> = owned` plus the CAPA role bootstrap marker
 - ELBv2 creates and mutations: `elbv2.k8s.aws/cluster = <name>` (set by the AWS load balancer controller)
 
 After a phase-2 run the controller can only affect resources belonging to that one cluster. Customers who do not perform the phase-2 re-run remain on the phase-1 conditions — both configurations are fully operational.

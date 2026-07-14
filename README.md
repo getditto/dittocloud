@@ -113,7 +113,7 @@ dittocloud bootstrap aws \
 
 #### Phase-2 IAM Lock-Down (Optional)
 
-After the initial bootstrap and once Ditto has provisioned your cluster, you can re-run with `--cluster-name` to tighten the CAPA controller IAM policy to that specific cluster. This changes tag-based conditions from the generic `ditto.live/managed_by` tag to cluster-specific `kubernetes.io/cluster/<name>` and `elbv2.k8s.aws/cluster` tags, so the controller can only affect resources belonging to your cluster.
+After the initial bootstrap and once Ditto has provisioned your cluster, you can re-run with `--cluster-name` to tighten the CAPA controller IAM policy to that specific cluster. Before that re-run, direct EC2 tag changes already require CAPA's role tag to exist on the resource; ownership tags cannot be assigned to an arbitrary existing resource to unlock permissions. Phase 2 additionally requires cluster-specific `kubernetes.io/cluster/<name>`, `sigs.k8s.io/cluster-api-provider-aws/cluster/<name>`, and `elbv2.k8s.aws/cluster` tags.
 
 **Requirements:**
 - The initial bootstrap must have been run first — `--cluster-name` requires an existing state file.
