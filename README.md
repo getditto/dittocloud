@@ -91,13 +91,24 @@ dittocloud bootstrap aws \
 
 #### Customer-Managed VPC
 
-If your organisation provides its own VPC rather than letting Ditto create one, pass `--customer-managed-vpc`. This omits VPC lifecycle permissions (create/delete VPC, subnets, internet gateways, NAT gateways) from the CAPA controller IAM role:
+If your organisation provides an existing VPC rather than letting Ditto create one, pass `--customer-managed-vpc` together with the required `--vpc-id`. This skips VPC creation, restricts supported EC2 operations to that VPC, and omits VPC lifecycle permissions (create/delete VPC, subnets, internet gateways, NAT gateways) from the CAPA controller IAM role:
 
 ```bash
 dittocloud bootstrap aws \
   --aws-profile my-profile \
   --aws-region us-west-2 \
-  --customer-managed-vpc
+  --customer-managed-vpc \
+  --vpc-id vpc-09e877f9012f52241
+```
+
+To skip Terraform VPC creation while retaining VPC lifecycle permissions for
+Cluster API, set `create_vpc=false` without enabling `--customer-managed-vpc`:
+
+```bash
+dittocloud bootstrap aws \
+  --aws-profile my-profile \
+  --aws-region us-west-2 \
+  --tf-var=create_vpc=false
 ```
 
 #### Phase-2 IAM Lock-Down (Optional)

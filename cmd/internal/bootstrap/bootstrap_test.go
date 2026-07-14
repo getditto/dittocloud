@@ -156,6 +156,60 @@ func TestBootstrap(t *testing.T) {
 		}
 	})
 
+	t.Run("should disable VPC creation for a customer-managed VPC", func(t *testing.T) {
+		cmd, mock := setupBootstrapTest(t, []string{
+			"aws",
+			"--aws-profile=test-profile",
+			"--aws-region=us-west-2",
+			"--customer-managed-vpc",
+			"--vpc-id=vpc-09e877f9012f52241",
+			"--state=/tmp/test.tfstate",
+			"--dry-run",
+		})
+
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error executing command: %v", err)
+		}
+
+		assertCallCounts(t, mock, 1, 1, 0)
+
+		if got := mock.PlanVars["customer_managed_vpc"]; got != "true" {
+			t.Errorf("customer_managed_vpc: got %q, want %q", got, "true")
+		}
+		if got := mock.PlanVars["create_vpc"]; got != "false" {
+			t.Errorf("create_vpc: got %q, want %q", got, "false")
+		}
+		if got := mock.PlanVars["vpc_id"]; got != "vpc-09e877f9012f52241" {
+			t.Errorf("vpc_id: got %q, want %q", got, "vpc-09e877f9012f52241")
+		}
+		if got, ok := mock.PlanVars["vpc_name"]; ok {
+			t.Errorf("vpc_name should not be set for a customer-managed VPC, got %q", got)
+		}
+		if got, ok := mock.PlanVars["vpc_cidr"]; ok {
+			t.Errorf("vpc_cidr should not be set for a customer-managed VPC, got %q", got)
+		}
+	})
+
+	t.Run("should require a VPC ID for a customer-managed VPC", func(t *testing.T) {
+		cmd, mock := setupBootstrapTest(t, []string{
+			"aws",
+			"--aws-profile=test-profile",
+			"--customer-managed-vpc",
+			"--state=/tmp/test.tfstate",
+			"--dry-run",
+		})
+
+		err := cmd.Execute()
+		if err == nil {
+			t.Fatal("expected an error when --vpc-id is omitted")
+		}
+		if !strings.Contains(err.Error(), "--vpc-id is required with --customer-managed-vpc") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		assertCallCounts(t, mock, 0, 0, 0)
+	})
+
 	t.Run("should pass correct variables to terraform for GCP", func(t *testing.T) {
 		cmd, mock := setupBootstrapTest(t, []string{
 			"gcp",

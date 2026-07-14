@@ -1,6 +1,14 @@
+locals {
+  # Terraform-created VPCs are confined automatically using the module output.
+  # Existing customer VPCs use var.vpc_id. When both controls are false, Cluster
+  # API may create the VPC and no VPC ID exists yet for initial confinement.
+  create_dittocloud_vpc = var.create_vpc && !var.customer_managed_vpc
+  effective_vpc_id      = local.create_dittocloud_vpc ? module.vpc[0].vpc_id : var.vpc_id
+}
+
 module "vpc" {
   source = "./vpc"
-  count  = var.create_vpc ? 1 : 0
+  count  = local.create_dittocloud_vpc ? 1 : 0
 
   region   = var.region
   vpc_name = var.vpc_name
@@ -19,7 +27,21 @@ module "cross_account_iam" {
   iam_trusted_operations_condition_arns = var.iam_trusted_operations_condition_arns
   customer_managed_vpc                  = var.customer_managed_vpc
   cluster_name                          = var.cluster_name
-  vpc_id                                = var.vpc_id
+  vpc_id                                = local.effective_vpc_id
+}
+
+resource "terraform_data" "validate_vpc_mode" {
+  input = {
+    customer_managed_vpc = var.customer_managed_vpc
+    vpc_id               = var.vpc_id
+  }
+
+  lifecycle {
+    precondition {
+      condition     = !var.customer_managed_vpc || try(trimspace(var.vpc_id) != "", false)
+      error_message = "vpc_id must be provided when customer_managed_vpc is true so IAM permissions can be restricted to the existing VPC."
+    }
+  }
 }
 
 data "aws_caller_identity" "current" {}

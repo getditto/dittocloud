@@ -51,7 +51,7 @@ Permission boundaries are defined in the `policies/` folder. They constrain the 
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `customer_managed_vpc` | bool | `false` | When `true`, omits the VPC lifecycle policy from the CAPA controller role |
+| `customer_managed_vpc` | bool | `false` | When `true`, uses an existing VPC and omits the VPC lifecycle policy from the CAPA controller role |
 | `cluster_name` | string | `null` | When set, tightens IAM conditions to this specific cluster name |
 | `vpc_id` | string | `null` | Scopes security-group creation to the selected VPC and applies `ec2:Vpc` to supported resources such as subnets, security groups, and network interfaces |
 | `ec2_project_tag` | string | `"ditto"` | Value for the `ec2:ResourceTag/ditto:project` condition in the cluster resources boundary policy |
@@ -62,9 +62,10 @@ Permission boundaries are defined in the `policies/` folder. They constrain the 
 
 Use the `dittocloud bootstrap aws` CLI command to manage this module. The flags map directly to the Terraform variables above.
 
-### Ditto-managed VPC (3-step lockdown)
+### Ditto-managed VPC (2-step lockdown)
 
-**Step 1 — Initial deployment.** Ditto provisions the VPC and all IAM roles with broad phase-1 permissions.
+**Step 1 — Initial deployment.** Terraform provisions the VPC and automatically
+uses its ID to confine supported EC2 permissions. No `--vpc-id` input is needed.
 
 ```sh
 dittocloud bootstrap aws \
@@ -73,7 +74,7 @@ dittocloud bootstrap aws \
   --iam-trusted-role-arns <trust-editor-role-arn>
 ```
 
-**Step 2 — Cluster-scoped IAM.** After the cluster is provisioned, re-run with `--cluster-name` to switch from broad phase-1 to cluster-specific conditions. Requires the state file from Step 1.
+**Step 2 — Cluster-scoped IAM.** After the cluster is provisioned, re-run with `--cluster-name` to switch from broad phase-1 to cluster-specific conditions. Requires the state file from Step 1. VPC confinement continues to use the Terraform-created VPC ID automatically.
 
 ```sh
 dittocloud bootstrap aws \
@@ -83,20 +84,9 @@ dittocloud bootstrap aws \
   --cluster-name <cluster-name>
 ```
 
-**Step 3 — VPC confinement.** Add `--vpc-id` to further restrict the CAPA controller and addon role boundary. Security-group creation is authorized against the selected VPC resource, while `ec2:Vpc` is applied only to action/resource combinations that expose it, such as `RunInstances` subnet, security-group, and network-interface authorization. Launch templates, volumes, and instances remain cluster-tag scoped because AWS does not expose `ec2:Vpc` for those resource types. Use the VPC ID created in Step 1 (available in the Terraform outputs).
-
-```sh
-dittocloud bootstrap aws \
-  --aws-profile <profile> \
-  --controller-trusted-role-arns <capa-role-arn> \
-  --iam-trusted-role-arns <trust-editor-role-arn> \
-  --cluster-name <cluster-name> \
-  --vpc-id <vpc-id>
-```
-
 ### Customer-managed VPC (2-step lockdown)
 
-When the VPC is provided by the customer, pass `--customer-managed-vpc` to omit VPC lifecycle permissions. Pass `--vpc-id` to confine EC2 operations to the customer VPC from day one.
+When the customer provides an existing VPC, pass `--customer-managed-vpc` and the required `--vpc-id`. Terraform does not create a VPC, VPC lifecycle permissions are omitted, and supported EC2 operations are confined to the selected VPC from day one.
 
 **Prerequisites — tag the VPC subnets before running:**
 
@@ -129,14 +119,32 @@ dittocloud bootstrap aws \
   --cluster-name <cluster-name>
 ```
 
+### Cluster API-managed VPC
+
+To skip Terraform VPC creation while retaining the VPC lifecycle permissions
+that Cluster API needs to create one, set `create_vpc=false` without setting
+`customer_managed_vpc=true`:
+
+```sh
+dittocloud bootstrap aws \
+  --aws-profile <profile> \
+  --controller-trusted-role-arns <capa-role-arn> \
+  --iam-trusted-role-arns <trust-editor-role-arn> \
+  --tf-var=create_vpc=false
+```
+
+This mode cannot be VPC-ID confined initially because the VPC does not exist
+yet. VPC lifecycle permissions remain attached so Cluster API can create and
+manage it.
+
 ### What each step locks down
 
 | | VPC lifecycle | EC2 scope | VPC confinement |
 |---|---|---|---|
-| Ditto VPC — Step 1 | Ditto-managed | broad (phase 1) | none |
-| Ditto VPC — Step 2 | Ditto-managed | cluster tag (phase 2) | none |
-| Ditto VPC — Step 3 | Ditto-managed | cluster tag (phase 2) | VPC resource + supported `ec2:Vpc` conditions |
+| Ditto VPC — Step 1 | Ditto-managed | broad (phase 1) | VPC resource + supported `ec2:Vpc` conditions |
+| Ditto VPC — Step 2 | Ditto-managed | cluster tag (phase 2) | VPC resource + supported `ec2:Vpc` conditions |
 | Customer VPC — Step 1 | omitted | broad (phase 1) | VPC resource + supported `ec2:Vpc` conditions |
 | Customer VPC — Step 2 | omitted | cluster tag (phase 2) | VPC resource + supported `ec2:Vpc` conditions |
+| Cluster API VPC — initial | retained | broad (phase 1) | none until the VPC exists |
 
 > **Note:** `--cluster-name` always requires an existing state file. Run the initial deployment first, then re-run to tighten. The CLI enforces this and will exit with an error if no state file is found.

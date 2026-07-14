@@ -29,7 +29,7 @@ This module creates cross-account IAM roles and an optional VPC for Ditto BYOC d
 
 #### VPC (`terraform/aws/vpc/`)
 
-Creates a VPC with subnets across multiple availability zones. Requires a region with at least 3 AZs. Skipped entirely when `customer_managed_vpc = true` — in that case no VPC resources are created and VPC lifecycle permissions are also omitted from the CAPA controller role.
+Creates a VPC with subnets across multiple availability zones. Requires a region with at least 3 AZs. The created VPC ID is passed directly to the IAM module so supported EC2 operations are confined to it from the initial deployment. The module is skipped entirely when `customer_managed_vpc = true` — in that case `vpc_id` is required, no VPC resources are created, and VPC lifecycle permissions are omitted from the CAPA controller role. Setting only `create_vpc = false` also skips Terraform VPC creation but retains lifecycle permissions so Cluster API can create the VPC.
 
 #### Cross-Account IAM (`terraform/aws/cross_account_iam/`)
 

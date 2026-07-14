@@ -24,7 +24,7 @@ variable "create_iam" {
 
 variable "create_vpc" {
   type        = bool
-  description = "Whether to create VPC resources for Valet default is true for best configurations."
+  description = "Whether Terraform creates the Ditto VPC. When false without customer_managed_vpc, Terraform skips VPC creation but retains VPC lifecycle permissions so Cluster API can create one."
   default     = true
 }
 
@@ -116,7 +116,7 @@ variable "tags" {
 
 variable "customer_managed_vpc" {
   type        = bool
-  description = "Whether the customer provides their own VPC. When true, VPC lifecycle permissions (create/delete VPC, subnets, IGW, NAT gateways, etc.) are not granted to the CAPA controller."
+  description = "Whether the customer provides an existing VPC. When true, vpc_id is required and VPC lifecycle permissions (create/delete VPC, subnets, IGW, NAT gateways, etc.) are not granted to the CAPA controller."
   default     = false
 }
 
@@ -128,6 +128,6 @@ variable "cluster_name" {
 
 variable "vpc_id" {
   type        = string
-  description = "When set, scopes security-group creation to this VPC and applies ec2:Vpc only to EC2 action/resource combinations that support it."
+  description = "ID of an existing customer-managed VPC. Required when customer_managed_vpc is true. Terraform automatically uses the created VPC ID when create_vpc is true."
   default     = null
 }

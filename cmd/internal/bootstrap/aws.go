@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/fatih/color"
 	"github.com/hashicorp/terraform-exec/tfexec"
@@ -18,7 +19,18 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 		Short: "Bootstrap AWS",
 		Long:  "Bootstrap AWS",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if cmd.Flags().Changed("customer-managed-vpc") {
+			customerManagedVPC, err := cmd.Flags().GetBool("customer-managed-vpc")
+			if err != nil {
+				return fmt.Errorf("unable to get customer-managed-vpc: %w", err)
+			}
+			if customerManagedVPC {
+				vpcID, err := cmd.Flags().GetString("vpc-id")
+				if err != nil {
+					return fmt.Errorf("unable to get vpc-id: %w", err)
+				}
+				if strings.TrimSpace(vpcID) == "" {
+					return fmt.Errorf("--vpc-id is required with --customer-managed-vpc so IAM permissions can be restricted to the existing VPC")
+				}
 				if cmd.Flags().Changed("aws-vpc-name") {
 					return fmt.Errorf("--aws-vpc-name cannot be used with --customer-managed-vpc; VPC name is only relevant when Ditto creates the VPC")
 				}
@@ -48,8 +60,8 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 	cmd.Flags().String("aws-vpc-cidr", "10.210.0.0/16", "AWS VPC CIDR block to use")
 	cmd.Flags().StringArray("controller-trusted-role-arns", []string{}, "AWS IAM role ARNs that can assume the CAPA controller role (can be specified multiple times)")
 	cmd.Flags().StringArray("iam-trusted-role-arns", []string{}, "AWS IAM role ARNs that can assume the IAM trust editor role (can be specified multiple times)")
-	cmd.Flags().Bool("customer-managed-vpc", false, "Set when the customer provides their own VPC; omits VPC lifecycle permissions from the CAPA controller role")
-	cmd.Flags().String("vpc-id", "", "Restrict CAPA EC2 operations to a specific VPC; use with --customer-managed-vpc when the VPC already exists")
+	cmd.Flags().Bool("customer-managed-vpc", false, "Set when the customer provides their own VPC; skips VPC creation and omits VPC lifecycle permissions from the CAPA controller role")
+	cmd.Flags().String("vpc-id", "", "ID of an existing VPC; required with --customer-managed-vpc so CAPA EC2 operations can be restricted to it")
 	cmd.Flags().String("cluster-name", "", "Tighten IAM conditions to a specific cluster name; requires an existing state file (re-runs only)")
 
 	return cmd
@@ -57,6 +69,10 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 
 func promptAWSValues(flags *pflag.FlagSet) ([]*tfexec.VarOption, error) {
 	vars := []*tfexec.VarOption{}
+	customerManagedVPC, err := flags.GetBool("customer-managed-vpc")
+	if err != nil {
+		return nil, fmt.Errorf("unable to get customer-managed-vpc: %w", err)
+	}
 
 	optional := color.New(color.FgYellow)
 	// Ask for the profile
@@ -75,21 +91,23 @@ func promptAWSValues(flags *pflag.FlagSet) ([]*tfexec.VarOption, error) {
 			tfexec.Var("region="+region),
 		)
 	}
-	if vpcName := StringPrompt(
-		"Enter the VPC name",
-		flags.Lookup("aws-vpc-name").Value.String(),
-	); vpcName != "" {
-		vars = append(vars,
-			tfexec.Var("vpc_name="+vpcName),
-		)
-	}
-	if cidr := StringPrompt(
-		"Enter the CIDR block",
-		flags.Lookup("aws-vpc-cidr").Value.String(),
-	); cidr != "" {
-		vars = append(vars,
-			tfexec.Var("vpc_cidr="+cidr),
-		)
+	if !customerManagedVPC {
+		if vpcName := StringPrompt(
+			"Enter the VPC name",
+			flags.Lookup("aws-vpc-name").Value.String(),
+		); vpcName != "" {
+			vars = append(vars,
+				tfexec.Var("vpc_name="+vpcName),
+			)
+		}
+		if cidr := StringPrompt(
+			"Enter the CIDR block",
+			flags.Lookup("aws-vpc-cidr").Value.String(),
+		); cidr != "" {
+			vars = append(vars,
+				tfexec.Var("vpc_cidr="+cidr),
+			)
+		}
 	}
 
 	if flags.Changed("controller-trusted-role-arns") {
@@ -117,11 +135,10 @@ func promptAWSValues(flags *pflag.FlagSet) ([]*tfexec.VarOption, error) {
 	}
 
 	if flags.Changed("customer-managed-vpc") {
-		customerManagedVPC, err := flags.GetBool("customer-managed-vpc")
-		if err != nil {
-			return nil, fmt.Errorf("unable to get customer-managed-vpc: %w", err)
-		}
 		vars = append(vars, tfexec.Var(fmt.Sprintf("customer_managed_vpc=%t", customerManagedVPC)))
+	}
+	if customerManagedVPC {
+		vars = append(vars, tfexec.Var("create_vpc=false"))
 	}
 
 	if flags.Changed("vpc-id") {
