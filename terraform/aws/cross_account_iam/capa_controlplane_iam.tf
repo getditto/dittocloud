@@ -33,32 +33,50 @@ resource "aws_iam_policy" "capa_control_plane" {
         ]
         Resource = ["*"]
       },
-      # Route, tag, and IPv6 mutations — cannot add resource conditions;
-      # route tables may be customer-owned in BYO-VPC, and CreateTags must
-      # reach resources of any type
-      {
-        Effect = "Allow"
-        Action = [
-          "ec2:AssignIpv6Addresses",
-          "ec2:CreateRoute",
-          "ec2:CreateTags",
-          "ec2:DeleteRoute",
-        ]
-        Resource = ["*"]
-      },
-      # EC2 creates — phase-2: require cluster ownership tag at request time
+      # Route tables can be customer-owned, so do not require ownership tags;
+      # confine them using the VPC context AWS exposes instead.
       merge(
         {
-          Effect = "Allow"
-          Action = [
-            "ec2:CreateSecurityGroup",
-            "ec2:CreateVolume",
-          ]
-          Resource = ["*"]
+          Effect   = "Allow"
+          Action   = ["ec2:CreateRoute", "ec2:DeleteRoute"]
+          Resource = ["arn:aws:ec2:*:*:route-table/*"]
+        },
+        local.ec2_vpc_cond != null ? { Condition = local.ec2_vpc_cond } : {}
+      ),
+      merge(
+        {
+          Effect   = "Allow"
+          Action   = ["ec2:AssignIpv6Addresses"]
+          Resource = ["arn:aws:ec2:*:*:network-interface/*"]
+        },
+        local.ec2_vpc_cond != null ? { Condition = local.ec2_vpc_cond } : {}
+      ),
+      # Security group creation authorizes the new security group and its target
+      # VPC separately. Request-tag conditions only apply to the SG resource.
+      merge(
+        {
+          Effect   = "Allow"
+          Action   = ["ec2:CreateSecurityGroup"]
+          Resource = ["arn:aws:ec2:*:*:security-group/*"]
         },
         local.ec2_create_cond != null ? { Condition = local.ec2_create_cond } : {}
       ),
-      # Security group mutations — phase-2: scoped to cluster-managed SGs
+      {
+        Effect   = "Allow"
+        Action   = ["ec2:CreateSecurityGroup"]
+        Resource = [local.ec2_vpc_arn != null ? local.ec2_vpc_arn : "arn:aws:ec2:*:*:vpc/*"]
+      },
+      # EBS volumes support request tags but have no VPC context.
+      merge(
+        {
+          Effect   = "Allow"
+          Action   = ["ec2:CreateVolume"]
+          Resource = ["arn:aws:ec2:*:*:volume/*"]
+        },
+        local.ec2_create_cond != null ? { Condition = local.ec2_create_cond } : {}
+      ),
+      # Security group mutations — cluster scoped in phase-2 and VPC scoped
+      # when vpc_id is set.
       merge(
         {
           Effect = "Allow"
@@ -69,7 +87,7 @@ resource "aws_iam_policy" "capa_control_plane" {
           ]
           Resource = ["arn:aws:ec2:*:*:security-group/*"]
         },
-        local.ec2_resource_cond != null ? { Condition = local.ec2_resource_cond } : {}
+        local.ec2_vpc_resource_cond != null ? { Condition = local.ec2_vpc_resource_cond } : {}
       ),
       # Volume mutations — phase-2: scoped to cluster-managed volumes.
       # AttachVolume/DetachVolume are intentionally omitted: AWS requires both the
@@ -107,13 +125,18 @@ resource "aws_iam_policy" "capa_control_plane" {
         ]
         Resource = ["*"]
       },
-      # ELBv2 LB + TG creates — require cluster tag at request time
+      # Require the cluster tag and, when configured, keep every selected load
+      # balancer subnet inside the chosen VPC.
       {
-        Effect = "Allow"
-        Action = [
-          "elasticloadbalancing:CreateLoadBalancer",
-          "elasticloadbalancing:CreateTargetGroup",
-        ]
+        Effect    = "Allow"
+        Action    = ["elasticloadbalancing:CreateLoadBalancer"]
+        Resource  = ["*"]
+        Condition = local.elb_create_load_balancer_cond
+      },
+      # ELB IAM exposes no VPC or subnet condition for CreateTargetGroup.
+      {
+        Effect    = "Allow"
+        Action    = ["elasticloadbalancing:CreateTargetGroup"]
         Resource  = ["*"]
         Condition = local.elb_create_cond
       },
@@ -200,6 +223,51 @@ resource "aws_iam_policy" "capa_control_plane" {
   })
 }
 
+# Keep EC2 tag authorization separate so the control-plane policy remains under
+# AWS's 6,144-character managed-policy limit.
+resource "aws_iam_policy" "capa_control_plane_tags" {
+  description = "Cluster API Control Plane EC2 tagging"
+  name        = "control-plane-tags.cluster-api-provider-aws.sigs.k8s.io"
+  tags        = local.tags
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect    = "Allow"
+        Action    = ["ec2:CreateTags"]
+        Resource  = ["*"]
+        Condition = local.ec2_create_tag_cond
+      },
+      {
+        Effect = "Allow"
+        Action = ["ec2:CreateTags"]
+        Resource = [
+          "arn:aws:ec2:*:*:network-interface/*",
+          "arn:aws:ec2:*:*:route-table/*",
+          "arn:aws:ec2:*:*:security-group/*",
+          "arn:aws:ec2:*:*:subnet/*",
+        ]
+        Condition = local.ec2_existing_vpc_tag_cond
+      },
+      {
+        Effect    = "Allow"
+        Action    = ["ec2:CreateTags"]
+        Resource  = [local.ec2_vpc_arn != null ? local.ec2_vpc_arn : "arn:aws:ec2:*:*:vpc/*"]
+        Condition = local.ec2_existing_tag_cond
+      },
+      {
+        Effect = "Allow"
+        Action = ["ec2:CreateTags"]
+        Resource = [
+          "arn:aws:ec2:*:*:instance/*",
+          "arn:aws:ec2:*:*:volume/*",
+        ]
+        Condition = local.ec2_existing_tag_cond
+      },
+    ]
+  })
+}
+
 # Configure the AWS EBS CSI Permissions to enable backups and updates to snapshots
 data "aws_iam_policy" "aws_ebs_csi_policy" {
   arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
@@ -224,6 +292,11 @@ resource "aws_iam_role" "capa_control_plane" {
 resource "aws_iam_role_policy_attachment" "capa_control_plane" {
   role       = aws_iam_role.capa_control_plane.name
   policy_arn = aws_iam_policy.capa_control_plane.arn
+}
+
+resource "aws_iam_role_policy_attachment" "capa_control_plane_tags" {
+  role       = aws_iam_role.capa_control_plane.name
+  policy_arn = aws_iam_policy.capa_control_plane_tags.arn
 }
 
 // ControlPlane nodes also need the nodes policy.

@@ -78,8 +78,19 @@ variable "cluster_name" {
 
 variable "vpc_id" {
   type        = string
-  description = "When set, restricts CAPA EC2 operations (instance launches, security group creates) to this specific VPC. Intended for BYO-VPC deployments where the controller must not affect resources outside the cluster VPC."
+  description = "When set, scopes security-group creation to this VPC and applies ec2:Vpc only to EC2 action/resource combinations that support it."
   default     = null
+}
+
+variable "vpc_subnet_ids" {
+  type        = list(string)
+  description = "Subnet IDs in vpc_id that ELB load balancers may use. When vpc_id is set, an empty list intentionally denies ELB subnet selection."
+  default     = []
+
+  validation {
+    condition     = length(var.vpc_subnet_ids) <= 9
+    error_message = "vpc_subnet_ids may contain at most 9 Kubernetes load-balancer subnets so the generated permissions boundary remains within AWS's 6,144-character limit."
+  }
 }
 
 variable "ec2_project_tag" {

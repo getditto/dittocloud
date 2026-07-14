@@ -85,24 +85,39 @@ dittocloud bootstrap aws
 dittocloud bootstrap aws \
   --aws-profile my-profile \
   --aws-region us-west-2 \
+  --create-vpc=true \
   --aws-vpc-name ditto-vpc \
   --aws-vpc-cidr 10.0.0.0/16
 ```
 
+Kubeadm is the default. Add `--enable-eks` only when provisioning an EKS
+cluster and its supporting IAM resources.
+
 #### Customer-Managed VPC
 
-If your organisation provides its own VPC rather than letting Ditto create one, pass `--customer-managed-vpc`. This omits VPC lifecycle permissions (create/delete VPC, subnets, internet gateways, NAT gateways) from the CAPA controller IAM role:
+If your organisation provides an existing VPC rather than letting Ditto create one, pass `--customer-managed-vpc` together with the required `--vpc-id`. This skips VPC creation, restricts supported EC2 operations to that VPC, confines load-balancer subnet selection to the Kubernetes-role-tagged subnets discovered in that VPC, and omits VPC lifecycle permissions (create/delete VPC, subnets, internet gateways, NAT gateways) from the CAPA controller IAM role:
 
 ```bash
 dittocloud bootstrap aws \
   --aws-profile my-profile \
   --aws-region us-west-2 \
-  --customer-managed-vpc
+  --customer-managed-vpc \
+  --vpc-id vpc-09e877f9012f52241
+```
+
+To skip Terraform VPC creation while retaining VPC lifecycle permissions for
+Cluster API, set `--create-vpc=false` without enabling `--customer-managed-vpc`:
+
+```bash
+dittocloud bootstrap aws \
+  --aws-profile my-profile \
+  --aws-region us-west-2 \
+  --create-vpc=false
 ```
 
 #### Phase-2 IAM Lock-Down (Optional)
 
-After the initial bootstrap and once Ditto has provisioned your cluster, you can re-run with `--cluster-name` to tighten the CAPA controller IAM policy to that specific cluster. This changes tag-based conditions from the generic `ditto.live/managed_by` tag to cluster-specific `kubernetes.io/cluster/<name>` and `elbv2.k8s.aws/cluster` tags, so the controller can only affect resources belonging to your cluster.
+After the initial bootstrap and once Ditto has provisioned your cluster, you can re-run with `--cluster-name` to tighten the CAPA controller IAM policy to that specific cluster. Before that re-run, direct EC2 tag changes already require CAPA's role tag to exist on the resource; ownership tags cannot be assigned to an arbitrary existing resource to unlock permissions. Phase 2 additionally requires cluster-specific `kubernetes.io/cluster/<name>`, `sigs.k8s.io/cluster-api-provider-aws/cluster/<name>`, and `elbv2.k8s.aws/cluster` tags.
 
 **Requirements:**
 - The initial bootstrap must have been run first — `--cluster-name` requires an existing state file.

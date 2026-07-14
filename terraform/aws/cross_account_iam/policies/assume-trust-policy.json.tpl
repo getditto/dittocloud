@@ -13,7 +13,7 @@
       "Resource": "*"
     },
     {
-      "Sid": "CreateOrChangeOnlyWithBoundary",
+      "Sid": "CreateOrManageOnlyWithBoundary",
       "Effect": "Allow",
       "Action": [
           "iam:AttachRolePolicy",
@@ -21,7 +21,6 @@
           "iam:CreateRolePolicy",
           "iam:DeleteRolePolicy",
           "iam:DetachRolePolicy",
-          "iam:PutRolePermissionsBoundary",
           "iam:PutRolePolicy",
           "iam:UpdateRole",
           "iam:PassRole"
@@ -47,17 +46,13 @@
       "Resource": "arn:aws:iam::${account_id}:role/dittocluster/*"
     },
     {
-      "Effect": "Allow",
+      "Sid": "DenyRoleBoundaryReplacementOrRemoval",
+      "Effect": "Deny",
       "Action": [
+          "iam:DeleteRolePermissionsBoundary",
           "iam:PutRolePermissionsBoundary"
       ],
       "Resource": "arn:aws:iam::${account_id}:role/dittocluster/*"
-    },
-    {
-      "Sid": "NoBoundaryUserDelete",
-      "Effect": "Deny",
-      "Action": "iam:DeleteUserPermissionsBoundary",
-      "Resource": "*"
     },
     {
       "Sid": "S3Permissions",

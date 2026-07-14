@@ -2,7 +2,6 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "S3",
       "Effect": "Allow",
       "Action": [
         "s3:*"
@@ -13,7 +12,6 @@
       ]
     },
     {
-      "Sid": "EC2Reads",
       "Effect": "Allow",
       "Action": [
         "ec2:Describe*",
@@ -22,43 +20,49 @@
       "Resource": "*"
     },
     {
-      "Sid": "EC2KarpenterNodeManagement",
       "Effect": "Allow",
       "Action": [
         "ec2:CreateFleet",
         "ec2:CreateLaunchTemplate",
         "ec2:DeleteLaunchTemplate",
-        "ec2:RunInstances",
         "ec2:TerminateInstances"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ec2:RunInstances"
       ],
       "Resource": "*"%{~ if vpc_arn != null ~},
       "Condition": {
-        "StringEquals": {
+        "StringEqualsIfExists": {
           "ec2:Vpc": "${vpc_arn}"
         }
       }%{~ endif ~}
     },
     {
-      "Sid": "EC2SecurityGroupCreate",
       "Effect": "Allow",
       "Action": [
         "ec2:CreateSecurityGroup"
       ],
-      "Resource": "*"%{~ if vpc_arn != null ~},
-      "Condition": {
-        "StringEquals": {
-          "ec2:Vpc": "${vpc_arn}"
-        }
-      }%{~ endif ~}
+      "Resource": "arn:aws:ec2:*:*:security-group/*"
     },
     {
-      "Sid": "EC2SecurityGroupMutationsDittoProject",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateSecurityGroup"
+      ],
+      "Resource": "%{~ if vpc_arn != null ~}${vpc_arn}%{~ else ~}arn:aws:ec2:*:*:vpc/*%{~ endif ~}"
+    },
+    {
       "Effect": "Allow",
       "Action": [
         "ec2:AuthorizeSecurityGroupIngress",
-        "ec2:RevokeSecurityGroupIngress"
+        "ec2:RevokeSecurityGroupIngress",
+        "ec2:DeleteSecurityGroup"
       ],
-      "Resource": "*",
+      "Resource": "arn:aws:ec2:*:*:security-group/*",
       "Condition": {
         "StringEquals": {
           "ec2:ResourceTag/ditto:project": "${ec2_project_tag}"
@@ -66,7 +70,22 @@
       }
     },
     {
-      "Sid": "EC2TagMutations",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateTags"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringLike": {
+          "ec2:CreateAction": [
+            "Create*",
+            "RunInstances",
+            "AllocateAddress"
+          ]
+        }
+      }
+    },
+    {
       "Effect": "Allow",
       "Action": [
         "ec2:CreateTags",
@@ -83,20 +102,30 @@
         "arn:aws:ec2:*:*:vpc/*",
         "arn:aws:ec2:*:*:internet-gateway/*",
         "arn:aws:ec2:*:*:route-table/*"
-      ]
+      ],
+      "Condition": {
+        "StringEquals": {
+          "ec2:ResourceTag/ditto:project": "${ec2_project_tag}"
+        }
+      }
     },
+%{~ if vpc_arn != null ~}
     {
-      "Sid": "EC2SecurityGroupMutations",
       "Effect": "Allow",
       "Action": [
         "ec2:AuthorizeSecurityGroupIngress",
         "ec2:RevokeSecurityGroupIngress",
         "ec2:DeleteSecurityGroup"
       ],
-      "Resource": "*"
+      "Resource": "arn:aws:ec2:*:*:security-group/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:Vpc": "${vpc_arn}"
+        }
+      }
     },
+%{~ endif ~}
     {
-      "Sid": "KarpenterSSM",
       "Effect": "Allow",
       "Action": [
         "ssm:GetParameter"
@@ -107,7 +136,6 @@
       ]
     },
     {
-      "Sid": "KarpenterSQS",
       "Effect": "Allow",
       "Action": [
         "sqs:DeleteMessage",
@@ -118,7 +146,6 @@
       "Resource": "arn:aws:sqs:*:*:karpenter-*"
     },
     {
-      "Sid": "KarpenterIAMPassRole",
       "Effect": "Allow",
       "Action": [
         "iam:PassRole"
@@ -126,7 +153,6 @@
       "Resource": "arn:aws:iam::*:role/*.cluster-api-provider-aws.sigs.k8s.io"
     },
     {
-      "Sid": "KarpenterEKS",
       "Effect": "Allow",
       "Action": [
         "eks:DescribeCluster"
@@ -134,7 +160,6 @@
       "Resource": "*"
     },
     {
-      "Sid": "KarpenterPricing",
       "Effect": "Allow",
       "Action": [
         "pricing:GetProducts"
@@ -142,7 +167,6 @@
       "Resource": "*"
     },
     {
-      "Sid": "SecretsManagerRead",
       "Effect": "Allow",
       "Action": [
         "secretsmanager:GetSecretValue",
@@ -153,7 +177,6 @@
       ]
     },
     {
-      "Sid": "ELBReads",
       "Effect": "Allow",
       "Action": [
         "elasticloadbalancing:Describe*"
@@ -161,7 +184,6 @@
       "Resource": "*"
     },
     {
-      "Sid": "ELBIAMServiceLinkedRole",
       "Effect": "Allow",
       "Action": [
         "iam:CreateServiceLinkedRole"
@@ -174,7 +196,6 @@
       }
     },
     {
-      "Sid": "LBCCertificateAndWAF",
       "Effect": "Allow",
       "Action": [
         "acm:DescribeCertificate",
@@ -197,16 +218,28 @@
       "Resource": "*"
     },
     {
-      "Sid": "ELBCreate",
       "Effect": "Allow",
       "Action": [
-        "elasticloadbalancing:CreateLoadBalancer",
+        "elasticloadbalancing:CreateLoadBalancer"
+      ],
+      "Resource": "*"%{~ if vpc_arn != null ~},
+      "Condition": {
+        "ForAllValues:StringEquals": {
+          "elasticloadbalancing:Subnet": ${jsonencode(vpc_subnet_ids)}
+        },
+        "Null": {
+          "elasticloadbalancing:Subnet": "false"
+        }
+      }%{~ endif ~}
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
         "elasticloadbalancing:CreateTargetGroup"
       ],
       "Resource": "*"
     },
     {
-      "Sid": "ELBListenerRuleMutations",
       "Effect": "Allow",
       "Action": [
         "elasticloadbalancing:CreateListener",
@@ -217,7 +250,6 @@
       "Resource": "*"
     },
     {
-      "Sid": "ELBLBTGTagMutations",
       "Effect": "Allow",
       "Action": [
         "elasticloadbalancing:AddTags",
@@ -236,21 +268,14 @@
       }
     },
     {
-      "Sid": "ELBListenerRuleTagMutations",
       "Effect": "Allow",
       "Action": [
         "elasticloadbalancing:AddTags",
         "elasticloadbalancing:RemoveTags"
       ],
-      "Resource": [
-        "arn:aws:elasticloadbalancing:*:*:listener/app/*/*/*",
-        "arn:aws:elasticloadbalancing:*:*:listener/net/*/*/*",
-        "arn:aws:elasticloadbalancing:*:*:listener-rule/app/*/*/*",
-        "arn:aws:elasticloadbalancing:*:*:listener-rule/net/*/*/*"
-      ]
+      "Resource": "arn:aws:elasticloadbalancing:*:*:listener*/*/*/*"
     },
     {
-      "Sid": "ELBLBTGMutations",
       "Effect": "Allow",
       "Action": [
         "elasticloadbalancing:DeleteLoadBalancer",
@@ -260,13 +285,26 @@
         "elasticloadbalancing:ModifyTargetGroup",
         "elasticloadbalancing:ModifyTargetGroupAttributes",
         "elasticloadbalancing:SetIpAddressType",
-        "elasticloadbalancing:SetSecurityGroups",
-        "elasticloadbalancing:SetSubnets"
+        "elasticloadbalancing:SetSecurityGroups"
       ],
       "Resource": "*"
     },
     {
-      "Sid": "ELBAddTagsAtCreation",
+      "Effect": "Allow",
+      "Action": [
+        "elasticloadbalancing:SetSubnets"
+      ],
+      "Resource": "*"%{~ if vpc_arn != null ~},
+      "Condition": {
+        "ForAllValues:StringEquals": {
+          "elasticloadbalancing:Subnet": ${jsonencode(vpc_subnet_ids)}
+        },
+        "Null": {
+          "elasticloadbalancing:Subnet": "false"
+        }
+      }%{~ endif ~}
+    },
+    {
       "Effect": "Allow",
       "Action": [
         "elasticloadbalancing:AddTags"
@@ -286,7 +324,6 @@
       }
     },
     {
-      "Sid": "ELBTargetRegistration",
       "Effect": "Allow",
       "Action": [
         "elasticloadbalancing:DeregisterTargets",
@@ -296,7 +333,6 @@
     },
 
     {
-      "Sid": "ELBListenerACLMutations",
       "Effect": "Allow",
       "Action": [
         "elasticloadbalancing:AddListenerCertificates",

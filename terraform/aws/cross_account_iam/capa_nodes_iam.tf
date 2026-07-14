@@ -22,15 +22,24 @@ resource "aws_iam_policy" "capa_nodes" {
         ]
         Resource = ["*"]
       },
-      # EC2 tag and IPv6 mutations — cannot add resource conditions;
-      # CreateTags is needed by VPC CNI to tag network interfaces
+      # VPC CNI only needs IPv6 assignment here; AmazonEKS_CNI_Policy supplies
+      # its network-interface CreateTags permission.
+      merge(
+        {
+          Effect   = "Allow"
+          Action   = ["ec2:AssignIpv6Addresses"]
+          Resource = ["arn:aws:ec2:*:*:network-interface/*"]
+        },
+        local.ec2_vpc_cond != null ? { Condition = local.ec2_vpc_cond } : {}
+      ),
+      # This policy is attached to worker and control-plane roles. Deny direct
+      # assignment of CAPA ownership/bootstrap tags to an existing resource
+      # unless CAPA established its role marker during resource creation.
       {
-        Effect = "Allow"
-        Action = [
-          "ec2:AssignIpv6Addresses",
-          "ec2:CreateTags",
-        ]
-        Resource = ["*"]
+        Effect    = "Deny"
+        Action    = ["ec2:CreateTags"]
+        Resource  = ["*"]
+        Condition = local.ec2_protected_tag_assignment_deny_cond
       },
       # ECR reads — GetAuthorizationToken is account-level; remaining operations
       # require Resource = ["*"] so nodes can pull from any ECR repository

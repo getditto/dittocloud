@@ -7,36 +7,133 @@ locals {
   # Phase-2 lock-down: when cluster_name is set, IAM conditions switch from generic
   # Ditto tags to cluster-specific tags so the CAPA controller can only affect
   # resources belonging to this one cluster.
-  # VPC confinement: when vpc_id is set, EC2 conditions also include an ec2:Vpc
-  # constraint so the controller cannot create or modify resources outside that VPC.
-  #
-  # Both constraints use StringEquals and are merged into a single Condition block —
-  # IAM does not allow duplicate Condition operator keys in one statement.
+  # VPC confinement must only be added to actions and resource types that expose
+  # ec2:Vpc. Launch templates, volumes, and instances do not expose that key, while
+  # security groups, subnets, and network interfaces do.
+  ec2_vpc_arn = var.vpc_id != null ? "arn:aws:ec2:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:vpc/${var.vpc_id}" : null
 
-  # ec2:Vpc StringEquals entries — empty map when vpc_id is not set
+  # ec2:Vpc StringEquals entries — empty map when vpc_id is not set.
   ec2_vpc_string_equals = var.vpc_id != null ? {
-    "ec2:Vpc" = "arn:aws:ec2:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:vpc/${var.vpc_id}"
+    "ec2:Vpc" = local.ec2_vpc_arn
   } : {}
 
-  # EC2 creates (RunInstances, CreateSecurityGroup, CreateLaunchTemplate)
-  # Cluster scope added in phase-2; VPC scope added when vpc_id is set.
-  # Nil when neither is set (phase-1, no vpc_id) → no condition applied.
-  ec2_create_cond_entries = merge(
-    var.cluster_name != null ? { "aws:RequestTag/kubernetes.io/cluster/${var.cluster_name}" = "owned" } : {},
-    local.ec2_vpc_string_equals
-  )
+  # Creation-time cluster ownership. Only use this with actions that support
+  # aws:RequestTag; CreateLaunchTemplateVersion is an existing-resource mutation.
+  ec2_create_cond_entries = var.cluster_name != null ? {
+    "aws:RequestTag/kubernetes.io/cluster/${var.cluster_name}" = "owned"
+  } : {}
   ec2_create_cond = length(local.ec2_create_cond_entries) > 0 ? {
     StringEquals = local.ec2_create_cond_entries
   } : null
 
-  # EC2 resource mutations — terminate, delete, modify on existing resources
-  # Cluster scope added in phase-2; VPC scope added when vpc_id is set.
-  ec2_resource_cond_entries = merge(
-    var.cluster_name != null ? { "ec2:ResourceTag/kubernetes.io/cluster/${var.cluster_name}" = "owned" } : {},
-    local.ec2_vpc_string_equals
-  )
+  # Existing-resource cluster ownership. This is intentionally independent of
+  # VPC confinement because many EC2 resource types do not expose ec2:Vpc.
+  ec2_resource_cond_entries = var.cluster_name != null ? {
+    "ec2:ResourceTag/kubernetes.io/cluster/${var.cluster_name}" = "owned"
+  } : {}
   ec2_resource_cond = length(local.ec2_resource_cond_entries) > 0 ? {
     StringEquals = local.ec2_resource_cond_entries
+  } : null
+
+  # Existing resources that support both ownership tags and ec2:Vpc, such as
+  # security groups and network interfaces.
+  ec2_vpc_resource_cond_entries = merge(
+    local.ec2_resource_cond_entries,
+    local.ec2_vpc_string_equals,
+  )
+  ec2_vpc_resource_cond = length(local.ec2_vpc_resource_cond_entries) > 0 ? {
+    StringEquals = local.ec2_vpc_resource_cond_entries
+  } : null
+
+  # VPC-only condition for RunInstances resource contexts. Cluster request tags
+  # are enforced separately on the instance resource because referenced resources
+  # such as AMIs and subnets do not expose aws:RequestTag.
+  ec2_vpc_cond = length(local.ec2_vpc_string_equals) > 0 ? {
+    StringEquals = local.ec2_vpc_string_equals
+  } : null
+
+  ec2_tag_keys_cond = {
+    "ForAllValues:StringLike" = {
+      "aws:TagKeys" = [
+        "kubernetes.io/*",
+        "k8s.io/*",
+        "sigs.k8s.io/*",
+        "ditto.live/*",
+        "Name",
+        "MachineName",
+      ]
+    }
+  }
+
+  # CAPA writes this namespaced role tag in each managed resource's create
+  # request. Treat its presence as an immutable bootstrap marker: creation-time
+  # tagging may establish it, but a later CreateTags call cannot add the marker
+  # to an arbitrary existing resource and then self-assign ownership.
+  capa_role_tag_key = "sigs.k8s.io/cluster-api-provider-aws/role"
+
+  ec2_existing_tag_string_equals = var.cluster_name != null ? {
+    "ec2:ResourceTag/sigs.k8s.io/cluster-api-provider-aws/cluster/${var.cluster_name}" = "owned"
+  } : {}
+
+  ec2_existing_tag_cond = merge(
+    local.ec2_tag_keys_cond,
+    {
+      Null = {
+        "ec2:ResourceTag/${local.capa_role_tag_key}" = "false"
+      }
+    },
+    length(local.ec2_existing_tag_string_equals) > 0 ? {
+      StringEquals = local.ec2_existing_tag_string_equals
+    } : {},
+  )
+
+  ec2_existing_vpc_tag_cond = merge(
+    local.ec2_existing_tag_cond,
+    length(merge(local.ec2_existing_tag_string_equals, local.ec2_vpc_string_equals)) > 0 ? {
+      StringEquals = merge(local.ec2_existing_tag_string_equals, local.ec2_vpc_string_equals)
+    } : {},
+  )
+
+  # EC2 performs a separate CreateTags authorization when tags are supplied to
+  # a resource-creating API. ec2:CreateAction makes this path unusable for a
+  # direct CreateTags call against an existing resource.
+  ec2_create_tag_cond = merge(local.ec2_tag_keys_cond, {
+    StringLike = {
+      "ec2:CreateAction" = ["Create*", "RunInstances", "AllocateAddress"]
+    }
+  })
+
+  # The node policy is also attached to control-plane instances, alongside AWS
+  # managed policies that independently grant CreateTags. An explicit deny is
+  # therefore required to stop those grants from establishing an ownership or
+  # permission-gating tag on an existing resource without CAPA's bootstrap tag.
+  ec2_protected_tag_assignment_deny_cond = {
+    "ForAnyValue:StringLike" = {
+      "aws:TagKeys" = [
+        local.capa_role_tag_key,
+        "sigs.k8s.io/cluster-api-provider-aws/cluster/*",
+        "kubernetes.io/cluster/*",
+        "ditto.live/managed_by",
+        "ditto:project",
+      ]
+    }
+    Null = {
+      "ec2:CreateAction"                           = "true"
+      "ec2:ResourceTag/${local.capa_role_tag_key}" = "true"
+    }
+  }
+
+  # ELB does not expose a VPC condition key for load balancers. It does expose
+  # the selected subnet IDs on CreateLoadBalancer and SetSubnets, so require
+  # every requested subnet to belong to the configured VPC. An empty subnet
+  # list fails closed when a VPC ID is configured.
+  elb_vpc_subnet_cond = var.vpc_id != null ? {
+    "ForAllValues:StringEquals" = {
+      "elasticloadbalancing:Subnet" = var.vpc_subnet_ids
+    }
+    Null = {
+      "elasticloadbalancing:Subnet" = "false"
+    }
   } : null
 
   # ELB LB/TG creates — cluster tag must be present (phase 1) or match exactly (phase 2)
@@ -44,6 +141,21 @@ locals {
     var.cluster_name != null
     ? jsonencode({ StringEquals = { "aws:RequestTag/elbv2.k8s.aws/cluster" = var.cluster_name } })
     : jsonencode({ Null = { "aws:RequestTag/elbv2.k8s.aws/cluster" = "false" } })
+  )
+
+  elb_create_load_balancer_cond = merge(
+    local.elb_create_cond,
+    jsondecode(
+      local.elb_vpc_subnet_cond != null
+      ? jsonencode({
+        "ForAllValues:StringEquals" = local.elb_vpc_subnet_cond["ForAllValues:StringEquals"]
+        Null = merge(
+          try(local.elb_create_cond.Null, {}),
+          local.elb_vpc_subnet_cond.Null,
+        )
+      })
+      : jsonencode({})
+    ),
   )
 
   # ELB LB/TG/target-group mutations — cluster tag on existing resource
