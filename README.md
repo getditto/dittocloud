@@ -97,6 +97,12 @@ cluster and its supporting IAM resources.
 
 If your organisation provides an existing VPC rather than letting Ditto create one, pass `--customer-managed-vpc` together with the required `--vpc-id`. This skips VPC creation, restricts supported EC2 operations to that VPC, confines load-balancer subnet selection to the Kubernetes-role-tagged subnets discovered in that VPC, and omits VPC lifecycle permissions (create/delete VPC, subnets, internet gateways, NAT gateways) from the CAPA controller IAM role:
 
+Before deployment, review the complete [Bring Your Own VPC requirements and
+preflight checks](docs/bring-your-own-vpc.md). The customer-managed VPC must
+provide compatible DNS, DHCP options, subnets, routing, capacity, and
+Kubernetes subnet tags; Dittocloud does not manage those resources in this
+mode.
+
 ```bash
 dittocloud bootstrap aws \
   --aws-profile my-profile \
