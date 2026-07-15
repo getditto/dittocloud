@@ -2,7 +2,10 @@ package bootstrap
 
 import (
 	"context"
+	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -15,9 +18,14 @@ import (
 // mockTerraformExecutor records terraform operations for verification
 type mockTerraformExecutor struct {
 	// Call counts
-	initCallCount  int
-	planCallCount  int
-	applyCallCount int
+	initCallCount   int
+	importCallCount int
+	planCallCount   int
+	applyCallCount  int
+
+	workingDir  string
+	importCalls []mockImportCall
+	importState []byte
 
 	// Parsed variables from Plan() call
 	PlanVars map[string]string
@@ -25,12 +33,41 @@ type mockTerraformExecutor struct {
 	// Return values
 	planReturnChanged bool
 	planReturnError   error
+	importReturnError error
 	applyReturnError  error
 	outputReturn      map[string]tfexec.OutputMeta
 }
 
+type mockImportCall struct {
+	address string
+	id      string
+	vars    map[string]string
+}
+
 func (m *mockTerraformExecutor) Init(ctx context.Context, opts ...tfexec.InitOption) error {
 	m.initCallCount++
+	return nil
+}
+
+func (m *mockTerraformExecutor) Import(ctx context.Context, address, id string, opts ...tfexec.ImportOption) error {
+	m.importCallCount++
+
+	vars := make(map[string]string)
+	for _, opt := range opts {
+		if key, value, ok := terraformVarOption(opt); ok {
+			vars[key] = value
+		}
+	}
+	m.importCalls = append(m.importCalls, mockImportCall{address: address, id: id, vars: vars})
+
+	if m.importReturnError != nil {
+		return m.importReturnError
+	}
+	if m.importState != nil {
+		if err := os.WriteFile(filepath.Join(m.workingDir, "terraform.tfstate"), m.importState, 0600); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -40,28 +77,8 @@ func (m *mockTerraformExecutor) Plan(ctx context.Context, opts ...tfexec.PlanOpt
 	// Extract and parse variables from plan options
 	m.PlanVars = make(map[string]string)
 	for _, opt := range opts {
-		varOpt, ok := opt.(*tfexec.VarOption)
-		if !ok {
-			continue
-		}
-
-		// Use reflection to access the unexported field containing "key=value"
-		val := reflect.ValueOf(varOpt).Elem()
-		if val.Kind() != reflect.Struct {
-			continue
-		}
-
-		for i := 0; i < val.NumField(); i++ {
-			field := val.Field(i)
-			if field.Kind() == reflect.String && field.String() != "" {
-				varString := field.String()
-
-				// Parse "key=value" into map
-				parts := strings.SplitN(varString, "=", 2)
-				if len(parts) == 2 {
-					m.PlanVars[parts[0]] = parts[1]
-				}
-			}
+		if key, value, ok := terraformVarOption(opt); ok {
+			m.PlanVars[key] = value
 		}
 	}
 
@@ -81,6 +98,31 @@ func (m *mockTerraformExecutor) SetStdout(w io.Writer) {}
 
 func (m *mockTerraformExecutor) SetStderr(w io.Writer) {}
 
+func terraformVarOption(opt any) (string, string, bool) {
+	varOpt, ok := opt.(*tfexec.VarOption)
+	if !ok {
+		return "", "", false
+	}
+
+	// Use reflection to access the unexported field containing "key=value".
+	val := reflect.ValueOf(varOpt).Elem()
+	if val.Kind() != reflect.Struct {
+		return "", "", false
+	}
+
+	for i := 0; i < val.NumField(); i++ {
+		field := val.Field(i)
+		if field.Kind() != reflect.String || field.String() == "" {
+			continue
+		}
+		parts := strings.SplitN(field.String(), "=", 2)
+		if len(parts) == 2 {
+			return parts[0], parts[1], true
+		}
+	}
+	return "", "", false
+}
+
 // setupBootstrapTest creates a test environment with a mocked terraform executor
 func setupBootstrapTest(t *testing.T, args []string) (*cobra.Command, *mockTerraformExecutor) {
 	t.Helper()
@@ -99,6 +141,7 @@ func setupBootstrapTest(t *testing.T, args []string) (*cobra.Command, *mockTerra
 
 	// Inject mock
 	terraformFactory = func(workingDir, execPath string) (TerraformExecutor, error) {
+		mock.workingDir = workingDir
 		return mock, nil
 	}
 
@@ -124,7 +167,126 @@ func assertCallCounts(t *testing.T, mock *mockTerraformExecutor, init, plan, app
 	}
 }
 
+func TestParseResourceImports(t *testing.T) {
+	t.Run("parses multiple imports and preserves equals signs in IDs", func(t *testing.T) {
+		imports, err := parseResourceImports([]string{
+			"aws_iam_policy.network=arn:aws:iam::123456789012:policy/network",
+			"module.example.resource.item=id=with=equals",
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := []resourceImport{
+			{address: "aws_iam_policy.network", id: "arn:aws:iam::123456789012:policy/network"},
+			{address: "module.example.resource.item", id: "id=with=equals"},
+		}
+		if !reflect.DeepEqual(imports, want) {
+			t.Fatalf("imports: got %#v, want %#v", imports, want)
+		}
+	})
+
+	t.Run("rejects malformed imports", func(t *testing.T) {
+		for _, value := range []string{"missing-delimiter", "=missing-address", "missing-id="} {
+			_, err := parseResourceImports([]string{value})
+			if err == nil || !strings.Contains(err.Error(), "expected address=id") {
+				t.Errorf("value %q: expected address=id error, got %v", value, err)
+			}
+		}
+	})
+
+	t.Run("rejects duplicate addresses", func(t *testing.T) {
+		_, err := parseResourceImports([]string{"aws_iam_policy.example=one", "aws_iam_policy.example=two"})
+		if err == nil || !strings.Contains(err.Error(), "duplicate --import-resource address") {
+			t.Fatalf("expected duplicate address error, got %v", err)
+		}
+	})
+}
+
 func TestBootstrap(t *testing.T) {
+	t.Run("should import resources, persist state, show a plan, and never apply", func(t *testing.T) {
+		statePath := filepath.Join(t.TempDir(), "terraform.tfstate")
+		if err := os.WriteFile(statePath, []byte(`{"serial":1}`), 0600); err != nil {
+			t.Fatalf("unable to create test state: %v", err)
+		}
+
+		cmd, mock := setupBootstrapTest(t, []string{
+			"aws",
+			"--aws-profile=test-profile",
+			"--aws-region=us-west-2",
+			"--state=" + statePath,
+			"--import-resource=module.cross_account_iam[0].aws_iam_policy.capa_controller_network=arn:aws:iam::123456789012:policy/ditto-capa-controller-network-policy",
+			"--import-resource=module.cross_account_iam[0].aws_iam_policy.capa_control_plane_tags=arn:aws:iam::123456789012:policy/control-plane-tags.cluster-api-provider-aws.sigs.k8s.io",
+		})
+		mock.importState = []byte(`{"serial":3}`)
+
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error executing command: %v", err)
+		}
+
+		assertCallCounts(t, mock, 1, 1, 0)
+		if mock.importCallCount != 2 {
+			t.Fatalf("expected 2 Import calls, got %d", mock.importCallCount)
+		}
+
+		wantAddresses := []string{
+			"module.cross_account_iam[0].aws_iam_policy.capa_controller_network",
+			"module.cross_account_iam[0].aws_iam_policy.capa_control_plane_tags",
+		}
+		for i, call := range mock.importCalls {
+			if call.address != wantAddresses[i] {
+				t.Errorf("import %d address: got %q, want %q", i, call.address, wantAddresses[i])
+			}
+			if call.vars["profile"] != "test-profile" {
+				t.Errorf("import %d profile: got %q, want %q", i, call.vars["profile"], "test-profile")
+			}
+			if call.vars["region"] != "us-west-2" {
+				t.Errorf("import %d region: got %q, want %q", i, call.vars["region"], "us-west-2")
+			}
+		}
+
+		state, err := os.ReadFile(statePath)
+		if err != nil {
+			t.Fatalf("unable to read imported state: %v", err)
+		}
+		if got, want := string(state), `{"serial":3}`; got != want {
+			t.Fatalf("persisted state: got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("should stop before plan when an import fails", func(t *testing.T) {
+		statePath := filepath.Join(t.TempDir(), "terraform.tfstate")
+		originalState := []byte(`{"serial":1}`)
+		if err := os.WriteFile(statePath, originalState, 0600); err != nil {
+			t.Fatalf("unable to create test state: %v", err)
+		}
+
+		cmd, mock := setupBootstrapTest(t, []string{
+			"aws",
+			"--aws-profile=test-profile",
+			"--state=" + statePath,
+			"--import-resource=aws_iam_policy.example=arn:aws:iam::123456789012:policy/example",
+		})
+		mock.importReturnError = errors.New("resource is already managed")
+
+		err := cmd.Execute()
+		if err == nil || !strings.Contains(err.Error(), "unable to import Terraform resource") {
+			t.Fatalf("expected import error, got %v", err)
+		}
+		assertCallCounts(t, mock, 1, 0, 0)
+		if mock.importCallCount != 1 {
+			t.Fatalf("expected 1 Import call, got %d", mock.importCallCount)
+		}
+
+		state, readErr := os.ReadFile(statePath)
+		if readErr != nil {
+			t.Fatalf("unable to read original state: %v", readErr)
+		}
+		if !reflect.DeepEqual(state, originalState) {
+			t.Fatalf("state changed after failed import: got %q, want %q", state, originalState)
+		}
+	})
+
 	t.Run("should pass correct variables to terraform for AWS", func(t *testing.T) {
 		cmd, mock := setupBootstrapTest(t, []string{
 			"aws",

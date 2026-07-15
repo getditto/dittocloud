@@ -22,6 +22,7 @@ import (
 // TerraformExecutor is an interface that abstracts terraform operations for testing
 type TerraformExecutor interface {
 	Init(context.Context, ...tfexec.InitOption) error
+	Import(context.Context, string, string, ...tfexec.ImportOption) error
 	Plan(context.Context, ...tfexec.PlanOption) (bool, error)
 	Apply(context.Context, ...tfexec.ApplyOption) error
 	Output(context.Context, ...tfexec.OutputOption) (map[string]tfexec.OutputMeta, error)
@@ -40,11 +41,17 @@ var defaultTerraformFactory TerraformFactory = func(workingDir string, execPath 
 // terraformFactory is the factory used by the code (can be replaced in tests)
 var terraformFactory = defaultTerraformFactory
 
+type resourceImport struct {
+	address string
+	id      string
+}
+
 func BootstrapCmd() *cobra.Command {
 	// Shared variables for all providers, scoped to this functions closure. At least they aren't globals.
 	var vars []*tfexec.VarOption
 	var logLevel string
 	var tfVars []string
+	var resourceImports []string
 
 	header := color.New(color.FgCyan, color.Bold)
 	progress := color.New(color.FgMagenta)
@@ -74,6 +81,13 @@ func BootstrapCmd() *cobra.Command {
 		PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
 			logger := log.FromContext(cmd.Context())
 			color.NoColor = cmd.Flag("no-color").Value.String() == "true"
+
+			imports, err := parseResourceImports(resourceImports)
+			if err != nil {
+				return err
+			}
+			importOnly := len(imports) > 0
+
 			// Copy the packaged terrafrom files into a temporary directory
 			tmpDir, err := os.MkdirTemp(os.TempDir(), "dittocloud")
 			if err != nil {
@@ -110,7 +124,7 @@ func BootstrapCmd() *cobra.Command {
 					return fmt.Errorf("unable to write state file to temporary directory: %w", err)
 				}
 			} else {
-				_,_ = progress.Printf(
+				_, _ = progress.Printf(
 					"No local state file found, new state file will be created at %q\n",
 					localStateFilePath,
 				)
@@ -142,14 +156,32 @@ func BootstrapCmd() *cobra.Command {
 				vars = append(vars, tfexec.Var(tfVar))
 			}
 
+			for _, resource := range imports {
+				_, _ = progress.Printf("Importing Terraform resource %q...\n", resource.address)
+				if err := tf.Import(cmd.Context(), resource.address, resource.id, toImportOptions(vars)...); err != nil {
+					return fmt.Errorf("unable to import Terraform resource %q: %w", resource.address, err)
+				}
+				if err := persistTerraformState(tmpStateFilePath, localStateFilePath); err != nil {
+					return fmt.Errorf("unable to save state after importing Terraform resource %q: %w", resource.address, err)
+				}
+			}
+			if importOnly {
+				_, _ = progress.Printf("Imported %d Terraform resource(s) and saved state to %q.\n", len(imports), localStateFilePath)
+			}
+
 			_, _ = progress.Println("Running terraform plan...")
 
-			// Check if debug logging is enabled to show detailed plan output
-			showDetailedPlan := logger.Enabled(cmd.Context(), slog.LevelDebug)
+			// Import workflows always show the post-import plan. Other workflows show
+			// detailed plan output only when debug logging is enabled.
+			showDetailedPlan := importOnly || logger.Enabled(cmd.Context(), slog.LevelDebug)
 
 			if showDetailedPlan {
 				// For debug mode, configure terraform to show output to user
-				logger.Debug("Debug mode enabled - showing detailed terraform plan output")
+				if importOnly {
+					_, _ = progress.Println("Showing detailed post-import Terraform plan...")
+				} else {
+					logger.Debug("Debug mode enabled - showing detailed terraform plan output")
+				}
 				tf.SetStdout(os.Stdout)
 				tf.SetStderr(os.Stderr)
 
@@ -166,7 +198,11 @@ func BootstrapCmd() *cobra.Command {
 					}
 					return nil
 				}
-				color.Yellow("\n📋 Changes detected and will be applied.\n")
+				if importOnly {
+					color.Yellow("\n📋 Changes detected. The import workflow will not apply them.\n")
+				} else {
+					color.Yellow("\n📋 Changes detected and will be applied.\n")
+				}
 			} else {
 				// For normal operation, suppress terraform output and just check if changes exist
 				tf.SetStdout(io.Discard)
@@ -187,6 +223,11 @@ func BootstrapCmd() *cobra.Command {
 				color.Yellow("\n📋 Terraform Plan Summary:")
 				color.Yellow("Changes have been detected and will be applied.")
 				color.Yellow("Use --log-level debug to see detailed plan output.\n")
+			}
+
+			if importOnly {
+				_, _ = progress.Println("Terraform import workflow complete. Review the plan, then rerun without --import-resource to apply any changes.")
+				return nil
 			}
 
 			if cmd.Flag("dry-run").Value.String() == "true" {
@@ -212,12 +253,8 @@ func BootstrapCmd() *cobra.Command {
 			defer func() {
 				// Copy the state file back to the original location
 				_, _ = progress.Printf("Copying state file back to %q\n", localStateFilePath)
-				stateFileData, err := os.ReadFile(tmpStateFilePath)
-				if err != nil {
-					_, _ = failure.Printf("unable to read state file from temporary directory: %v", err)
-				}
-				if err := os.WriteFile(localStateFilePath, stateFileData, 0600); err != nil {
-					_, _ = failure.Printf("unable to write state file to %q: %v", localStateFilePath, err)
+				if err := persistTerraformState(tmpStateFilePath, localStateFilePath); err != nil {
+					_, _ = failure.Printf("unable to save Terraform state: %v", err)
 				}
 			}()
 
@@ -241,11 +278,50 @@ func BootstrapCmd() *cobra.Command {
 	cmd.PersistentFlags().Bool("force-terraform-download", false, "Force download terraform")
 	cmd.PersistentFlags().StringArrayVar(&tfVars, "tf-var", []string{}, "Pass arbitrary variables to terraform (can be specified multiple times)")
 	_ = cmd.PersistentFlags().MarkHidden("tf-var")
+	cmd.PersistentFlags().StringArrayVar(
+		&resourceImports,
+		"import-resource",
+		[]string{},
+		"Import an existing resource into state, then plan without applying (repeatable; address=id; modifies state)",
+	)
 
 	// The subcommands will handle cloud provider specific variables and mutate the list of vars to be passed to terraform plan/apply
 	cmd.AddCommand(awsCmd(&vars))
 	cmd.AddCommand(gcpCmd(&vars))
 	return cmd
+}
+
+func parseResourceImports(values []string) ([]resourceImport, error) {
+	imports := make([]resourceImport, 0, len(values))
+	seenAddresses := make(map[string]struct{}, len(values))
+
+	for _, value := range values {
+		address, id, found := strings.Cut(value, "=")
+		address = strings.TrimSpace(address)
+		id = strings.TrimSpace(id)
+		if !found || address == "" || id == "" {
+			return nil, fmt.Errorf("invalid --import-resource value %q: expected address=id with non-empty values", value)
+		}
+		if _, found := seenAddresses[address]; found {
+			return nil, fmt.Errorf("duplicate --import-resource address %q", address)
+		}
+
+		seenAddresses[address] = struct{}{}
+		imports = append(imports, resourceImport{address: address, id: id})
+	}
+
+	return imports, nil
+}
+
+func persistTerraformState(tmpStateFilePath, localStateFilePath string) error {
+	stateFileData, err := os.ReadFile(tmpStateFilePath)
+	if err != nil {
+		return fmt.Errorf("unable to read state file from temporary directory: %w", err)
+	}
+	if err := os.WriteFile(localStateFilePath, stateFileData, 0600); err != nil {
+		return fmt.Errorf("unable to write state file to %q: %w", localStateFilePath, err)
+	}
+	return nil
 }
 
 func toPlanOptions(vars []*tfexec.VarOption) []tfexec.PlanOption {
@@ -254,6 +330,14 @@ func toPlanOptions(vars []*tfexec.VarOption) []tfexec.PlanOption {
 		planOpts[i] = v
 	}
 	return planOpts
+}
+
+func toImportOptions(vars []*tfexec.VarOption) []tfexec.ImportOption {
+	importOpts := make([]tfexec.ImportOption, len(vars))
+	for i, v := range vars {
+		importOpts[i] = v
+	}
+	return importOpts
 }
 
 func toApplyOptions(vars []*tfexec.VarOption) []tfexec.ApplyOption {

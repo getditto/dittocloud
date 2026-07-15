@@ -237,6 +237,33 @@ The tool uses Terraform state files to track the infrastructure it creates. By d
 
 **Important:** Keep your state file safe and backed up, as it's required for any future updates or destruction of the created resources.
 
+### Importing Existing Resources
+
+Use `--import-resource` to associate an existing cloud resource with an address
+in the embedded Terraform configuration. The value uses `address=id` format and
+the flag can be repeated to import multiple resources in order:
+
+```bash
+cp terraform.tfstate terraform.tfstate.before-import
+
+dittocloud bootstrap aws \
+  --aws-profile my-profile \
+  --aws-region us-west-2 \
+  --state terraform.tfstate \
+  --import-resource 'module.cross_account_iam[0].aws_iam_policy.capa_controller_network=arn:aws:iam::123456789012:policy/ditto-capa-controller-network-policy' \
+  --import-resource 'module.cross_account_iam[0].aws_iam_policy.capa_control_plane_tags=arn:aws:iam::123456789012:policy/control-plane-tags.cluster-api-provider-aws.sigs.k8s.io'
+```
+
+Import mode modifies the selected state file after each successful import, then
+shows a detailed Terraform plan. It never runs `terraform apply`, even when
+`--dry-run` is omitted. Review the plan and rerun the same bootstrap command
+without `--import-resource` when you are ready to apply any proposed changes.
+
+The Terraform address must already exist in Dittocloud's embedded configuration,
+and the provider-specific import ID must identify exactly one existing resource.
+Pass the same provider, region, VPC, cluster, and trust configuration used by the
+deployment so the post-import plan is accurate.
+
 ## Updating an Existing Deployment
 
 Occasionally Ditto may request that you re-run the script to make necessary updates to permissions and resources.
