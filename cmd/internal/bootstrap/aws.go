@@ -19,6 +19,14 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 		Short: "Bootstrap AWS",
 		Long:  "Bootstrap AWS",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			scopeMode, err := validateAWSScopesFlags(cmd.Flags())
+			if err != nil {
+				return err
+			}
+			if scopeMode {
+				return fmt.Errorf("AWS scope mode configuration is valid, but Terraform resource wiring is not implemented yet; no plan or apply was run")
+			}
+
 			customerManagedVPC, err := cmd.Flags().GetBool("customer-managed-vpc")
 			if err != nil {
 				return fmt.Errorf("unable to get customer-managed-vpc: %w", err)
@@ -74,8 +82,56 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 	cmd.Flags().Bool("customer-managed-vpc", false, "Set when the customer provides their own VPC; skips VPC creation and omits VPC lifecycle permissions from the CAPA controller role")
 	cmd.Flags().String("vpc-id", "", "ID of an existing VPC; required with --customer-managed-vpc so CAPA EC2 operations can be restricted to it")
 	cmd.Flags().String("cluster-name", "", "Tighten IAM conditions to a specific cluster name; requires an existing state file (re-runs only)")
+	cmd.Flags().Bool("scopes", false, "Enable AWS multi-scope mode using a scopes YAML file")
+	cmd.Flags().String("scopes-file", "", "Path to an AWS deployment scopes YAML file; requires --scopes")
 
 	return cmd
+}
+
+func validateAWSScopesFlags(flags *pflag.FlagSet) (bool, error) {
+	scopeMode, err := flags.GetBool("scopes")
+	if err != nil {
+		return false, fmt.Errorf("unable to get scopes: %w", err)
+	}
+	scopesFile, err := flags.GetString("scopes-file")
+	if err != nil {
+		return false, fmt.Errorf("unable to get scopes-file: %w", err)
+	}
+
+	if !scopeMode {
+		if strings.TrimSpace(scopesFile) != "" {
+			return false, fmt.Errorf("--scopes-file requires --scopes=true")
+		}
+		return false, nil
+	}
+	if strings.TrimSpace(scopesFile) == "" {
+		return false, fmt.Errorf("--scopes-file is required with --scopes=true")
+	}
+
+	legacyScopeFlags := []string{
+		"aws-region",
+		"aws-vpc-name",
+		"aws-vpc-cidr",
+		"create-vpc",
+		"enable-eks",
+		"customer-managed-vpc",
+		"vpc-id",
+		"cluster-name",
+	}
+	for _, flagName := range legacyScopeFlags {
+		if flags.Changed(flagName) {
+			return false, fmt.Errorf("--%s cannot be used with --scopes=true; configure it in the scopes YAML", flagName)
+		}
+	}
+
+	scopes, err := loadAWSDeploymentScopes(scopesFile)
+	if err != nil {
+		return false, err
+	}
+	if _, err := marshalAWSDeploymentScopes(scopes); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func promptAWSValues(flags *pflag.FlagSet) ([]*tfexec.VarOption, error) {

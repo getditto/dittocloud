@@ -13,6 +13,108 @@ variable "profile" {
   default     = null
 }
 
+variable "deployment_scopes" {
+  description = "Complete desired AWS deployment scope map. An empty map preserves legacy single-scope behavior; a non-empty map enables scope mode and requires exactly one default scope."
+  type = map(object({
+    name         = optional(string)
+    default      = optional(bool, false)
+    cluster_name = optional(string)
+    cluster_type = optional(string, "kubeadm")
+    region       = string
+    vpc = object({
+      mode = string
+      name = optional(string)
+      cidr = optional(string)
+      id   = optional(string)
+    })
+  }))
+  default = {}
+
+  validation {
+    condition = length(var.deployment_scopes) == 0 || length([
+      for scope in values(var.deployment_scopes) : scope if scope.default
+    ]) == 1
+    error_message = "A non-empty deployment_scopes map must contain exactly one scope with default = true."
+  }
+
+  validation {
+    condition = alltrue([
+      for scope_ref in keys(var.deployment_scopes) :
+      length(scope_ref) >= 1 &&
+      length(scope_ref) <= 32 &&
+      can(regex("^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$", scope_ref))
+    ])
+    error_message = "Each deployment scope reference must contain 1-32 lowercase letters, digits, or internal hyphens and must begin and end with a letter or digit."
+  }
+
+  validation {
+    condition = alltrue([
+      for scope in values(var.deployment_scopes) :
+      try(
+        scope.name == trimspace(scope.name) &&
+        length(scope.name) <= 100 &&
+        !can(regex("[[:cntrl:]]", scope.name)),
+        true,
+      )
+    ])
+    error_message = "Deployment scope display names must not have leading or trailing whitespace, contain control characters, or exceed 100 characters."
+  }
+
+  validation {
+    condition = alltrue([
+      for scope in values(var.deployment_scopes) :
+      contains(["kubeadm", "eks"], scope.cluster_type) &&
+      can(regex("^[a-z]{2}(?:-[a-z0-9]+)+-[0-9]+$", scope.region)) &&
+      try(
+        scope.cluster_name == null || (
+          length(scope.cluster_name) <= 63 &&
+          can(regex("^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$", scope.cluster_name))
+        ),
+        true,
+      )
+    ])
+    error_message = "Each deployment scope must use cluster_type kubeadm or eks, a valid AWS region, and an optional lowercase DNS-label cluster_name with at most 63 characters."
+  }
+
+  validation {
+    condition = length([
+      for scope in values(var.deployment_scopes) : scope.cluster_name
+      if scope.cluster_name != null && scope.cluster_name != ""
+      ]) == length(distinct([
+        for scope in values(var.deployment_scopes) : scope.cluster_name
+        if scope.cluster_name != null && scope.cluster_name != ""
+    ]))
+    error_message = "Each non-empty cluster_name must be unique across deployment scopes."
+  }
+
+  validation {
+    condition = alltrue([
+      for scope in values(var.deployment_scopes) : contains(["dittocloud", "capi", "existing"], scope.vpc.mode)
+    ])
+    error_message = "Each deployment scope VPC mode must be dittocloud, capi, or existing."
+  }
+
+  validation {
+    condition = alltrue([
+      for scope in values(var.deployment_scopes) :
+      scope.vpc.mode == "dittocloud" ? (
+        try(trimspace(scope.vpc.name) != "", false) &&
+        try(can(cidrhost(scope.vpc.cidr, 0)) && !strcontains(scope.vpc.cidr, ":"), false) &&
+        scope.vpc.id == null
+        ) : scope.vpc.mode == "capi" ? (
+        scope.vpc.name == null &&
+        scope.vpc.cidr == null &&
+        (scope.vpc.id == null ? true : can(regex("^vpc-(?:[0-9a-f]{8}|[0-9a-f]{17})$", scope.vpc.id)))
+        ) : scope.vpc.mode == "existing" ? (
+        scope.vpc.name == null &&
+        scope.vpc.cidr == null &&
+        (scope.vpc.id == null ? false : can(regex("^vpc-(?:[0-9a-f]{8}|[0-9a-f]{17})$", scope.vpc.id)))
+      ) : true
+    ])
+    error_message = "Dittocloud VPC scopes require name and IPv4 cidr; CAPI scopes permit only an optional VPC id; existing scopes require a valid VPC id."
+  }
+}
+
 ####################################################################################################
 # IAM Policies
 ####################################################################################################
