@@ -13,10 +13,10 @@ locals {
       "compute.backendServices.getEffectiveSecurityPolicies",
       "compute.backendServices.list",
       "compute.backendServices.update",
-      "compute.disks.get",  # CSI functionality
-      "compute.disks.create",  # CSI functionality
-      "compute.disks.createSnapshot",  # CSI functionality
-      "compute.disks.setLabels",  # CSI functionality
+      "compute.disks.get",            # CSI functionality
+      "compute.disks.create",         # CSI functionality
+      "compute.disks.createSnapshot", # CSI functionality
+      "compute.disks.setLabels",      # CSI functionality
       "compute.firewalls.create",
       "compute.firewalls.delete",
       "compute.firewalls.get",
@@ -57,12 +57,12 @@ locals {
       "compute.routers.create",
       "compute.routers.delete",
       "compute.routers.get",
-      "compute.snapshots.get",  # CSI functionality
-      "compute.snapshots.list",  # CSI functionality
-      "compute.snapshots.create",  # CSI functionality
-      "compute.snapshots.useReadOnly",  # CSI functionality
-      "compute.snapshots.delete",  # CSI functionality
-      "compute.snapshots.setLabels",  # CSI functionality
+      "compute.snapshots.get",         # CSI functionality
+      "compute.snapshots.list",        # CSI functionality
+      "compute.snapshots.create",      # CSI functionality
+      "compute.snapshots.useReadOnly", # CSI functionality
+      "compute.snapshots.delete",      # CSI functionality
+      "compute.snapshots.setLabels",   # CSI functionality
       "compute.subnetworks.create",
       "compute.subnetworks.delete",
       "compute.subnetworks.get",

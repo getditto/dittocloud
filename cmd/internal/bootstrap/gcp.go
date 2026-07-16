@@ -19,7 +19,9 @@ func gcpCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 		Use:   "gcp",
 		Short: "Bootstrap GCP",
 		Long:  "Ready a GCP project to host Ditto",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) (runErr error) {
+			defer releaseCommandOperationLockOnError(cmd, &runErr)
+
 			logger := log.FromContext(cmd.Context())
 			logger.Debug("Processing GCP bootstrap command")
 
@@ -79,7 +81,6 @@ func promptGcpValues(ctx context.Context, flags *pflag.FlagSet) ([]*tfexec.VarOp
 			}
 		})
 	}
-
 
 	// Build terraform variables
 	projectId := fmt.Sprintf("project_id=%s", flags.Lookup("project-id").Value.String())

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -126,6 +127,17 @@ func terraformVarOption(opt any) (string, string, bool) {
 // setupBootstrapTest creates a test environment with a mocked terraform executor
 func setupBootstrapTest(t *testing.T, args []string) (*cobra.Command, *mockTerraformExecutor) {
 	t.Helper()
+
+	hasStatePath := false
+	for _, arg := range args {
+		if arg == "--state" || strings.HasPrefix(arg, "--state=") {
+			hasStatePath = true
+			break
+		}
+	}
+	if !hasStatePath {
+		args = append(slices.Clone(args), "--state="+filepath.Join(t.TempDir(), "terraform.tfstate"))
+	}
 
 	ctx := log.WithLogger(context.Background(), log.Setup("debug"))
 

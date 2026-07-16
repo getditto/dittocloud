@@ -18,12 +18,21 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 		Use:   "aws",
 		Short: "Bootstrap AWS",
 		Long:  "Bootstrap AWS",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			scopeMode, encodedScopes, err := validateAWSScopesFlags(cmd.Flags())
+		RunE: func(cmd *cobra.Command, args []string) (runErr error) {
+			defer releaseCommandOperationLockOnError(cmd, &runErr)
+
+			scopeMode, scopes, encodedScopes, allowedScopeRemovals, err := validateAWSScopesFlags(cmd.Flags())
 			if err != nil {
 				return err
 			}
 			if scopeMode {
+				if err := validateAWSStateScopeLifecycle(
+					commandCanonicalStatePath(cmd),
+					scopes,
+					allowedScopeRemovals,
+				); err != nil {
+					return err
+				}
 				scopeVars, err := awsScopeTerraformVariables(cmd.Flags(), encodedScopes)
 				if err != nil {
 					return err
@@ -31,7 +40,7 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 				for _, value := range scopeVars {
 					*vars = append(*vars, tfexec.Var(value))
 				}
-				return fmt.Errorf("AWS scope mode configuration is valid, but Terraform resource wiring is not implemented yet; no plan or apply was run")
+				return fmt.Errorf("AWS scope-mode safety preflight passed, but Terraform execution is not enabled yet; no plan or apply was run")
 			}
 
 			customerManagedVPC, err := cmd.Flags().GetBool("customer-managed-vpc")
@@ -91,31 +100,43 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 	cmd.Flags().String("cluster-name", "", "Tighten IAM conditions to a specific cluster name; requires an existing state file (re-runs only)")
 	cmd.Flags().Bool("scopes", false, "Enable AWS multi-scope mode using a scopes YAML file")
 	cmd.Flags().String("scopes-file", "", "Path to an AWS deployment scopes YAML file; requires --scopes")
+	cmd.Flags().StringArray(
+		"allow-scope-removal",
+		[]string{},
+		"Authorize omission of one state-backed non-default scope reference (repeatable; requires --scopes)",
+	)
 
 	return cmd
 }
 
-func validateAWSScopesFlags(flags *pflag.FlagSet) (bool, string, error) {
+func validateAWSScopesFlags(flags *pflag.FlagSet) (bool, AWSDeploymentScopes, string, []string, error) {
 	scopeMode, err := flags.GetBool("scopes")
 	if err != nil {
-		return false, "", fmt.Errorf("unable to get scopes: %w", err)
+		return false, nil, "", nil, fmt.Errorf("unable to get scopes: %w", err)
 	}
 	scopesFile, err := flags.GetString("scopes-file")
 	if err != nil {
-		return false, "", fmt.Errorf("unable to get scopes-file: %w", err)
+		return false, nil, "", nil, fmt.Errorf("unable to get scopes-file: %w", err)
+	}
+	allowedScopeRemovals, err := flags.GetStringArray("allow-scope-removal")
+	if err != nil {
+		return false, nil, "", nil, fmt.Errorf("unable to get allow-scope-removal: %w", err)
 	}
 
 	if !scopeMode {
 		if strings.TrimSpace(scopesFile) != "" {
-			return false, "", fmt.Errorf("--scopes-file requires --scopes=true")
+			return false, nil, "", nil, fmt.Errorf("--scopes-file requires --scopes=true")
 		}
-		return false, "", nil
+		if flags.Changed("allow-scope-removal") {
+			return false, nil, "", nil, fmt.Errorf("--allow-scope-removal requires --scopes=true")
+		}
+		return false, nil, "", nil, nil
 	}
 	if strings.TrimSpace(scopesFile) == "" {
-		return false, "", fmt.Errorf("--scopes-file is required with --scopes=true")
+		return false, nil, "", nil, fmt.Errorf("--scopes-file is required with --scopes=true")
 	}
 	if flags.Changed("tf-var") {
-		return false, "", fmt.Errorf("--tf-var cannot be used with --scopes=true; scope mode accepts only validated scope YAML and explicit account-level flags")
+		return false, nil, "", nil, fmt.Errorf("--tf-var cannot be used with --scopes=true; scope mode accepts only validated scope YAML and explicit account-level flags")
 	}
 
 	legacyScopeFlags := []string{
@@ -130,19 +151,19 @@ func validateAWSScopesFlags(flags *pflag.FlagSet) (bool, string, error) {
 	}
 	for _, flagName := range legacyScopeFlags {
 		if flags.Changed(flagName) {
-			return false, "", fmt.Errorf("--%s cannot be used with --scopes=true; configure it in the scopes YAML", flagName)
+			return false, nil, "", nil, fmt.Errorf("--%s cannot be used with --scopes=true; configure it in the scopes YAML", flagName)
 		}
 	}
 
 	scopes, err := loadAWSDeploymentScopes(scopesFile)
 	if err != nil {
-		return false, "", err
+		return false, nil, "", nil, err
 	}
 	encodedScopes, err := marshalAWSDeploymentScopes(scopes)
 	if err != nil {
-		return false, "", err
+		return false, nil, "", nil, err
 	}
-	return true, encodedScopes, nil
+	return true, scopes, encodedScopes, allowedScopeRemovals, nil
 }
 
 // awsScopeTerraformVariables returns the complete account-level input shared by

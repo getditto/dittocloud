@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -55,7 +56,6 @@ func BootstrapCmd() *cobra.Command {
 
 	header := color.New(color.FgCyan, color.Bold)
 	progress := color.New(color.FgMagenta)
-	failure := color.New(color.FgRed, color.Bold)
 	cmd := &cobra.Command{
 		Use:   "bootstrap",
 		Short: "Bootstrap a cloud provider",
@@ -70,15 +70,37 @@ func BootstrapCmd() *cobra.Command {
 			ctx := log.WithLogger(cmd.Context(), logger)
 			cmd.SetContext(ctx)
 
+			operation := "bootstrap " + cmd.Name()
+			if len(resourceImports) > 0 {
+				operation += " import"
+			} else if cmd.Flag("dry-run").Value.String() == "true" {
+				operation += " dry-run"
+			}
+			operationLock, err := acquireStateOperationLock(cmd.Flag("state").Value.String(), operation)
+			if err != nil {
+				return err
+			}
+			setCommandOperationLock(cmd, operationLock)
+
 			// Log the start of bootstrap
-			logger.Debug("Starting Ditto Cloud Bootstrap", "command", cmd.Name())
+			logger.Debug(
+				"Starting Ditto Cloud Bootstrap",
+				"command", cmd.Name(),
+				"state", operationLock.canonicalStatePath,
+			)
 
 			_, _ = header.Println("══════════════════════════════════════════════════")
 			_, _ = header.Println("               Ditto Cloud Bootstrap              ")
 			_, _ = header.Println("══════════════════════════════════════════════════")
 			return nil
 		},
-		PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
+		PersistentPostRunE: func(cmd *cobra.Command, args []string) (postRunErr error) {
+			defer func() {
+				if err := releaseCommandOperationLock(cmd); err != nil {
+					postRunErr = errors.Join(postRunErr, fmt.Errorf("unable to release Dittocloud operation lock: %w", err))
+				}
+			}()
+
 			logger := log.FromContext(cmd.Context())
 			color.NoColor = cmd.Flag("no-color").Value.String() == "true"
 
@@ -93,8 +115,13 @@ func BootstrapCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("unable to create temporary directory: %w", err)
 			}
+			retainTmpDir := false
 			if cmd.Flag("remove-tmpdir").Value.String() == "true" {
-				defer func() { _ = os.Remove(tmpDir) }()
+				defer func() {
+					if !retainTmpDir {
+						_ = os.RemoveAll(tmpDir)
+					}
+				}()
 			}
 
 			_, _ = progress.Printf("Copying terraform files to temporary directory %q\n", tmpDir)
@@ -111,7 +138,7 @@ func BootstrapCmd() *cobra.Command {
 			workingDir := filepath.Join(tmpDir, provider)
 			_, _ = progress.Printf("Using %q provider\n", provider)
 
-			localStateFilePath := cmd.Flag("state").Value.String()
+			localStateFilePath := commandCanonicalStatePath(cmd)
 			tmpStateFilePath := filepath.Join(workingDir, "terraform.tfstate")
 
 			if _, err := os.Stat(localStateFilePath); err == nil {
@@ -123,11 +150,13 @@ func BootstrapCmd() *cobra.Command {
 				if err := os.WriteFile(tmpStateFilePath, input, 0600); err != nil {
 					return fmt.Errorf("unable to write state file to temporary directory: %w", err)
 				}
-			} else {
+			} else if errors.Is(err, os.ErrNotExist) {
 				_, _ = progress.Printf(
 					"No local state file found, new state file will be created at %q\n",
 					localStateFilePath,
 				)
+			} else {
+				return fmt.Errorf("unable to inspect local state file %q: %w", localStateFilePath, err)
 			}
 
 			var execPath string
@@ -162,6 +191,7 @@ func BootstrapCmd() *cobra.Command {
 					return fmt.Errorf("unable to import Terraform resource %q: %w", resource.address, err)
 				}
 				if err := persistTerraformState(tmpStateFilePath, localStateFilePath); err != nil {
+					retainTmpDir = true
 					return fmt.Errorf("unable to save state after importing Terraform resource %q: %w", resource.address, err)
 				}
 			}
@@ -250,24 +280,32 @@ func BootstrapCmd() *cobra.Command {
 				_, _ = progress.Println("Only \"y\" or \"n\" inputs are accepted.")
 			}
 
-			defer func() {
-				// Copy the state file back to the original location
-				_, _ = progress.Printf("Copying state file back to %q\n", localStateFilePath)
-				if err := persistTerraformState(tmpStateFilePath, localStateFilePath); err != nil {
-					_, _ = failure.Printf("unable to save Terraform state: %v", err)
-				}
-			}()
-
 			_, _ = progress.Println("Running terraform apply...")
-			if err := tf.Apply(cmd.Context(), toApplyOptions(vars)...); err != nil {
-				return fmt.Errorf("unable to run terraform apply: %w", err)
+			applyErr := tf.Apply(cmd.Context(), toApplyOptions(vars)...)
+
+			var outputErr error
+			if applyErr == nil {
+				outputErr = showOutputs(cmd.Context(), tf)
 			}
 
-			if err := showOutputs(cmd.Context(), tf); err != nil {
-				return err
+			_, _ = progress.Printf("Persisting Terraform state to %q\n", localStateFilePath)
+			persistenceErr := persistTerraformState(tmpStateFilePath, localStateFilePath)
+			if persistenceErr != nil {
+				retainTmpDir = true
 			}
 
-			return nil
+			if applyErr != nil {
+				wrappedApplyErr := fmt.Errorf(
+					"unable to run terraform apply: %w; partial Terraform state was saved to %q",
+					applyErr,
+					localStateFilePath,
+				)
+				if persistenceErr != nil {
+					wrappedApplyErr = fmt.Errorf("unable to run terraform apply: %w", applyErr)
+				}
+				return errors.Join(wrappedApplyErr, persistenceErr)
+			}
+			return errors.Join(outputErr, persistenceErr)
 		},
 	}
 	cmd.PersistentFlags().Bool("dry-run", false, "Run terraform plan instead of terraform apply")
@@ -311,17 +349,6 @@ func parseResourceImports(values []string) ([]resourceImport, error) {
 	}
 
 	return imports, nil
-}
-
-func persistTerraformState(tmpStateFilePath, localStateFilePath string) error {
-	stateFileData, err := os.ReadFile(tmpStateFilePath)
-	if err != nil {
-		return fmt.Errorf("unable to read state file from temporary directory: %w", err)
-	}
-	if err := os.WriteFile(localStateFilePath, stateFileData, 0600); err != nil {
-		return fmt.Errorf("unable to write state file to %q: %w", localStateFilePath, err)
-	}
-	return nil
 }
 
 func toPlanOptions(vars []*tfexec.VarOption) []tfexec.PlanOption {

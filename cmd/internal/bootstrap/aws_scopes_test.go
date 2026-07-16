@@ -390,6 +390,11 @@ dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
 			wantError: "--scopes-file requires --scopes=true",
 		},
 		{
+			name:      "rejects removal authorization outside scope mode",
+			args:      []string{"aws", "--allow-scope-removal=" + testSecondaryScopeRef, "--dry-run"},
+			wantError: "--allow-scope-removal requires --scopes=true",
+		},
+		{
 			name: "rejects legacy per-scope flags",
 			args: []string{
 				"aws",
@@ -422,7 +427,7 @@ dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
 				"--iam-trusted-role-arns=arn:aws:iam::123456789012:role/trust-editor",
 				"--dry-run",
 			},
-			wantError: "Terraform resource wiring is not implemented yet; no plan or apply was run",
+			wantError: "scope-mode safety preflight passed, but Terraform execution is not enabled yet",
 		},
 		{
 			name: "validates then fails closed before Terraform",
@@ -432,7 +437,7 @@ dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
 				"--scopes-file=" + validScopesPath,
 				"--dry-run",
 			},
-			wantError: "Terraform resource wiring is not implemented yet; no plan or apply was run",
+			wantError: "scope-mode safety preflight passed, but Terraform execution is not enabled yet",
 		},
 	}
 
