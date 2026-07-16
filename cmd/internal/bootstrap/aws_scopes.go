@@ -20,11 +20,11 @@ const (
 	awsVPCModeExisting      = "existing"
 	awsClusterTypeKubeadm   = "kubeadm"
 	awsClusterTypeEKS       = "eks"
-	awsScopeReferenceMaxLen = 32
+	awsScopeReferenceLength = 30
 )
 
 var (
-	awsScopeReferencePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$`)
+	awsScopeReferencePattern = regexp.MustCompile(`^dsc-[0-7][0-9a-hjkmnp-tv-z]{25}$`)
 	awsClusterNamePattern    = regexp.MustCompile(`^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$`)
 	awsRegionPattern         = regexp.MustCompile(`^[a-z]{2}(?:-[a-z0-9]+)+-[0-9]+$`)
 	awsVPCIDPattern          = regexp.MustCompile(`^vpc-(?:[0-9a-f]{8}|[0-9a-f]{17})$`)
@@ -36,11 +36,12 @@ var (
 type AWSDeploymentScopes map[string]AWSDeploymentScope
 
 type AWSDeploymentScope struct {
-	Default     bool        `yaml:"default,omitempty" json:"default"`
-	ClusterName string      `yaml:"clusterName,omitempty" json:"cluster_name,omitempty"`
-	ClusterType string      `yaml:"clusterType,omitempty" json:"cluster_type"`
-	Region      string      `yaml:"region" json:"region"`
-	VPC         AWSScopeVPC `yaml:"vpc" json:"vpc"`
+	Default               bool        `yaml:"default,omitempty" json:"default"`
+	ClusterName           string      `yaml:"clusterName,omitempty" json:"cluster_name,omitempty"`
+	ClusterType           string      `yaml:"clusterType,omitempty" json:"cluster_type"`
+	Region                string      `yaml:"region" json:"region"`
+	ScopeTagPolicyVersion int         `yaml:"scopeTagPolicyVersion,omitempty" json:"scope_tag_policy_version"`
+	VPC                   AWSScopeVPC `yaml:"vpc" json:"vpc"`
 }
 
 type AWSScopeVPC struct {
@@ -99,11 +100,10 @@ func (scopes AWSDeploymentScopes) Validate() error {
 	sort.Strings(scopeRefs)
 
 	defaultScopeCount := 0
-	clusterNames := make(map[string]string, len(scopes))
 	for _, scopeRef := range scopeRefs {
 		scope := scopes[scopeRef]
 		if !awsScopeReferencePattern.MatchString(scopeRef) {
-			return fmt.Errorf("scope reference %q must contain 1-%d lowercase letters, digits, or internal hyphens and must begin and end with a letter or digit", scopeRef, awsScopeReferenceMaxLen)
+			return fmt.Errorf("scope reference %q must be exactly %d characters in generated dsc-<lowercase-crockford-ulid> form", scopeRef, awsScopeReferenceLength)
 		}
 		if scope.Default {
 			defaultScopeCount++
@@ -111,14 +111,13 @@ func (scopes AWSDeploymentScopes) Validate() error {
 		if scope.ClusterType != awsClusterTypeKubeadm && scope.ClusterType != awsClusterTypeEKS {
 			return fmt.Errorf("scope %q clusterType must be %q or %q", scopeRef, awsClusterTypeKubeadm, awsClusterTypeEKS)
 		}
+		if scope.ScopeTagPolicyVersion != 0 && scope.ScopeTagPolicyVersion != 1 {
+			return fmt.Errorf("scope %q scopeTagPolicyVersion must be 0 or 1", scopeRef)
+		}
 		if scope.ClusterName != "" {
 			if len(scope.ClusterName) > 63 || !awsClusterNamePattern.MatchString(scope.ClusterName) {
 				return fmt.Errorf("scope %q clusterName %q must be a lowercase DNS label with at most 63 characters", scopeRef, scope.ClusterName)
 			}
-			if previousScope, exists := clusterNames[scope.ClusterName]; exists {
-				return fmt.Errorf("scopes %q and %q use the same clusterName %q", previousScope, scopeRef, scope.ClusterName)
-			}
-			clusterNames[scope.ClusterName] = scopeRef
 		}
 		if !awsRegionPattern.MatchString(scope.Region) {
 			return fmt.Errorf("scope %q region %q is not a valid AWS region name", scopeRef, scope.Region)

@@ -4,9 +4,8 @@
 # karpenter-interruption, set in cloud-infra-apps) to cordon and drain nodes before
 # they are reclaimed, instead of losing them abruptly.
 #
-# Account-scoped and gated on enable_eks (mirrors eks_imds_defaults.tf). The queue
-# name is fixed rather than per-cluster because this module runs per AWS account and
-# does not know cluster names; revisit if an account ever hosts multiple EKS clusters.
+# The unsuffixed resources belong to the default scope and remain gated on that
+# scope being EKS. Non-default EKS scopes use separately keyed resources.
 
 locals {
   karpenter_interruption_events = {
@@ -34,15 +33,17 @@ locals {
 }
 
 resource "aws_sqs_queue" "karpenter_interruption" {
-  count                     = var.enable_eks ? 1 : 0
+  count                     = local.default_enable_eks ? 1 : 0
   name                      = "karpenter-interruption"
   message_retention_seconds = 300
   sqs_managed_sse_enabled   = true
   tags                      = var.tags
+
+  depends_on = [terraform_data.scope_registry]
 }
 
 data "aws_iam_policy_document" "karpenter_interruption" {
-  count = var.enable_eks ? 1 : 0
+  count = local.default_enable_eks ? 1 : 0
 
   statement {
     sid       = "EC2InterruptionPolicy"
@@ -73,13 +74,13 @@ data "aws_iam_policy_document" "karpenter_interruption" {
 }
 
 resource "aws_sqs_queue_policy" "karpenter_interruption" {
-  count     = var.enable_eks ? 1 : 0
+  count     = local.default_enable_eks ? 1 : 0
   queue_url = aws_sqs_queue.karpenter_interruption[0].id
   policy    = data.aws_iam_policy_document.karpenter_interruption[0].json
 }
 
 resource "aws_cloudwatch_event_rule" "karpenter_interruption" {
-  for_each = var.enable_eks ? local.karpenter_interruption_events : {}
+  for_each = local.default_enable_eks ? local.karpenter_interruption_events : {}
 
   name = each.value.name
   event_pattern = jsonencode({
@@ -87,10 +88,12 @@ resource "aws_cloudwatch_event_rule" "karpenter_interruption" {
     "detail-type" = [each.value.detail_type]
   })
   tags = var.tags
+
+  depends_on = [terraform_data.scope_registry]
 }
 
 resource "aws_cloudwatch_event_target" "karpenter_interruption" {
-  for_each = var.enable_eks ? local.karpenter_interruption_events : {}
+  for_each = local.default_enable_eks ? local.karpenter_interruption_events : {}
 
   rule = aws_cloudwatch_event_rule.karpenter_interruption[each.key].name
   arn  = aws_sqs_queue.karpenter_interruption[0].arn

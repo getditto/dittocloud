@@ -16,10 +16,11 @@ variable "profile" {
 variable "deployment_scopes" {
   description = "Complete desired AWS deployment scope map. An empty map preserves legacy single-scope behavior; a non-empty map enables scope mode and requires exactly one default scope."
   type = map(object({
-    default      = optional(bool, false)
-    cluster_name = optional(string)
-    cluster_type = optional(string, "kubeadm")
-    region       = string
+    default                  = optional(bool, false)
+    cluster_name             = optional(string)
+    cluster_type             = optional(string, "kubeadm")
+    region                   = string
+    scope_tag_policy_version = optional(number, 0)
     vpc = object({
       mode = string
       name = optional(string)
@@ -39,11 +40,10 @@ variable "deployment_scopes" {
   validation {
     condition = alltrue([
       for scope_ref in keys(var.deployment_scopes) :
-      length(scope_ref) >= 1 &&
-      length(scope_ref) <= 32 &&
-      can(regex("^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$", scope_ref))
+      length(scope_ref) == 30 &&
+      can(regex("^dsc-[0-7][0-9a-hjkmnp-tv-z]{25}$", scope_ref))
     ])
-    error_message = "Each deployment scope reference must contain 1-32 lowercase letters, digits, or internal hyphens and must begin and end with a letter or digit."
+    error_message = "Each deployment scope reference must be exactly 30 characters in generated dsc-<lowercase-crockford-ulid> form."
   }
 
   validation {
@@ -63,14 +63,10 @@ variable "deployment_scopes" {
   }
 
   validation {
-    condition = length([
-      for scope in values(var.deployment_scopes) : scope.cluster_name
-      if scope.cluster_name != null && scope.cluster_name != ""
-      ]) == length(distinct([
-        for scope in values(var.deployment_scopes) : scope.cluster_name
-        if scope.cluster_name != null && scope.cluster_name != ""
-    ]))
-    error_message = "Each non-empty cluster_name must be unique across deployment scopes."
+    condition = alltrue([
+      for scope in values(var.deployment_scopes) : contains([0, 1], scope.scope_tag_policy_version)
+    ])
+    error_message = "Each deployment scope scope_tag_policy_version must be 0 or 1."
   }
 
   validation {

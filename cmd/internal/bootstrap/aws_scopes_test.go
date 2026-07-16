@@ -24,16 +24,17 @@ dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
   clusterName: cluster-x
   clusterType: eks
   region: ap-southeast-2
+  scopeTagPolicyVersion: 1
   vpc:
     mode: dittocloud
     name: ditto-k8s
     cidr: 10.210.0.0/16
-vpc-09e877f9012f52241:
+dsc-01k2m8g7n4p6q9r3t5v8x1y2z4:
   region: us-east-1
   vpc:
     mode: existing
     id: vpc-09e877f9012f52241
-capi-virginia:
+dsc-01k2m8g7n4p6q9r3t5v8x1y2z5:
   region: us-gov-west-1
   vpc:
     mode: capi
@@ -50,14 +51,14 @@ capi-virginia:
 		if got := scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].ClusterType; got != awsClusterTypeEKS {
 			t.Errorf("default scope cluster type: got %q, want %q", got, awsClusterTypeEKS)
 		}
-		if got := scopes["vpc-09e877f9012f52241"].ClusterType; got != awsClusterTypeKubeadm {
+		if got := scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].ClusterType; got != awsClusterTypeKubeadm {
 			t.Errorf("existing VPC scope default cluster type: got %q, want %q", got, awsClusterTypeKubeadm)
 		}
 	})
 
 	t.Run("marshals Terraform field names", func(t *testing.T) {
 		path := writeAWSScopeTestFile(t, `
-legacy:
+dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
   default: true
   clusterName: cluster-x
   region: ap-southeast-2
@@ -73,10 +74,29 @@ legacy:
 		if err != nil {
 			t.Fatalf("unexpected marshal error: %v", err)
 		}
-		for _, want := range []string{`"default":true`, `"cluster_name":"cluster-x"`, `"cluster_type":"kubeadm"`} {
+		for _, want := range []string{`"default":true`, `"cluster_name":"cluster-x"`, `"cluster_type":"kubeadm"`, `"scope_tag_policy_version":0`} {
 			if !strings.Contains(encoded, want) {
 				t.Errorf("encoded scopes %q do not contain %q", encoded, want)
 			}
+		}
+	})
+
+	t.Run("accepts repeated cluster names across scopes", func(t *testing.T) {
+		path := writeAWSScopeTestFile(t, `
+dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
+  default: true
+  clusterName: shared-cluster
+  region: ap-southeast-2
+  vpc:
+    mode: capi
+dsc-01k2m8g7n4p6q9r3t5v8x1y2z4:
+  clusterName: shared-cluster
+  region: us-east-1
+  vpc:
+    mode: capi
+`)
+		if _, err := loadAWSDeploymentScopes(path); err != nil {
+			t.Fatalf("unexpected error: %v", err)
 		}
 	})
 
@@ -93,7 +113,7 @@ legacy:
 		{
 			name: "rejects an unknown field",
 			content: `
-legacy:
+dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
   default: true
   region: ap-southeast-2
   unexpected: true
@@ -105,13 +125,13 @@ legacy:
 		{
 			name: "rejects multiple YAML documents",
 			content: `
-legacy:
+dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
   default: true
   region: ap-southeast-2
   vpc:
     mode: capi
 ---
-other:
+dsc-01k2m8g7n4p6q9r3t5v8x1y2z4:
   default: true
   region: us-east-1
   vpc:
@@ -122,7 +142,7 @@ other:
 		{
 			name: "requires one default scope",
 			content: `
-only:
+dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
   region: ap-southeast-2
   vpc:
     mode: capi
@@ -132,12 +152,12 @@ only:
 		{
 			name: "rejects multiple default scopes",
 			content: `
-first:
+dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
   default: true
   region: ap-southeast-2
   vpc:
     mode: capi
-second:
+dsc-01k2m8g7n4p6q9r3t5v8x1y2z4:
   default: true
   region: us-east-1
   vpc:
@@ -154,7 +174,7 @@ Sydney_EKS:
   vpc:
     mode: capi
 `,
-			wantError: "scope reference \"Sydney_EKS\" must contain 1-32 lowercase letters",
+			wantError: "must be exactly 30 characters in generated dsc-<lowercase-crockford-ulid> form",
 		},
 		{
 			name: "rejects over-length scope reference",
@@ -165,12 +185,12 @@ this-scope-reference-is-over-limit:
   vpc:
     mode: capi
 `,
-			wantError: "must contain 1-32 lowercase letters",
+			wantError: "must be exactly 30 characters in generated dsc-<lowercase-crockford-ulid> form",
 		},
 		{
 			name: "rejects removed scope display name field",
 			content: `
-legacy:
+dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
   name: "Legacy Sydney"
   default: true
   region: ap-southeast-2
@@ -182,7 +202,7 @@ legacy:
 		{
 			name: "rejects unsupported cluster type",
 			content: `
-legacy:
+dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
   default: true
   clusterType: kops
   region: ap-southeast-2
@@ -194,7 +214,7 @@ legacy:
 		{
 			name: "validates supplied Kubernetes cluster name",
 			content: `
-legacy:
+dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
   default: true
   clusterName: cluster_x
   region: ap-southeast-2
@@ -204,26 +224,21 @@ legacy:
 			wantError: "must be a lowercase DNS label",
 		},
 		{
-			name: "rejects duplicate cluster names",
+			name: "rejects unsupported scope tag policy version",
 			content: `
-first:
+dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
   default: true
-  clusterName: cluster-x
   region: ap-southeast-2
-  vpc:
-    mode: capi
-second:
-  clusterName: cluster-x
-  region: us-east-1
+  scopeTagPolicyVersion: 2
   vpc:
     mode: capi
 `,
-			wantError: "use the same clusterName",
+			wantError: "scopeTagPolicyVersion must be 0 or 1",
 		},
 		{
 			name: "rejects invalid region",
 			content: `
-legacy:
+dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
   default: true
   region: sydney
   vpc:
@@ -234,7 +249,7 @@ legacy:
 		{
 			name: "requires Dittocloud VPC settings",
 			content: `
-legacy:
+dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
   default: true
   region: ap-southeast-2
   vpc:
@@ -245,7 +260,7 @@ legacy:
 		{
 			name: "requires IPv4 CIDR for Dittocloud VPC",
 			content: `
-legacy:
+dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
   default: true
   region: ap-southeast-2
   vpc:
@@ -258,7 +273,7 @@ legacy:
 		{
 			name: "rejects managed settings in CAPI mode",
 			content: `
-legacy:
+dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
   default: true
   region: ap-southeast-2
   vpc:
@@ -270,7 +285,7 @@ legacy:
 		{
 			name: "requires existing VPC ID",
 			content: `
-legacy:
+dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
   default: true
   region: ap-southeast-2
   vpc:
@@ -281,7 +296,7 @@ legacy:
 		{
 			name: "rejects unsupported VPC mode",
 			content: `
-legacy:
+dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
   default: true
   region: ap-southeast-2
   vpc:
@@ -305,9 +320,53 @@ legacy:
 	}
 }
 
+func TestAWSDeploymentScopesValidateScopeReference(t *testing.T) {
+	validScope := AWSDeploymentScope{
+		Default:     true,
+		ClusterType: awsClusterTypeKubeadm,
+		Region:      "ap-southeast-2",
+		VPC: AWSScopeVPC{
+			Mode: awsVPCModeCAPI,
+		},
+	}
+	validReference := "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"
+
+	tests := []struct {
+		name      string
+		scopeRef  string
+		wantError bool
+	}{
+		{name: "accepts generated reference", scopeRef: validReference},
+		{name: "accepts maximum ULID timestamp prefix", scopeRef: "dsc-71k2m8g7n4p6q9r3t5v8x1y2z3"},
+		{name: "rejects wrong prefix", scopeRef: "vpc-01k2m8g7n4p6q9r3t5v8x1y2z3", wantError: true},
+		{name: "rejects uppercase alphabet", scopeRef: strings.Replace(validReference, "k", "K", 1), wantError: true},
+		{name: "rejects forbidden Crockford alphabet", scopeRef: strings.Replace(validReference, "k", "i", 1), wantError: true},
+		{name: "rejects out of range ULID timestamp prefix", scopeRef: strings.Replace(validReference, "0", "8", 1), wantError: true},
+		{name: "rejects short reference", scopeRef: validReference[:len(validReference)-1], wantError: true},
+		{name: "rejects long reference", scopeRef: validReference + "0", wantError: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := (AWSDeploymentScopes{test.scopeRef: validScope}).Validate()
+			if !test.wantError && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if test.wantError {
+				if err == nil {
+					t.Fatal("expected scope reference validation error")
+				}
+				if !strings.Contains(err.Error(), "generated dsc-<lowercase-crockford-ulid> form") {
+					t.Fatalf("got error %q, want strict generated scope reference error", err)
+				}
+			}
+		})
+	}
+}
+
 func TestAWSScopesFlags(t *testing.T) {
 	validScopesPath := writeAWSScopeTestFile(t, `
-legacy:
+dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
   default: true
   region: ap-southeast-2
   vpc:
@@ -439,7 +498,7 @@ func TestAWSScopeTerraformVariables(t *testing.T) {
 		t.Fatalf("unable to parse AWS flags: %v", err)
 	}
 
-	encodedScopes := `{"legacy":{"default":true,"cluster_type":"kubeadm","region":"ap-southeast-2","vpc":{"mode":"capi"}}}`
+	encodedScopes := `{"dsc-01k2m8g7n4p6q9r3t5v8x1y2z3":{"default":true,"cluster_type":"kubeadm","region":"ap-southeast-2","vpc":{"mode":"capi"}}}`
 	values, err := awsScopeTerraformVariables(awsCommand.Flags(), encodedScopes)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
