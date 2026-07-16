@@ -19,9 +19,10 @@ module "capa_controller_role" {
   version = "6.4.0"
 
   create          = true
-  name            = "controllers.cluster-api-provider-aws.sigs.k8s.io"
+  name            = local.iam_names.controller_role
   use_name_prefix = false
   description     = "Ditto Cross Account Infrastructure Controller"
+  tags            = local.scope_enabled ? local.tags : {}
 
   trust_policy_permissions = {
     TrustedRoles = {
@@ -42,7 +43,7 @@ module "capa_controller_role" {
 # Destructive operations are gated by the ditto.live/managed_by=terraform resource tag
 # so the controller can only affect resources it created.
 resource "aws_iam_policy" "capa_controller_base" {
-  name = "ditto-capa-controller-policy"
+  name = local.iam_names.controller_base_policy
   tags = local.tags
   policy = jsonencode({
     Version = "2012-10-17"
@@ -238,7 +239,7 @@ resource "aws_iam_policy" "capa_controller_base" {
       {
         Effect   = "Allow"
         Action   = ["iam:PassRole"]
-        Resource = ["arn:*:iam::*:role/*.cluster-api-provider-aws.sigs.k8s.io"]
+        Resource = local.capa_pass_role_arns
       },
       # Secrets Manager — scoped to CAPI cluster secrets
       {
@@ -304,7 +305,7 @@ resource "aws_iam_policy" "capa_controller_base" {
 # Split from the base policy to stay below AWS's 6,144-character managed-policy
 # limit while retaining resource-level route, network-interface, and tag scope.
 resource "aws_iam_policy" "capa_controller_network" {
-  name = "ditto-capa-controller-network-policy"
+  name = local.iam_names.controller_network_policy
   tags = local.tags
   policy = jsonencode({
     Version = "2012-10-17"
@@ -377,7 +378,7 @@ resource "aws_iam_policy" "capa_controller_network" {
 }
 
 resource "aws_iam_policy" "capa_controller_elb" {
-  name = "ditto-capa-controller-elb-policy"
+  name = local.iam_names.controller_elb_policy
   tags = local.tags
   policy = jsonencode({
     Version = "2012-10-17"
@@ -545,7 +546,7 @@ resource "aws_iam_policy" "capa_controller_elb" {
 # everything the controller needs inside an existing VPC.
 resource "aws_iam_policy" "capa_controller_vpc_lifecycle" {
   count = var.customer_managed_vpc ? 0 : 1
-  name  = "ditto-capa-controller-vpc-lifecycle-policy"
+  name  = local.iam_names.controller_vpc_lifecycle_policy
   tags  = local.tags
   policy = jsonencode({
     Version = "2012-10-17"
@@ -621,8 +622,10 @@ moved {
 # --document AWSIAMManagedPolicyControllersEKS`, plus the access-entry and
 # OpenIDConnectProvider statements CAPA >= v2.10 needs that clusterawsadm omits.
 resource "aws_iam_policy" "capa_controller_eks_policy" {
-  count  = var.enable_eks ? 1 : 0
-  name   = "ditto-capa-controller-eks-policy"
-  policy = file("${path.module}/policies/capa-controller-eks-policy.json")
-  tags   = local.tags
+  count = var.enable_eks ? 1 : 0
+  name  = local.iam_names.controller_eks_policy
+  policy = templatefile("${path.module}/policies/capa-controller-eks-policy.json.tpl", {
+    pass_role_arns = local.capa_pass_role_arns
+  })
+  tags = local.tags
 }

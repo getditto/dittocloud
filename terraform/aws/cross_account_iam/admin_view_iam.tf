@@ -11,7 +11,7 @@ module "iam_admin_view_role" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-role"
   version = "6.4.0"
 
-  create          = true
+  create          = var.create_admin_view_role
   name            = "iam-admin-view.ditto.live"
   use_name_prefix = false
   description     = "Ditto Cross Account IAM admin view role"

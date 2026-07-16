@@ -12,7 +12,7 @@
         "secretsmanager:DescribeSecret"
       ],
       "Resource": [
-        "arn:aws:secretsmanager:*:*:secret:dittocluster/*"
+        ${jsonencode(cluster_secret_arn)}
       ]
     },
     {

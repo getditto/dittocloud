@@ -13,10 +13,11 @@ module "iam_trust_editor_role" {
   version = "6.4.0"
 
   create          = true
-  name            = "iam-trust-editor.ditto.live"
+  name            = local.iam_names.trust_editor_role
   use_name_prefix = false
   description     = "Ditto Cross Account IAM trust editor role"
   path            = "/ditto/"
+  tags            = local.scope_enabled ? local.tags : {}
 
   trust_policy_permissions = {
     TrustedRoles = {
@@ -44,25 +45,31 @@ P O L I C I E S
 # It includes restrictions on the resources that can be managed by the role. Including locking
 # Roles with the boundary policy.
 resource "aws_iam_policy" "iam_trust_editor_policy" {
-  name = "ditto-iam-trust-editor-policy"
+  name = local.iam_names.trust_editor_policy
   policy = templatefile("${path.module}/policies/assume-trust-policy.json.tpl", {
-    account_id = data.aws_caller_identity.current.account_id
+    managed_role_arn     = local.managed_cluster_role_arn
+    boundary_policy_arns = local.boundary_policy_arns
   })
   tags = local.tags
 }
 
 resource "aws_iam_policy" "cluster_resources_boundary_policy" {
-  name = "ditto-cluster-resources-boundary-policy"
+  name = local.iam_names.cluster_resources_boundary
   policy = templatefile("${path.module}/policies/cluster-resources-boundary-policy.json.tpl", {
-    ec2_project_tag = var.ec2_project_tag
-    vpc_arn         = var.vpc_id != null ? "arn:aws:ec2:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:vpc/${var.vpc_id}" : null
-    vpc_subnet_ids  = var.vpc_subnet_ids
+    ec2_project_tag         = var.ec2_project_tag
+    vpc_arn                 = local.ec2_vpc_arn
+    vpc_subnet_ids          = var.vpc_subnet_ids
+    karpenter_queue_arn     = local.karpenter_queue_arn
+    capa_pass_role_resource = local.scope_enabled ? jsonencode(local.capa_pass_role_arns) : jsonencode(one(local.capa_pass_role_arns))
+    cluster_secret_arn      = local.cluster_secret_arn
   })
   tags = local.tags
 }
 
 resource "aws_iam_policy" "cluster_external_resources_boundary_policy" {
-  name   = "ditto-cluster-external-resources-boundary-policy"
-  policy = file("${path.module}/policies/cluster-external-resources-boundary-policy.json")
-  tags   = local.tags
+  name = local.iam_names.cluster_external_boundary
+  policy = templatefile("${path.module}/policies/cluster-external-resources-boundary-policy.json.tpl", {
+    cluster_secret_arn = local.cluster_secret_arn
+  })
+  tags = local.tags
 }

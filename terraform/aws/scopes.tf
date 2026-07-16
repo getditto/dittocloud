@@ -14,6 +14,14 @@ locals {
     for scope_ref, scope in var.deployment_scopes : scope_ref => scope
     if !scope.default
   }
+  non_default_dittocloud_scopes = {
+    for scope_ref, scope in local.non_default_scopes : scope_ref => scope
+    if scope.vpc.mode == "dittocloud"
+  }
+  non_default_existing_scopes = {
+    for scope_ref, scope in local.non_default_scopes : scope_ref => scope
+    if scope.vpc.mode == "existing"
+  }
 
   root_region = local.default_scope != null ? local.default_scope.region : var.region
 

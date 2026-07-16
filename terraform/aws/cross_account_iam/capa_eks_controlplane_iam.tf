@@ -8,7 +8,7 @@
 # when enable_eks is set.
 resource "aws_iam_role" "capa_eks_control_plane" {
   count = var.enable_eks ? 1 : 0
-  name  = "eks-controlplane.cluster-api-provider-aws.sigs.k8s.io"
+  name  = local.iam_names.eks_control_plane_role
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [

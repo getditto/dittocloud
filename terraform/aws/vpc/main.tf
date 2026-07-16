@@ -1,5 +1,10 @@
-data "aws_availability_zones" "available" {}
-data "aws_region" "current" {}
+data "aws_availability_zones" "available" {
+  region = var.region
+}
+
+data "aws_region" "current" {
+  region = var.region
+}
 
 locals {
   name   = var.vpc_name
@@ -85,6 +90,8 @@ module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "6.6.0"
 
+  region = local.region
+
   name = local.name
   cidr = local.vpc_cidr
 
@@ -143,6 +150,8 @@ module "vpc" {
 module "vpc_endpoints" {
   source  = "terraform-aws-modules/vpc/aws//modules/vpc-endpoints"
   version = "6.6.0"
+
+  region = local.region
 
   vpc_id = module.vpc.vpc_id
 

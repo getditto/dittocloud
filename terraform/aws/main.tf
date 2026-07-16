@@ -45,6 +45,42 @@ data "aws_subnets" "customer_managed_public" {
   }
 }
 
+# Non-default existing VPCs discover only their Kubernetes load-balancer
+# subnets, using the owning scope's Region explicitly.
+data "aws_subnets" "scoped_existing_private" {
+  for_each = local.non_default_existing_scopes
+  region   = each.value.region
+
+  filter {
+    name   = "vpc-id"
+    values = [each.value.vpc.id]
+  }
+
+  filter {
+    name   = "tag:kubernetes.io/role/internal-elb"
+    values = ["1"]
+  }
+
+  depends_on = [terraform_data.scope_registry]
+}
+
+data "aws_subnets" "scoped_existing_public" {
+  for_each = local.non_default_existing_scopes
+  region   = each.value.region
+
+  filter {
+    name   = "vpc-id"
+    values = [each.value.vpc.id]
+  }
+
+  filter {
+    name   = "tag:kubernetes.io/role/elb"
+    values = ["1"]
+  }
+
+  depends_on = [terraform_data.scope_registry]
+}
+
 module "vpc" {
   source = "./vpc"
   count  = local.create_dittocloud_vpc ? 1 : 0
@@ -55,6 +91,43 @@ module "vpc" {
   tags     = var.tags
 
   depends_on = [terraform_data.scope_registry]
+}
+
+module "scoped_vpc" {
+  source   = "./vpc"
+  for_each = local.non_default_dittocloud_scopes
+
+  region                  = each.value.region
+  vpc_name                = each.value.vpc.name
+  vpc_cidr                = each.value.vpc.cidr
+  kubernetes_cluster_name = each.value.cluster_name
+  tags = merge(
+    var.tags,
+    { "ditto.live/scope-ref" = each.key },
+  )
+
+  depends_on = [terraform_data.scope_registry]
+}
+
+locals {
+  scoped_effective_vpc_ids = {
+    for scope_ref, scope in local.non_default_scopes : scope_ref => (
+      scope.vpc.mode == "dittocloud" ? module.scoped_vpc[scope_ref].vpc_id :
+      scope.vpc.mode == "existing" ? scope.vpc.id :
+      null
+    )
+  }
+  scoped_effective_vpc_subnet_ids = {
+    for scope_ref, scope in local.non_default_scopes : scope_ref => (
+      scope.vpc.mode == "dittocloud" ? sort(distinct(concat(
+        module.scoped_vpc[scope_ref].vpc.private_subnets,
+        module.scoped_vpc[scope_ref].vpc.public_subnets,
+        ))) : scope.vpc.mode == "existing" ? sort(distinct(concat(
+        data.aws_subnets.scoped_existing_private[scope_ref].ids,
+        data.aws_subnets.scoped_existing_public[scope_ref].ids,
+      ))) : []
+    )
+  }
 }
 
 module "cross_account_iam" {
@@ -71,6 +144,27 @@ module "cross_account_iam" {
   cluster_name                          = local.default_cluster_name
   vpc_id                                = local.effective_vpc_id
   vpc_subnet_ids                        = local.effective_vpc_subnet_ids
+
+  depends_on = [terraform_data.scope_registry]
+}
+
+module "scoped_cross_account_iam" {
+  source   = "./cross_account_iam"
+  for_each = local.non_default_scopes
+
+  scope_ref                             = each.key
+  region                                = each.value.region
+  create_admin_view_role                = false
+  controller_trusted_role_arns          = var.controller_trusted_role_arns
+  iam_trusted_role_arns                 = var.iam_trusted_role_arns
+  iam_trusted_operations_principal_arns = var.iam_trusted_operations_principal_arns
+  iam_trusted_operations_condition_arns = var.iam_trusted_operations_condition_arns
+  enable_eks                            = each.value.cluster_type == "eks"
+  customer_managed_vpc                  = each.value.vpc.mode == "existing"
+  cluster_name                          = each.value.cluster_name
+  vpc_id                                = local.scoped_effective_vpc_ids[each.key]
+  vpc_subnet_ids                        = local.scoped_effective_vpc_subnet_ids[each.key]
+  tags                                  = var.tags
 
   depends_on = [terraform_data.scope_registry]
 }

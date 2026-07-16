@@ -144,7 +144,9 @@
         "iam:PassRole"
       ],
       "Resource": [
-        "*"
+%{~ for index, role_arn in pass_role_arns ~}
+        ${jsonencode(role_arn)}%{ if index < length(pass_role_arns) - 1 },%{ endif }
+%{~ endfor ~}
       ],
       "Condition": {
         "StringEquals": {

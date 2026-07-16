@@ -1,8 +1,73 @@
 
 locals {
-  tags = {
-    "ditto.live/managed_by" = "dittocloud"
+  scope_enabled    = var.scope_ref != null
+  effective_region = coalesce(var.region, data.aws_region.current.region)
+
+  iam_names = {
+    controller_role                 = local.scope_enabled ? "ditto-capa-controller-${var.scope_ref}" : "controllers.cluster-api-provider-aws.sigs.k8s.io"
+    trust_editor_role               = local.scope_enabled ? "ditto-iam-trust-editor-${var.scope_ref}" : "iam-trust-editor.ditto.live"
+    nodes_role                      = local.scope_enabled ? "ditto-capa-nodes-${var.scope_ref}" : "nodes.cluster-api-provider-aws.sigs.k8s.io"
+    nodes_instance_profile          = local.scope_enabled ? "ditto-capa-nodes-${var.scope_ref}" : "nodes.cluster-api-provider-aws.sigs.k8s.io"
+    control_plane_role              = local.scope_enabled ? "ditto-capa-control-plane-${var.scope_ref}" : "control-plane.cluster-api-provider-aws.sigs.k8s.io"
+    control_plane_instance_profile  = local.scope_enabled ? "ditto-capa-control-plane-${var.scope_ref}" : "control-plane.cluster-api-provider-aws.sigs.k8s.io"
+    eks_control_plane_role          = local.scope_enabled ? "ditto-capa-eks-control-plane-${var.scope_ref}" : "eks-controlplane.cluster-api-provider-aws.sigs.k8s.io"
+    trust_editor_policy             = local.scope_enabled ? "ditto-iam-trust-editor-policy-${var.scope_ref}" : "ditto-iam-trust-editor-policy"
+    cluster_resources_boundary      = local.scope_enabled ? "ditto-cluster-resources-boundary-${var.scope_ref}" : "ditto-cluster-resources-boundary-policy"
+    cluster_external_boundary       = local.scope_enabled ? "ditto-cluster-external-boundary-${var.scope_ref}" : "ditto-cluster-external-resources-boundary-policy"
+    nodes_policy                    = local.scope_enabled ? "ditto-capa-nodes-policy-${var.scope_ref}" : "nodes.cluster-api-provider-aws.sigs.k8s.io"
+    control_plane_policy            = local.scope_enabled ? "ditto-capa-control-plane-policy-${var.scope_ref}" : "control-plane.cluster-api-provider-aws.sigs.k8s.io"
+    control_plane_tags_policy       = local.scope_enabled ? "ditto-capa-control-plane-tags-${var.scope_ref}" : "control-plane-tags.cluster-api-provider-aws.sigs.k8s.io"
+    controller_base_policy          = local.scope_enabled ? "ditto-capa-controller-base-${var.scope_ref}" : "ditto-capa-controller-policy"
+    controller_network_policy       = local.scope_enabled ? "ditto-capa-controller-network-${var.scope_ref}" : "ditto-capa-controller-network-policy"
+    controller_elb_policy           = local.scope_enabled ? "ditto-capa-controller-elb-${var.scope_ref}" : "ditto-capa-controller-elb-policy"
+    controller_vpc_lifecycle_policy = local.scope_enabled ? "ditto-capa-controller-vpc-lifecycle-${var.scope_ref}" : "ditto-capa-controller-vpc-lifecycle-policy"
+    controller_eks_policy           = local.scope_enabled ? "ditto-capa-controller-eks-${var.scope_ref}" : "ditto-capa-controller-eks-policy"
+    karpenter_queue                 = local.scope_enabled ? "karpenter-interruption-${var.scope_ref}" : "karpenter-interruption"
   }
+
+  scoped_generated_names = local.scope_enabled ? {
+    controller_role                = { kind = "IAM role", name = local.iam_names.controller_role, limit = 64, pattern = "^[A-Za-z0-9_+=,.@-]+$" }
+    trust_editor_role              = { kind = "IAM role", name = local.iam_names.trust_editor_role, limit = 64, pattern = "^[A-Za-z0-9_+=,.@-]+$" }
+    nodes_role                     = { kind = "IAM role", name = local.iam_names.nodes_role, limit = 64, pattern = "^[A-Za-z0-9_+=,.@-]+$" }
+    nodes_instance_profile         = { kind = "IAM instance profile", name = local.iam_names.nodes_instance_profile, limit = 128, pattern = "^[A-Za-z0-9_+=,.@-]+$" }
+    control_plane_role             = { kind = "IAM role", name = local.iam_names.control_plane_role, limit = 64, pattern = "^[A-Za-z0-9_+=,.@-]+$" }
+    control_plane_instance_profile = { kind = "IAM instance profile", name = local.iam_names.control_plane_instance_profile, limit = 128, pattern = "^[A-Za-z0-9_+=,.@-]+$" }
+    eks_control_plane_role         = { kind = "IAM role", name = local.iam_names.eks_control_plane_role, limit = 64, pattern = "^[A-Za-z0-9_+=,.@-]+$" }
+    trust_editor_policy            = { kind = "IAM managed policy", name = local.iam_names.trust_editor_policy, limit = 128, pattern = "^[A-Za-z0-9_+=,.@-]+$" }
+    cluster_resources_boundary     = { kind = "IAM managed policy", name = local.iam_names.cluster_resources_boundary, limit = 128, pattern = "^[A-Za-z0-9_+=,.@-]+$" }
+    cluster_external_boundary      = { kind = "IAM managed policy", name = local.iam_names.cluster_external_boundary, limit = 128, pattern = "^[A-Za-z0-9_+=,.@-]+$" }
+    nodes_policy                   = { kind = "IAM managed policy", name = local.iam_names.nodes_policy, limit = 128, pattern = "^[A-Za-z0-9_+=,.@-]+$" }
+    control_plane_policy           = { kind = "IAM managed policy", name = local.iam_names.control_plane_policy, limit = 128, pattern = "^[A-Za-z0-9_+=,.@-]+$" }
+    control_plane_tags_policy      = { kind = "IAM managed policy", name = local.iam_names.control_plane_tags_policy, limit = 128, pattern = "^[A-Za-z0-9_+=,.@-]+$" }
+    controller_base_policy         = { kind = "IAM managed policy", name = local.iam_names.controller_base_policy, limit = 128, pattern = "^[A-Za-z0-9_+=,.@-]+$" }
+    controller_network_policy      = { kind = "IAM managed policy", name = local.iam_names.controller_network_policy, limit = 128, pattern = "^[A-Za-z0-9_+=,.@-]+$" }
+    controller_elb_policy          = { kind = "IAM managed policy", name = local.iam_names.controller_elb_policy, limit = 128, pattern = "^[A-Za-z0-9_+=,.@-]+$" }
+    controller_vpc_lifecycle       = { kind = "IAM managed policy", name = local.iam_names.controller_vpc_lifecycle_policy, limit = 128, pattern = "^[A-Za-z0-9_+=,.@-]+$" }
+    controller_eks_policy          = { kind = "IAM managed policy", name = local.iam_names.controller_eks_policy, limit = 128, pattern = "^[A-Za-z0-9_+=,.@-]+$" }
+    karpenter_queue                = { kind = "SQS queue", name = local.iam_names.karpenter_queue, limit = 80, pattern = "^[A-Za-z0-9_-]+$" }
+  } : {}
+
+  managed_cluster_role_path = local.scope_enabled ? "/dittocluster/${var.scope_ref}/" : "/dittocluster/"
+  managed_cluster_role_arn  = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role${local.managed_cluster_role_path}*"
+  boundary_policy_arns = [
+    "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${local.iam_names.cluster_resources_boundary}",
+    "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${local.iam_names.cluster_external_boundary}",
+  ]
+  capa_pass_role_arns = local.scope_enabled ? [
+    for role_name in [
+      local.iam_names.nodes_role,
+      local.iam_names.control_plane_role,
+      local.iam_names.eks_control_plane_role,
+    ] : "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${role_name}"
+  ] : ["arn:*:iam::*:role/*.cluster-api-provider-aws.sigs.k8s.io"]
+  karpenter_queue_arn = local.scope_enabled ? "arn:aws:sqs:${local.effective_region}:${data.aws_caller_identity.current.account_id}:${local.iam_names.karpenter_queue}" : "arn:aws:sqs:*:*:karpenter-*"
+  cluster_secret_arn  = local.scope_enabled ? "arn:aws:secretsmanager:*:*:secret:dittocluster/${var.scope_ref}/*" : "arn:aws:secretsmanager:*:*:secret:dittocluster/*"
+
+  tags = merge(
+    { "ditto.live/managed_by" = "dittocloud" },
+    var.tags,
+    local.scope_enabled ? { "ditto.live/scope-ref" = var.scope_ref } : {},
+  )
 
   # Phase-2 lock-down: when cluster_name is set, IAM conditions switch from generic
   # Ditto tags to cluster-specific tags so the CAPA controller can only affect
@@ -10,7 +75,7 @@ locals {
   # VPC confinement must only be added to actions and resource types that expose
   # ec2:Vpc. Launch templates, volumes, and instances do not expose that key, while
   # security groups, subnets, and network interfaces do.
-  ec2_vpc_arn = var.vpc_id != null ? "arn:aws:ec2:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:vpc/${var.vpc_id}" : null
+  ec2_vpc_arn = var.vpc_id != null ? "arn:aws:ec2:${local.effective_region}:${data.aws_caller_identity.current.account_id}:vpc/${var.vpc_id}" : null
 
   # ec2:Vpc StringEquals entries — empty map when vpc_id is not set.
   ec2_vpc_string_equals = var.vpc_id != null ? {

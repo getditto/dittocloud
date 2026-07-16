@@ -25,13 +25,10 @@
           "iam:UpdateRole",
           "iam:PassRole"
       ],
-      "Resource": "arn:aws:iam::${account_id}:role/dittocluster/*",
+      "Resource": ${jsonencode(managed_role_arn)},
       "Condition": {
           "StringEquals": {
-            "iam:PermissionsBoundary": [
-                "arn:aws:iam::${account_id}:policy/ditto-cluster-resources-boundary-policy",
-                "arn:aws:iam::${account_id}:policy/ditto-cluster-external-resources-boundary-policy"
-            ]
+            "iam:PermissionsBoundary": ${jsonencode(boundary_policy_arns)}
           }
       }
     },
@@ -43,7 +40,7 @@
           "iam:TagRole",
           "iam:UpdateAssumeRolePolicy"
       ],
-      "Resource": "arn:aws:iam::${account_id}:role/dittocluster/*"
+      "Resource": ${jsonencode(managed_role_arn)}
     },
     {
       "Sid": "DenyRoleBoundaryReplacementOrRemoval",
@@ -52,7 +49,7 @@
           "iam:DeleteRolePermissionsBoundary",
           "iam:PutRolePermissionsBoundary"
       ],
-      "Resource": "arn:aws:iam::${account_id}:role/dittocluster/*"
+      "Resource": ${jsonencode(managed_role_arn)}
     },
     {
       "Sid": "S3Permissions",
