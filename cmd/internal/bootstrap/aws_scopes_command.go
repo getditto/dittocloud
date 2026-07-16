@@ -28,6 +28,7 @@ func awsScopesCmd() *cobra.Command {
 		PersistentPostRunE: func(cmd *cobra.Command, args []string) error { return nil },
 	}
 	cmd.AddCommand(awsScopesAddCmd())
+	cmd.AddCommand(awsScopesMigrateCmd())
 	return cmd
 }
 

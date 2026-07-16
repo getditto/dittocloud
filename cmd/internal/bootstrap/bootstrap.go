@@ -16,6 +16,7 @@ import (
 	"github.com/getditto/dittocloud/cmd/internal/log"
 	"github.com/getditto/dittocloud/terraform"
 	"github.com/hashicorp/terraform-exec/tfexec"
+	tfjson "github.com/hashicorp/terraform-json"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -25,6 +26,7 @@ type TerraformExecutor interface {
 	Init(context.Context, ...tfexec.InitOption) error
 	Import(context.Context, string, string, ...tfexec.ImportOption) error
 	Plan(context.Context, ...tfexec.PlanOption) (bool, error)
+	ShowPlanFile(context.Context, string, ...tfexec.ShowOption) (*tfjson.Plan, error)
 	Apply(context.Context, ...tfexec.ApplyOption) error
 	Output(context.Context, ...tfexec.OutputOption) (map[string]tfexec.OutputMeta, error)
 	SetStdout(io.Writer)

@@ -25,10 +25,22 @@ readonly seed_changes="$(jq -c -s '
       )
     | .test_plan.resource_changes[]?
     | select(.change.actions != ["no-op"])
-    | {address, actions: .change.actions}
+    | {
+        address,
+        module_address,
+        mode,
+        type,
+        name,
+        index,
+        provider_name,
+        previous_address,
+        deposed,
+        actions: .change.actions,
+        importing: .change.importing
+      }
   ]
 ' "${result_file}")"
-readonly expected_seed_changes="[{\"address\":\"terraform_data.scope_registry[\\\"${scope_ref}\\\"]\",\"actions\":[\"create\"]}]"
+readonly expected_seed_changes="[{\"address\":\"terraform_data.scope_registry[\\\"${scope_ref}\\\"]\",\"module_address\":null,\"mode\":\"managed\",\"type\":\"terraform_data\",\"name\":\"scope_registry\",\"index\":\"${scope_ref}\",\"provider_name\":\"terraform.io/builtin/terraform\",\"previous_address\":null,\"deposed\":null,\"actions\":[\"create\"],\"importing\":null}]"
 
 if [[ "${seed_changes}" != "${expected_seed_changes}" ]]; then
   echo "Registry-seed plan contained changes other than the default-scope sentinel:" >&2

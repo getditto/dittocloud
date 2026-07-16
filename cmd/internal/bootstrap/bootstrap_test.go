@@ -13,30 +13,38 @@ import (
 
 	"github.com/getditto/dittocloud/cmd/internal/log"
 	"github.com/hashicorp/terraform-exec/tfexec"
+	tfjson "github.com/hashicorp/terraform-json"
 	"github.com/spf13/cobra"
 )
 
 // mockTerraformExecutor records terraform operations for verification
 type mockTerraformExecutor struct {
 	// Call counts
-	initCallCount   int
-	importCallCount int
-	planCallCount   int
-	applyCallCount  int
+	initCallCount     int
+	importCallCount   int
+	planCallCount     int
+	showPlanCallCount int
+	applyCallCount    int
 
 	workingDir  string
 	importCalls []mockImportCall
 	importState []byte
 
 	// Parsed variables from Plan() call
-	PlanVars map[string]string
+	PlanVars    map[string]string
+	planTargets []string
+	planOutPath string
 
 	// Return values
-	planReturnChanged bool
-	planReturnError   error
-	importReturnError error
-	applyReturnError  error
-	outputReturn      map[string]tfexec.OutputMeta
+	planReturnChanged   bool
+	planReturnError     error
+	showPlanReturn      *tfjson.Plan
+	showPlanReturnError error
+	importReturnError   error
+	applyReturnError    error
+	applyState          []byte
+	applyPlanPath       string
+	outputReturn        map[string]tfexec.OutputMeta
 }
 
 type mockImportCall struct {
@@ -81,13 +89,41 @@ func (m *mockTerraformExecutor) Plan(ctx context.Context, opts ...tfexec.PlanOpt
 		if key, value, ok := terraformVarOption(opt); ok {
 			m.PlanVars[key] = value
 		}
+		switch opt.(type) {
+		case *tfexec.TargetOption:
+			if target, ok := terraformOptionString(opt); ok {
+				m.planTargets = append(m.planTargets, target)
+			}
+		case *tfexec.OutOption:
+			if path, ok := terraformOptionString(opt); ok {
+				m.planOutPath = path
+			}
+		}
 	}
 
 	return m.planReturnChanged, m.planReturnError
 }
 
+func (m *mockTerraformExecutor) ShowPlanFile(ctx context.Context, planPath string, opts ...tfexec.ShowOption) (*tfjson.Plan, error) {
+	m.showPlanCallCount++
+	return m.showPlanReturn, m.showPlanReturnError
+}
+
 func (m *mockTerraformExecutor) Apply(ctx context.Context, opts ...tfexec.ApplyOption) error {
 	m.applyCallCount++
+	for _, opt := range opts {
+		if _, isDirOrPlan := opt.(*tfexec.DirOrPlanOption); !isDirOrPlan {
+			continue
+		}
+		if dirOrPlan, ok := terraformOptionString(opt); ok {
+			m.applyPlanPath = dirOrPlan
+		}
+	}
+	if m.applyState != nil {
+		if err := os.WriteFile(filepath.Join(m.workingDir, "terraform.tfstate"), m.applyState, 0600); err != nil {
+			return err
+		}
+	}
 	return m.applyReturnError
 }
 
@@ -122,6 +158,24 @@ func terraformVarOption(opt any) (string, string, bool) {
 		}
 	}
 	return "", "", false
+}
+
+func terraformOptionString(opt any) (string, bool) {
+	value := reflect.ValueOf(opt)
+	if value.Kind() != reflect.Pointer || value.IsNil() {
+		return "", false
+	}
+	value = value.Elem()
+	if value.Kind() != reflect.Struct {
+		return "", false
+	}
+	for index := 0; index < value.NumField(); index++ {
+		field := value.Field(index)
+		if field.Kind() == reflect.String && field.String() != "" {
+			return field.String(), true
+		}
+	}
+	return "", false
 }
 
 // setupBootstrapTest creates a test environment with a mocked terraform executor
