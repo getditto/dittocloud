@@ -3,7 +3,9 @@ package bootstrap
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/fatih/color"
@@ -44,10 +46,16 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 				if err != nil {
 					return err
 				}
+				if err := writeAWSScopesSummary(cmd.OutOrStdout(), scopes); err != nil {
+					return fmt.Errorf("unable to display AWS deployment scope summary: %w", err)
+				}
 				for _, value := range scopeVars {
 					*vars = append(*vars, tfexec.Var(value))
 				}
-				return fmt.Errorf("AWS scope-mode safety preflight passed, but Terraform execution is not enabled yet; no plan or apply was run")
+				return nil
+			}
+			if err := validateAWSLegacyModeState(commandCanonicalStatePath(cmd)); err != nil {
+				return err
 			}
 
 			customerManagedVPC, err := cmd.Flags().GetBool("customer-managed-vpc")
@@ -168,11 +176,59 @@ func validateAWSScopesFlags(flags *pflag.FlagSet) (bool, AWSDeploymentScopes, st
 	if err != nil {
 		return false, nil, "", nil, err
 	}
+	if flags.Changed("import-resource") {
+		return false, nil, "", nil, fmt.Errorf("--import-resource is not enabled for AWS scope mode yet; no import was run")
+	}
+	for _, scopeRef := range sortedAWSDeploymentScopeRefs(scopes) {
+		scope := scopes[scopeRef]
+		if scope.ScopeTagPolicyVersion == 1 {
+			return false, nil, "", nil, fmt.Errorf(
+				"scope %q cannot use scopeTagPolicyVersion: 1 until the verified tag-policy transition workflow is implemented; keep it at 0",
+				scopeRef,
+			)
+		}
+	}
 	encodedScopes, err := marshalAWSDeploymentScopes(scopes)
 	if err != nil {
 		return false, nil, "", nil, err
 	}
 	return true, scopes, encodedScopes, allowedScopeRemovals, nil
+}
+
+func writeAWSScopesSummary(writer io.Writer, scopes AWSDeploymentScopes) error {
+	scopeRefs := sortedAWSDeploymentScopeRefs(scopes)
+
+	if _, err := fmt.Fprintf(writer, "AWS deployment scopes (%d):\n", len(scopeRefs)); err != nil {
+		return err
+	}
+	for _, scopeRef := range scopeRefs {
+		scope := scopes[scopeRef]
+		defaultMarker := ""
+		if scope.Default {
+			defaultMarker = " [default]"
+		}
+		if _, err := fmt.Fprintf(
+			writer,
+			"  - %s%s: region=%s clusterType=%s vpcMode=%s\n",
+			scopeRef,
+			defaultMarker,
+			scope.Region,
+			scope.ClusterType,
+			scope.VPC.Mode,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func sortedAWSDeploymentScopeRefs(scopes AWSDeploymentScopes) []string {
+	scopeRefs := make([]string, 0, len(scopes))
+	for scopeRef := range scopes {
+		scopeRefs = append(scopeRefs, scopeRef)
+	}
+	sort.Strings(scopeRefs)
+	return scopeRefs
 }
 
 // awsScopeTerraformVariables returns the complete account-level input shared by

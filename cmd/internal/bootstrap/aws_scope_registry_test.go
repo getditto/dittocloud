@@ -200,6 +200,79 @@ func TestLoadAWSStateScopeRegistry(t *testing.T) {
 	}
 }
 
+func TestAWSLegacyModeStatePreflightRunsBeforeTerraform(t *testing.T) {
+	legacyStatePath := writeTerraformStateTestFile(t, rawTerraformStateWithResources([]any{
+		map[string]any{
+			"mode": "managed", "type": "aws_iam_role", "name": "legacy",
+			"instances": []any{map[string]any{"attributes": map[string]any{"name": "legacy"}}},
+		},
+	}))
+	registryStatePath := writeTerraformStateTestFile(t, rawScopeRegistryState(
+		rawScopeRegistryInstance(testDefaultScopeRef, testDefaultScopeRef, true),
+	))
+	apparentScopeStatePath := writeTerraformStateTestFile(t, rawTerraformStateWithResources([]any{
+		map[string]any{
+			"module":    `module.scoped_vpc[\"` + testSecondaryScopeRef + `\"]`,
+			"mode":      "managed",
+			"type":      "aws_vpc",
+			"name":      "this",
+			"instances": []any{},
+		},
+	}))
+
+	tests := []struct {
+		name          string
+		statePath     string
+		wantError     string
+		wantTerraform bool
+	}{
+		{
+			name:          "allows a genuine pre-scope state through the legacy path",
+			statePath:     legacyStatePath,
+			wantTerraform: true,
+		},
+		{
+			name:      "rejects a registry-backed state when scope mode is omitted",
+			statePath: registryStatePath,
+			wantError: "is managed in AWS scope mode; rerun with --scopes=true",
+		},
+		{
+			name:      "rejects apparent scope resources without a registry",
+			statePath: apparentScopeStatePath,
+			wantError: "apparent scope-mode resources but no valid root terraform_data.scope_registry",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cmd, mock := setupBootstrapTest(t, []string{
+				"aws",
+				"--state=" + test.statePath,
+				"--aws-profile=test-profile",
+				"--dry-run",
+			})
+			err := cmd.Execute()
+			if test.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantError) {
+					t.Fatalf("got %v, want error containing %q", err, test.wantError)
+				}
+				assertCallCounts(t, mock, 0, 0, 0)
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected legacy-mode error: %v", err)
+			}
+			if !test.wantTerraform {
+				t.Fatal("test case must declare either wantError or wantTerraform")
+			}
+			assertCallCounts(t, mock, 1, 1, 0)
+			if _, exists := mock.PlanVars["deployment_scopes"]; exists {
+				t.Fatalf("legacy mode unexpectedly passed deployment_scopes: %#v", mock.PlanVars)
+			}
+		})
+	}
+}
+
 func TestValidateAWSStateScopeLifecycle(t *testing.T) {
 	registryStatePath := writeTerraformStateTestFile(t, rawScopeRegistryState(
 		rawScopeRegistryInstance(testDefaultScopeRef, testDefaultScopeRef, true),
@@ -209,6 +282,12 @@ func TestValidateAWSStateScopeLifecycle(t *testing.T) {
 		testDefaultScopeRef:   testScope(true),
 		testSecondaryScopeRef: testScope(false),
 	}
+	legacyStatePath := writeTerraformStateTestFile(t, rawTerraformStateWithResources([]any{
+		map[string]any{
+			"mode": "managed", "type": "aws_iam_role", "name": "legacy",
+			"instances": []any{map[string]any{"attributes": map[string]any{"name": "legacy"}}},
+		},
+	}))
 
 	tests := []struct {
 		name            string
@@ -226,6 +305,12 @@ func TestValidateAWSStateScopeLifecycle(t *testing.T) {
 			name:          "accepts unchanged registry",
 			statePath:     registryStatePath,
 			desiredScopes: allScopes,
+		},
+		{
+			name:          "requires the dedicated registry seed for legacy state",
+			statePath:     legacyStatePath,
+			desiredScopes: AWSDeploymentScopes{testDefaultScopeRef: testScope(true)},
+			wantError:     "run bootstrap aws scopes migrate seed-registry",
 		},
 		{
 			name:      "accepts additive change",
@@ -324,10 +409,11 @@ func TestAWSScopesStatePreflightRunsBeforeTerraform(t *testing.T) {
 `)
 
 	tests := []struct {
-		name      string
-		statePath string
-		extraArgs []string
-		wantError string
+		name          string
+		statePath     string
+		extraArgs     []string
+		wantError     string
+		wantTerraform bool
 	}{
 		{
 			name:      "rejects an unauthorized omission",
@@ -335,10 +421,17 @@ func TestAWSScopesStatePreflightRunsBeforeTerraform(t *testing.T) {
 			wantError: "missing authorization: [" + testSecondaryScopeRef + "]",
 		},
 		{
-			name:      "accepts an exactly authorized omission then remains fail closed",
-			statePath: statePath,
-			extraArgs: []string{"--allow-scope-removal=" + testSecondaryScopeRef},
-			wantError: "scope-mode safety preflight passed, but Terraform execution is not enabled yet",
+			name:          "accepts an exactly authorized omission and runs Terraform",
+			statePath:     statePath,
+			extraArgs:     []string{"--allow-scope-removal=" + testSecondaryScopeRef},
+			wantTerraform: true,
+		},
+		{
+			name: "rejects legacy state without a seeded registry",
+			statePath: writeTerraformStateTestFile(t, rawTerraformStateWithResources([]any{map[string]any{
+				"mode": "managed", "type": "aws_iam_role", "name": "legacy", "instances": []any{},
+			}})),
+			wantError: "run bootstrap aws scopes migrate seed-registry",
 		},
 		{
 			name:      "rejects malformed state",
@@ -359,10 +452,20 @@ func TestAWSScopesStatePreflightRunsBeforeTerraform(t *testing.T) {
 			args = append(args, test.extraArgs...)
 			cmd, mock := setupBootstrapTest(t, args)
 			err := cmd.Execute()
-			if err == nil || !strings.Contains(err.Error(), test.wantError) {
-				t.Fatalf("got %v, want error containing %q", err, test.wantError)
+			if test.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantError) {
+					t.Fatalf("got %v, want error containing %q", err, test.wantError)
+				}
+				assertCallCounts(t, mock, 0, 0, 0)
+				return
 			}
-			assertCallCounts(t, mock, 0, 0, 0)
+			if err != nil {
+				t.Fatalf("unexpected scope-mode error: %v", err)
+			}
+			if !test.wantTerraform {
+				t.Fatal("test case must declare either wantError or wantTerraform")
+			}
+			assertCallCounts(t, mock, 1, 1, 0)
 		})
 	}
 }

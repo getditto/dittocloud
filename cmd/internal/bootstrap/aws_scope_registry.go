@@ -118,6 +118,20 @@ func loadAWSStateScopeRegistry(statePath string) (awsStateScopeRegistry, error) 
 	return registry, nil
 }
 
+func validateAWSLegacyModeState(statePath string) error {
+	registry, err := loadAWSStateScopeRegistry(statePath)
+	if err != nil {
+		return err
+	}
+	if registry.Present {
+		return fmt.Errorf(
+			"Terraform state %q is managed in AWS scope mode; rerun with --scopes=true and the matching --scopes-file; no Terraform operation was run",
+			statePath,
+		)
+	}
+	return nil
+}
+
 func loadRawTerraformState(statePath string) (rawTerraformState, bool, error) {
 	var state rawTerraformState
 	content, err := os.ReadFile(statePath)
@@ -332,7 +346,10 @@ func validateAWSStateScopeLifecycle(
 				statePath,
 			)
 		}
-		return nil
+		return fmt.Errorf(
+			"legacy Terraform state %q has no scope registry; run bootstrap aws scopes migrate seed-registry before a normal scope-mode plan or apply",
+			statePath,
+		)
 	}
 
 	desiredDefault, exists := desiredScopes[registry.DefaultScopeRef]

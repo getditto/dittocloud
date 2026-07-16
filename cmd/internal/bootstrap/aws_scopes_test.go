@@ -1,8 +1,12 @@
 package bootstrap
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -373,11 +377,20 @@ dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
     mode: existing
     id: vpc-09e877f9012f52241
 `)
+	versionOneScopesPath := writeAWSScopeTestFile(t, `
+`+testDefaultScopeRef+`:
+  default: true
+  region: ap-southeast-2
+  scopeTagPolicyVersion: 1
+  vpc:
+    mode: capi
+`)
 
 	tests := []struct {
-		name      string
-		args      []string
-		wantError string
+		name          string
+		args          []string
+		wantError     string
+		wantTerraform bool
 	}{
 		{
 			name:      "requires scopes file in scope mode",
@@ -427,17 +440,37 @@ dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
 				"--iam-trusted-role-arns=arn:aws:iam::123456789012:role/trust-editor",
 				"--dry-run",
 			},
-			wantError: "scope-mode safety preflight passed, but Terraform execution is not enabled yet",
+			wantTerraform: true,
 		},
 		{
-			name: "validates then fails closed before Terraform",
+			name: "validates then executes the normal Terraform lifecycle",
 			args: []string{
 				"aws",
 				"--scopes=true",
 				"--scopes-file=" + validScopesPath,
 				"--dry-run",
 			},
-			wantError: "scope-mode safety preflight passed, but Terraform execution is not enabled yet",
+			wantTerraform: true,
+		},
+		{
+			name: "keeps scope-mode imports fail closed",
+			args: []string{
+				"aws",
+				"--scopes=true",
+				"--scopes-file=" + validScopesPath,
+				"--import-resource=aws_iam_role.example=example",
+			},
+			wantError: "--import-resource is not enabled for AWS scope mode yet",
+		},
+		{
+			name: "keeps tag policy version one fail closed",
+			args: []string{
+				"aws",
+				"--scopes=true",
+				"--scopes-file=" + versionOneScopesPath,
+				"--dry-run",
+			},
+			wantError: "cannot use scopeTagPolicyVersion: 1",
 		},
 	}
 
@@ -445,13 +478,20 @@ dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
 		t.Run(test.name, func(t *testing.T) {
 			cmd, mock := setupBootstrapTest(t, test.args)
 			err := cmd.Execute()
-			if err == nil {
-				t.Fatalf("expected error containing %q", test.wantError)
+			if test.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantError) {
+					t.Fatalf("got %v, want error containing %q", err, test.wantError)
+				}
+				assertCallCounts(t, mock, 0, 0, 0)
+				return
 			}
-			if !strings.Contains(err.Error(), test.wantError) {
-				t.Fatalf("got error %q, want it to contain %q", err, test.wantError)
+			if err != nil {
+				t.Fatalf("unexpected scope-mode lifecycle error: %v", err)
 			}
-			assertCallCounts(t, mock, 0, 0, 0)
+			if !test.wantTerraform {
+				t.Fatal("test case must declare either wantError or wantTerraform")
+			}
+			assertCallCounts(t, mock, 1, 1, 0)
 		})
 	}
 
@@ -484,6 +524,144 @@ dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
 			assertCallCounts(t, mock, 0, 0, 0)
 		})
 	}
+}
+
+func TestAWSScopesNormalExecutionPassesValidatedScopesAndPrintsSummary(t *testing.T) {
+	statePath := writeTerraformStateTestFile(t, rawScopeRegistryState(
+		rawScopeRegistryInstance(testDefaultScopeRef, testDefaultScopeRef, true),
+		rawScopeRegistryInstance(testSecondaryScopeRef, testSecondaryScopeRef, false),
+	))
+	scopesPath := writeAWSScopeTestFile(t, `
+`+testSecondaryScopeRef+`:
+  clusterType: eks
+  region: us-west-2
+  vpc:
+    mode: existing
+    id: vpc-09e877f9012f52241
+`+testDefaultScopeRef+`:
+  default: true
+  region: ap-southeast-2
+  vpc:
+    mode: capi
+`)
+	cmd, mock := setupBootstrapTest(t, []string{
+		"aws",
+		"--scopes=true",
+		"--scopes-file=" + scopesPath,
+		"--state=" + statePath,
+		"--aws-profile=test-profile",
+		"--controller-trusted-role-arns=arn:aws:iam::123456789012:role/controller",
+		"--iam-trusted-role-arns=arn:aws:iam::123456789012:role/trust-editor",
+		"--dry-run",
+	})
+	var output bytes.Buffer
+	cmd.SetOut(&output)
+	cmd.SetErr(&output)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected normal scope-mode error: %v", err)
+	}
+	assertCallCounts(t, mock, 1, 1, 0)
+	if mock.PlanVars["profile"] != "test-profile" ||
+		mock.PlanVars["controller_trusted_role_arns"] != `["arn:aws:iam::123456789012:role/controller"]` ||
+		mock.PlanVars["iam_trusted_role_arns"] != `["arn:aws:iam::123456789012:role/trust-editor"]` {
+		t.Fatalf("scope-mode account variables were not passed exactly: %#v", mock.PlanVars)
+	}
+	for _, legacyVariable := range []string{"region", "vpc_name", "vpc_cidr", "create_vpc", "enable_eks", "customer_managed_vpc", "vpc_id", "cluster_name"} {
+		if _, exists := mock.PlanVars[legacyVariable]; exists {
+			t.Errorf("scope mode passed legacy variable %q", legacyVariable)
+		}
+	}
+	var plannedScopes AWSDeploymentScopes
+	if err := json.Unmarshal([]byte(mock.PlanVars["deployment_scopes"]), &plannedScopes); err != nil {
+		t.Fatalf("unable to decode planned deployment_scopes: %v", err)
+	}
+	if len(plannedScopes) != 2 || !plannedScopes[testDefaultScopeRef].Default || plannedScopes[testSecondaryScopeRef].Region != "us-west-2" {
+		t.Fatalf("unexpected planned deployment scopes: %#v", plannedScopes)
+	}
+
+	wantSummaryLines := []string{
+		"AWS deployment scopes (2):",
+		"  - " + testDefaultScopeRef + " [default]: region=ap-southeast-2 clusterType=kubeadm vpcMode=capi",
+		"  - " + testSecondaryScopeRef + ": region=us-west-2 clusterType=eks vpcMode=existing",
+	}
+	lastOffset := -1
+	for _, line := range wantSummaryLines {
+		offset := strings.Index(output.String(), line)
+		if offset < 0 {
+			t.Errorf("scope summary omitted %q:\n%s", line, output.String())
+		}
+		if offset <= lastOffset {
+			t.Errorf("scope summary is not in deterministic order:\n%s", output.String())
+		}
+		lastOffset = offset
+	}
+}
+
+func TestAWSScopesNormalApplyPersistsPartialStateAfterFailure(t *testing.T) {
+	originalPrompt := terraformApplyPrompt
+	terraformApplyPrompt = func(label, defaultValue string) string { return "yes" }
+	t.Cleanup(func() { terraformApplyPrompt = originalPrompt })
+
+	statePath := writeTerraformStateTestFile(t, rawScopeRegistryState(
+		rawScopeRegistryInstance(testDefaultScopeRef, testDefaultScopeRef, true),
+	))
+	scopesPath := writeAWSScopeTestFile(t, `
+`+testDefaultScopeRef+`:
+  default: true
+  region: ap-southeast-2
+  vpc:
+    mode: capi
+`+testSecondaryScopeRef+`:
+  region: us-west-2
+  vpc:
+    mode: capi
+`)
+	cmd, mock := setupBootstrapTest(t, []string{
+		"aws",
+		"--scopes=true",
+		"--scopes-file=" + scopesPath,
+		"--state=" + statePath,
+	})
+	partialStateValue := rawScopeRegistryState(
+		rawScopeRegistryInstance(testDefaultScopeRef, testDefaultScopeRef, true),
+		rawScopeRegistryInstance(testSecondaryScopeRef, testSecondaryScopeRef, false),
+	)
+	partialStateValue["serial"] = int64(2)
+	partialState, err := json.Marshal(partialStateValue)
+	if err != nil {
+		t.Fatalf("unable to encode partial state: %v", err)
+	}
+	mock.applyState = partialState
+	mock.applyReturnError = errors.New("injected scope apply failure")
+
+	err = cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "partial Terraform state was saved") {
+		t.Fatalf("expected failed-apply persistence error, got %v", err)
+	}
+	assertCallCounts(t, mock, 1, 1, 1)
+	persistedState, readErr := os.ReadFile(statePath)
+	if readErr != nil || !bytes.Equal(persistedState, partialState) {
+		t.Fatalf("partial scope state was not persisted exactly: err=%v", readErr)
+	}
+	registry, registryErr := loadAWSStateScopeRegistry(statePath)
+	if registryErr != nil || !registry.Present || !slices.Equal(sortedScopeRefs(registry.Scopes), []string{testDefaultScopeRef, testSecondaryScopeRef}) {
+		t.Fatalf("persisted partial registry is invalid: registry=%#v err=%v", registry, registryErr)
+	}
+	operationLock, lockErr := acquireStateOperationLock(statePath, "test verification")
+	if lockErr != nil {
+		t.Fatalf("state operation lock was not released after failed apply: %v", lockErr)
+	}
+	_ = operationLock.Release()
+}
+
+func sortedScopeRefs(scopes map[string]awsStateScopeIdentity) []string {
+	refs := make([]string, 0, len(scopes))
+	for scopeRef := range scopes {
+		refs = append(refs, scopeRef)
+	}
+	slices.Sort(refs)
+	return refs
 }
 
 func TestAWSScopeTerraformVariables(t *testing.T) {

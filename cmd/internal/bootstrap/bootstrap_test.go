@@ -271,10 +271,7 @@ func TestParseResourceImports(t *testing.T) {
 
 func TestBootstrap(t *testing.T) {
 	t.Run("should import resources, persist state, show a plan, and never apply", func(t *testing.T) {
-		statePath := filepath.Join(t.TempDir(), "terraform.tfstate")
-		if err := os.WriteFile(statePath, []byte(`{"serial":1}`), 0600); err != nil {
-			t.Fatalf("unable to create test state: %v", err)
-		}
+		statePath := writeTerraformStateTestFile(t, rawTerraformStateWithResources([]any{}))
 
 		cmd, mock := setupBootstrapTest(t, []string{
 			"aws",
@@ -321,10 +318,10 @@ func TestBootstrap(t *testing.T) {
 	})
 
 	t.Run("should stop before plan when an import fails", func(t *testing.T) {
-		statePath := filepath.Join(t.TempDir(), "terraform.tfstate")
-		originalState := []byte(`{"serial":1}`)
-		if err := os.WriteFile(statePath, originalState, 0600); err != nil {
-			t.Fatalf("unable to create test state: %v", err)
+		statePath := writeTerraformStateTestFile(t, rawTerraformStateWithResources([]any{}))
+		originalState, err := os.ReadFile(statePath)
+		if err != nil {
+			t.Fatalf("unable to read test state: %v", err)
 		}
 
 		cmd, mock := setupBootstrapTest(t, []string{
@@ -335,7 +332,7 @@ func TestBootstrap(t *testing.T) {
 		})
 		mock.importReturnError = errors.New("resource is already managed")
 
-		err := cmd.Execute()
+		err = cmd.Execute()
 		if err == nil || !strings.Contains(err.Error(), "unable to import Terraform resource") {
 			t.Fatalf("expected import error, got %v", err)
 		}

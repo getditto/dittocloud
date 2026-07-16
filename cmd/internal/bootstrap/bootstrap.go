@@ -44,6 +44,8 @@ var defaultTerraformFactory TerraformFactory = func(workingDir string, execPath 
 // terraformFactory is the factory used by the code (can be replaced in tests)
 var terraformFactory = defaultTerraformFactory
 
+var terraformApplyPrompt = StringPrompt
+
 type resourceImport struct {
 	address string
 	id      string
@@ -276,7 +278,7 @@ func BootstrapCmd() *cobra.Command {
 			// to prevent errant ENTER smashes as an approval.
 			color.White("%s", color.New(color.Bold).Sprint("Are you sure you want to apply these changes?"))
 			for {
-				v := StringPrompt("(y/n)", "")
+				v := terraformApplyPrompt("(y/n)", "")
 				if v == "n" || v == "no" {
 					_, _ = progress.Println("Aborting...")
 					return nil
