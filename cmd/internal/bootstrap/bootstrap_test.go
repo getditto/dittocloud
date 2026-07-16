@@ -41,6 +41,7 @@ type mockTerraformExecutor struct {
 	showPlanReturn      *tfjson.Plan
 	showPlanReturnError error
 	importReturnError   error
+	importReturnErrorAt int
 	applyReturnError    error
 	applyState          []byte
 	applyPlanPath       string
@@ -69,7 +70,7 @@ func (m *mockTerraformExecutor) Import(ctx context.Context, address, id string, 
 	}
 	m.importCalls = append(m.importCalls, mockImportCall{address: address, id: id, vars: vars})
 
-	if m.importReturnError != nil {
+	if m.importReturnError != nil && (m.importReturnErrorAt == 0 || m.importReturnErrorAt == m.importCallCount) {
 		return m.importReturnError
 	}
 	if m.importState != nil {

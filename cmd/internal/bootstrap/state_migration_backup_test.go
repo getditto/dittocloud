@@ -87,6 +87,7 @@ func TestCreateTerraformMigrationBackup(t *testing.T) {
 		t.Fatalf("unable to decode migration manifest: %v", err)
 	}
 	if manifest.SchemaVersion != terraformMigrationManifestSchemaVersion ||
+		manifest.Operation != "scope-registry-seed" ||
 		manifest.ScopeRef != testDefaultScopeRef ||
 		manifest.TargetAddress != target ||
 		manifest.StateBackupPath != backup.StatePath {

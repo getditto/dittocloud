@@ -117,6 +117,10 @@ func BootstrapCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			scopedImportConfiguration, scopedImport := commandAWSScopedImportConfiguration(cmd.Context())
+			if scopedImport {
+				imports = slices.Clone(scopedImportConfiguration.Imports)
+			}
 			importOnly := len(imports) > 0
 
 			// Copy the packaged terrafrom files into a temporary directory
@@ -186,6 +190,29 @@ func BootstrapCmd() *cobra.Command {
 				return fmt.Errorf("unable to initialize terraform: %w", err)
 			}
 
+			var scopedImportBackup terraformMigrationBackup
+			if scopedImport {
+				importAddresses := make([]string, 0, len(imports))
+				for _, resource := range imports {
+					importAddresses = append(importAddresses, resource.address)
+				}
+				scopedImportBackup, err = createTerraformImportBackup(
+					localStateFilePath,
+					scopedImportConfiguration.OriginalState,
+					scopedImportConfiguration.TerraformState,
+					importAddresses,
+					[]byte(scopedImportConfiguration.EncodedScopes),
+				)
+				if err != nil {
+					return fmt.Errorf("unable to create scope-mode import backup: %w", err)
+				}
+				_, _ = progress.Printf(
+					"Created pre-import state backup %q and manifest %q.\n",
+					scopedImportBackup.StatePath,
+					scopedImportBackup.ManifestPath,
+				)
+			}
+
 			// Parse and append any --tf-var flags to the vars slice
 			for _, tfVar := range tfVars {
 				if !strings.Contains(tfVar, "=") {
@@ -197,10 +224,38 @@ func BootstrapCmd() *cobra.Command {
 			for _, resource := range imports {
 				_, _ = progress.Printf("Importing Terraform resource %q...\n", resource.address)
 				if err := tf.Import(cmd.Context(), resource.address, resource.id, toImportOptions(vars)...); err != nil {
+					if scopedImport {
+						return fmt.Errorf(
+							"unable to import Terraform resource %q: %w; pre-import state backup remains at %q",
+							resource.address,
+							err,
+							scopedImportBackup.StatePath,
+						)
+					}
 					return fmt.Errorf("unable to import Terraform resource %q: %w", resource.address, err)
+				}
+				if scopedImport {
+					if err := validateAWSScopedImportRegistry(tmpStateFilePath, scopedImportConfiguration.Scopes); err != nil {
+						retainTmpDir = true
+						return fmt.Errorf(
+							"imported Terraform resource %q produced invalid scope registry state: %w; temporary state retained at %q and pre-import backup remains at %q",
+							resource.address,
+							err,
+							tmpStateFilePath,
+							scopedImportBackup.StatePath,
+						)
+					}
 				}
 				if err := persistTerraformState(tmpStateFilePath, localStateFilePath); err != nil {
 					retainTmpDir = true
+					if scopedImport {
+						return fmt.Errorf(
+							"unable to save state after importing Terraform resource %q: %w; pre-import state backup remains at %q",
+							resource.address,
+							err,
+							scopedImportBackup.StatePath,
+						)
+					}
 					return fmt.Errorf("unable to save state after importing Terraform resource %q: %w", resource.address, err)
 				}
 			}

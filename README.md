@@ -259,6 +259,33 @@ shows a detailed Terraform plan. It never runs `terraform apply`, even when
 `--dry-run` is omitted. Review the plan and rerun the same bootstrap command
 without `--import-resource` when you are ready to apply any proposed changes.
 
+AWS scope mode requires the selected state to contain a seeded scope registry
+that exactly matches the reviewed scopes YAML. The CLI passes the complete
+validated `deployment_scopes` object and legal account-level variables to every
+import and to the post-import plan. Default-scope resources retain their legacy
+addresses; non-default resources use their `scopeRef`-keyed addresses:
+
+```bash
+dittocloud bootstrap aws \
+  --scopes=true \
+  --scopes-file scopes.yaml \
+  --state terraform.tfstate \
+  --import-resource 'module.scoped_cross_account_iam["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].aws_iam_role.capa_nodes=ditto-capa-nodes-dsc-01k2m8g7n4p6q9r3t5v8x1y2z4' \
+  --import-resource 'aws_sqs_queue.scoped_karpenter_interruption["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"]=https://sqs.us-west-2.amazonaws.com/123456789012/karpenter-interruption-dsc-01k2m8g7n4p6q9r3t5v8x1y2z4'
+```
+
+For regional AWS resources, scope mode resolves the owning scope or regional
+singleton and appends the AWS provider v6 `@region` import suffix. A caller may
+provide an already qualified ID, but its Region must match the scopes YAML.
+IAM import IDs remain unqualified because IAM is account-global.
+
+Immediately before the first scope-mode import, Dittocloud creates a
+byte-for-byte state backup and a `0600` manifest beside the selected state. A
+backup failure stops before any import. Each successful import is validated to
+retain the exact scope registry and is atomically persisted before the next
+import; if a later import fails, the earlier successful imports remain in the
+selected state and the original backup remains available for rollback.
+
 The Terraform address must already exist in Dittocloud's embedded configuration,
 and the provider-specific import ID must identify exactly one existing resource.
 Pass the same provider, region, VPC, cluster, and trust configuration used by the

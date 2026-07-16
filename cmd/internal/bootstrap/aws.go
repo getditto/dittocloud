@@ -42,6 +42,26 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 				); err != nil {
 					return err
 				}
+				if cmd.Flags().Changed("import-resource") {
+					importValues, err := cmd.Flags().GetStringArray("import-resource")
+					if err != nil {
+						return fmt.Errorf("unable to get import-resource: %w", err)
+					}
+					imports, err := parseResourceImports(importValues)
+					if err != nil {
+						return err
+					}
+					configuration, err := prepareAWSScopedImportConfiguration(
+						commandCanonicalStatePath(cmd),
+						scopes,
+						encodedScopes,
+						imports,
+					)
+					if err != nil {
+						return err
+					}
+					cmd.SetContext(setAWSScopedImportConfiguration(cmd.Context(), configuration))
+				}
 				scopeVars, err := awsScopeTerraformVariables(cmd.Flags(), encodedScopes)
 				if err != nil {
 					return err
@@ -175,9 +195,6 @@ func validateAWSScopesFlags(flags *pflag.FlagSet) (bool, AWSDeploymentScopes, st
 	scopes, err := loadAWSDeploymentScopes(scopesFile)
 	if err != nil {
 		return false, nil, "", nil, err
-	}
-	if flags.Changed("import-resource") {
-		return false, nil, "", nil, fmt.Errorf("--import-resource is not enabled for AWS scope mode yet; no import was run")
 	}
 	for _, scopeRef := range sortedAWSDeploymentScopeRefs(scopes) {
 		scope := scopes[scopeRef]

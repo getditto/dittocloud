@@ -30,6 +30,31 @@ mock_provider "aws" {
       ]
     }
   }
+
+  mock_data "aws_iam_policy_document" {
+    defaults = {
+      json          = jsonencode({ Version = "2012-10-17", Statement = [] })
+      minified_json = jsonencode({ Version = "2012-10-17", Statement = [] })
+    }
+  }
+
+  mock_resource "aws_iam_policy" {
+    defaults = {
+      arn = "arn:aws:iam::123456789012:policy/mock-policy"
+    }
+  }
+
+  mock_resource "aws_iam_role" {
+    defaults = {
+      arn = "arn:aws:iam::123456789012:role/mock-role"
+    }
+  }
+
+  mock_resource "aws_iam_instance_profile" {
+    defaults = {
+      arn = "arn:aws:iam::123456789012:instance-profile/mock-profile"
+    }
+  }
 }
 
 variables {
@@ -273,6 +298,67 @@ run "creates_registry_for_valid_multi_scope_object" {
       ])
     )
     error_message = "Each keyed IAM module must receive only its own VPC and subnet set, never a cross-scope union."
+  }
+}
+
+run "retains_existing_vpc_discovery_at_policy_size_limit" {
+  command = apply
+
+  override_data {
+    target          = data.aws_subnets.scoped_existing_private["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"]
+    override_during = plan
+    values = {
+      ids = [
+        "subnet-00000000000000001",
+        "subnet-00000000000000002",
+        "subnet-00000000000000003",
+        "subnet-00000000000000004",
+        "subnet-00000000000000005",
+      ]
+    }
+  }
+
+  override_data {
+    target          = data.aws_subnets.scoped_existing_public["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"]
+    override_during = plan
+    values = {
+      ids = [
+        "subnet-00000000000000006",
+        "subnet-00000000000000007",
+        "subnet-00000000000000008",
+        "subnet-00000000000000009",
+      ]
+    }
+  }
+
+  variables {
+    deployment_scopes = {
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" = {
+        default = true
+        region  = "ap-southeast-2"
+        vpc = {
+          mode = "capi"
+        }
+      }
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z4" = {
+        region = "us-west-2"
+        vpc = {
+          mode = "existing"
+          id   = "vpc-09e877f9012f52241"
+        }
+      }
+    }
+  }
+
+  assert {
+    condition = (
+      data.aws_subnets.scoped_existing_private["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].region == "us-west-2" &&
+      data.aws_subnets.scoped_existing_public["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].region == "us-west-2" &&
+      length(module.scoped_cross_account_iam["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].scope_iam.confinement.subnet_ids) == 9 &&
+      module.scoped_cross_account_iam["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].scope_iam.confinement.vpc_id == "vpc-09e877f9012f52241" &&
+      module.scoped_cross_account_iam["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].scope_iam.policies.controller_vpc_lifecycle == null
+    )
+    error_message = "An existing-VPC scope must discover only its own Region's nine Kubernetes load-balancer subnets, confine IAM to that VPC, and omit VPC lifecycle permissions."
   }
 }
 

@@ -453,14 +453,14 @@ dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
 			wantTerraform: true,
 		},
 		{
-			name: "keeps scope-mode imports fail closed",
+			name: "requires a seeded registry for scope-mode imports",
 			args: []string{
 				"aws",
 				"--scopes=true",
 				"--scopes-file=" + validScopesPath,
 				"--import-resource=aws_iam_role.example=example",
 			},
-			wantError: "--import-resource is not enabled for AWS scope mode yet",
+			wantError: "scope-mode imports require a seeded scope registry",
 		},
 		{
 			name: "keeps tag policy version one fail closed",

@@ -601,6 +601,33 @@ run "legacy_names_and_policy_paths_remain_unchanged" {
   }
 }
 
+run "rejects_more_than_nine_existing_vpc_subnets" {
+  command = plan
+
+  module {
+    source = "./cross_account_iam"
+  }
+
+  variables {
+    customer_managed_vpc = true
+    vpc_id               = "vpc-09e877f9012f52241"
+    vpc_subnet_ids = [
+      "subnet-00000000000000001",
+      "subnet-00000000000000002",
+      "subnet-00000000000000003",
+      "subnet-00000000000000004",
+      "subnet-00000000000000005",
+      "subnet-00000000000000006",
+      "subnet-00000000000000007",
+      "subnet-00000000000000008",
+      "subnet-00000000000000009",
+      "subnet-00000000000000010",
+    ]
+  }
+
+  expect_failures = [var.vpc_subnet_ids]
+}
+
 run "scoped_module_requires_an_explicit_region" {
   command = plan
 

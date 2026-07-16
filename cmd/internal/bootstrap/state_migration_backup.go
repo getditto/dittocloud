@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -23,6 +24,7 @@ type terraformMigrationBackup struct {
 
 type terraformMigrationManifest struct {
 	SchemaVersion      int      `json:"schemaVersion"`
+	Operation          string   `json:"operation"`
 	CreatedAt          string   `json:"createdAt"`
 	CanonicalStatePath string   `json:"canonicalStatePath"`
 	StateBackupPath    string   `json:"stateBackupPath"`
@@ -31,10 +33,18 @@ type terraformMigrationManifest struct {
 	TerraformVersion   string   `json:"terraformVersion"`
 	StateSerial        int64    `json:"stateSerial"`
 	StateLineage       string   `json:"stateLineage"`
-	ScopeRef           string   `json:"scopeRef"`
-	TargetAddress      string   `json:"targetAddress"`
+	ScopeRef           string   `json:"scopeRef,omitempty"`
+	TargetAddress      string   `json:"targetAddress,omitempty"`
+	ImportAddresses    []string `json:"importAddresses,omitempty"`
 	OutputNames        []string `json:"outputNames"`
 	ResourceAddresses  []string `json:"resourceAddresses"`
+}
+
+type terraformMigrationManifestOperation struct {
+	Name            string
+	ScopeRef        string
+	TargetAddress   string
+	ImportAddresses []string
 }
 
 var (
@@ -49,6 +59,48 @@ func createTerraformMigrationBackup(
 	scopeRef string,
 	targetAddress string,
 	scopesContent []byte,
+) (terraformMigrationBackup, error) {
+	return createTerraformOperationBackup(
+		statePath,
+		expectedState,
+		state,
+		scopesContent,
+		terraformMigrationManifestOperation{
+			Name:          "scope-registry-seed",
+			ScopeRef:      scopeRef,
+			TargetAddress: targetAddress,
+		},
+	)
+}
+
+func createTerraformImportBackup(
+	statePath string,
+	expectedState []byte,
+	state rawTerraformState,
+	importAddresses []string,
+	scopesContent []byte,
+) (terraformMigrationBackup, error) {
+	if len(importAddresses) == 0 {
+		return terraformMigrationBackup{}, fmt.Errorf("at least one Terraform import address is required for a pre-import backup")
+	}
+	return createTerraformOperationBackup(
+		statePath,
+		expectedState,
+		state,
+		scopesContent,
+		terraformMigrationManifestOperation{
+			Name:            "scope-import",
+			ImportAddresses: slices.Clone(importAddresses),
+		},
+	)
+}
+
+func createTerraformOperationBackup(
+	statePath string,
+	expectedState []byte,
+	state rawTerraformState,
+	scopesContent []byte,
+	operation terraformMigrationManifestOperation,
 ) (terraformMigrationBackup, error) {
 	canonicalStatePath, err := canonicalizeStatePath(statePath)
 	if err != nil {
@@ -89,6 +141,7 @@ func createTerraformMigrationBackup(
 	scopesDigest := sha256.Sum256(scopesContent)
 	manifest := terraformMigrationManifest{
 		SchemaVersion:      terraformMigrationManifestSchemaVersion,
+		Operation:          operation.Name,
 		CreatedAt:          createdAt.Format(time.RFC3339Nano),
 		CanonicalStatePath: canonicalStatePath,
 		StateBackupPath:    backupPath,
@@ -97,8 +150,9 @@ func createTerraformMigrationBackup(
 		TerraformVersion:   state.TerraformVersion,
 		StateSerial:        state.Serial,
 		StateLineage:       state.Lineage,
-		ScopeRef:           scopeRef,
-		TargetAddress:      targetAddress,
+		ScopeRef:           operation.ScopeRef,
+		TargetAddress:      operation.TargetAddress,
+		ImportAddresses:    operation.ImportAddresses,
 		OutputNames:        sortedTerraformStateOutputNames(state),
 		ResourceAddresses:  sortedTerraformStateResourceAddresses(state),
 	}

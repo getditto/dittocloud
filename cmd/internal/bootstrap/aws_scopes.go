@@ -119,7 +119,7 @@ func (scopes AWSDeploymentScopes) Validate() error {
 	if defaultScopeCount != 1 {
 		return fmt.Errorf("exactly one deployment scope must set default: true; found %d", defaultScopeCount)
 	}
-	return nil
+	return validateAWSGeneratedScopeNames(scopes)
 }
 
 func validateAWSDeploymentScopeFields(scopeRef string, scope AWSDeploymentScope) error {
