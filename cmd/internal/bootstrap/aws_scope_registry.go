@@ -56,50 +56,12 @@ func loadAWSStateScopeRegistry(statePath string) (awsStateScopeRegistry, error) 
 		Scopes:     map[string]awsStateScopeIdentity{},
 	}
 
-	content, err := os.ReadFile(statePath)
-	if errors.Is(err, os.ErrNotExist) {
-		return registry, nil
-	}
+	state, exists, err := loadRawTerraformState(statePath)
 	if err != nil {
-		return registry, fmt.Errorf("unable to read Terraform state registry from %q: %w", statePath, err)
+		return registry, err
 	}
-	if len(bytes.TrimSpace(content)) == 0 {
-		return registry, fmt.Errorf("Terraform state %q is empty and cannot be decoded", statePath)
-	}
-	var topLevel map[string]json.RawMessage
-	if err := json.Unmarshal(content, &topLevel); err != nil {
-		return registry, fmt.Errorf("unable to decode Terraform state %q: %w", statePath, err)
-	}
-	for _, requiredField := range []string{"version", "terraform_version", "serial", "lineage", "outputs", "resources"} {
-		if topLevel[requiredField] == nil {
-			return registry, fmt.Errorf("Terraform state %q is missing required field %q", statePath, requiredField)
-		}
-	}
-
-	var state rawTerraformState
-	decoder := json.NewDecoder(bytes.NewReader(content))
-	if err := decoder.Decode(&state); err != nil {
-		return registry, fmt.Errorf("unable to decode Terraform state %q: %w", statePath, err)
-	}
-	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		if err == nil {
-			return registry, fmt.Errorf("Terraform state %q contains multiple JSON values", statePath)
-		}
-		return registry, fmt.Errorf("Terraform state %q contains trailing malformed JSON: %w", statePath, err)
-	}
-	if state.Version != supportedTerraformStateVersion {
-		return registry, fmt.Errorf(
-			"Terraform state %q uses unsupported format version %d; Dittocloud supports version %d",
-			statePath,
-			state.Version,
-			supportedTerraformStateVersion,
-		)
-	}
-	if strings.TrimSpace(state.TerraformVersion) == "" || state.Serial < 0 || strings.TrimSpace(state.Lineage) == "" {
-		return registry, fmt.Errorf("Terraform state %q has invalid version, serial, or lineage metadata", statePath)
-	}
-	if !jsonObject(topLevel["outputs"]) || !jsonArray(topLevel["resources"]) {
-		return registry, fmt.Errorf("Terraform state %q outputs or resources have an invalid shape", statePath)
+	if !exists {
+		return registry, nil
 	}
 
 	registry.StateEmpty = len(state.Resources) == 0 && len(state.Outputs) == 0
@@ -154,6 +116,55 @@ func loadAWSStateScopeRegistry(statePath string) (awsStateScopeRegistry, error) 
 		)
 	}
 	return registry, nil
+}
+
+func loadRawTerraformState(statePath string) (rawTerraformState, bool, error) {
+	var state rawTerraformState
+	content, err := os.ReadFile(statePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return state, false, nil
+	}
+	if err != nil {
+		return state, false, fmt.Errorf("unable to read Terraform state %q: %w", statePath, err)
+	}
+	if len(bytes.TrimSpace(content)) == 0 {
+		return state, false, fmt.Errorf("Terraform state %q is empty and cannot be decoded", statePath)
+	}
+	var topLevel map[string]json.RawMessage
+	if err := json.Unmarshal(content, &topLevel); err != nil {
+		return state, false, fmt.Errorf("unable to decode Terraform state %q: %w", statePath, err)
+	}
+	for _, requiredField := range []string{"version", "terraform_version", "serial", "lineage", "outputs", "resources"} {
+		if topLevel[requiredField] == nil {
+			return state, false, fmt.Errorf("Terraform state %q is missing required field %q", statePath, requiredField)
+		}
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(content))
+	if err := decoder.Decode(&state); err != nil {
+		return state, false, fmt.Errorf("unable to decode Terraform state %q: %w", statePath, err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return state, false, fmt.Errorf("Terraform state %q contains multiple JSON values", statePath)
+		}
+		return state, false, fmt.Errorf("Terraform state %q contains trailing malformed JSON: %w", statePath, err)
+	}
+	if state.Version != supportedTerraformStateVersion {
+		return state, false, fmt.Errorf(
+			"Terraform state %q uses unsupported format version %d; Dittocloud supports version %d",
+			statePath,
+			state.Version,
+			supportedTerraformStateVersion,
+		)
+	}
+	if strings.TrimSpace(state.TerraformVersion) == "" || state.Serial < 0 || strings.TrimSpace(state.Lineage) == "" {
+		return state, false, fmt.Errorf("Terraform state %q has invalid version, serial, or lineage metadata", statePath)
+	}
+	if !jsonObject(topLevel["outputs"]) || !jsonArray(topLevel["resources"]) {
+		return state, false, fmt.Errorf("Terraform state %q outputs or resources have an invalid shape", statePath)
+	}
+	return state, true, nil
 }
 
 func isAWSStateScopeRegistryResource(resource rawTerraformResource) bool {

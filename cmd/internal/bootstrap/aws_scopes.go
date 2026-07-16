@@ -56,7 +56,10 @@ func loadAWSDeploymentScopes(path string) (AWSDeploymentScopes, error) {
 	if err != nil {
 		return nil, fmt.Errorf("unable to read AWS scopes file %q: %w", path, err)
 	}
+	return decodeAWSDeploymentScopes(content, path)
+}
 
+func decodeAWSDeploymentScopes(content []byte, path string) (AWSDeploymentScopes, error) {
 	var scopes AWSDeploymentScopes
 	decoder := yaml.NewDecoder(bytes.NewReader(content))
 	decoder.KnownFields(true)
@@ -108,21 +111,7 @@ func (scopes AWSDeploymentScopes) Validate() error {
 		if scope.Default {
 			defaultScopeCount++
 		}
-		if scope.ClusterType != awsClusterTypeKubeadm && scope.ClusterType != awsClusterTypeEKS {
-			return fmt.Errorf("scope %q clusterType must be %q or %q", scopeRef, awsClusterTypeKubeadm, awsClusterTypeEKS)
-		}
-		if scope.ScopeTagPolicyVersion != 0 && scope.ScopeTagPolicyVersion != 1 {
-			return fmt.Errorf("scope %q scopeTagPolicyVersion must be 0 or 1", scopeRef)
-		}
-		if scope.ClusterName != "" {
-			if len(scope.ClusterName) > 63 || !awsClusterNamePattern.MatchString(scope.ClusterName) {
-				return fmt.Errorf("scope %q clusterName %q must be a lowercase DNS label with at most 63 characters", scopeRef, scope.ClusterName)
-			}
-		}
-		if !awsRegionPattern.MatchString(scope.Region) {
-			return fmt.Errorf("scope %q region %q is not a valid AWS region name", scopeRef, scope.Region)
-		}
-		if err := validateAWSScopeVPC(scopeRef, scope.VPC); err != nil {
+		if err := validateAWSDeploymentScopeFields(scopeRef, scope); err != nil {
 			return err
 		}
 	}
@@ -131,6 +120,24 @@ func (scopes AWSDeploymentScopes) Validate() error {
 		return fmt.Errorf("exactly one deployment scope must set default: true; found %d", defaultScopeCount)
 	}
 	return nil
+}
+
+func validateAWSDeploymentScopeFields(scopeRef string, scope AWSDeploymentScope) error {
+	if scope.ClusterType != awsClusterTypeKubeadm && scope.ClusterType != awsClusterTypeEKS {
+		return fmt.Errorf("scope %q clusterType must be %q or %q", scopeRef, awsClusterTypeKubeadm, awsClusterTypeEKS)
+	}
+	if scope.ScopeTagPolicyVersion != 0 && scope.ScopeTagPolicyVersion != 1 {
+		return fmt.Errorf("scope %q scopeTagPolicyVersion must be 0 or 1", scopeRef)
+	}
+	if scope.ClusterName != "" {
+		if len(scope.ClusterName) > 63 || !awsClusterNamePattern.MatchString(scope.ClusterName) {
+			return fmt.Errorf("scope %q clusterName %q must be a lowercase DNS label with at most 63 characters", scopeRef, scope.ClusterName)
+		}
+	}
+	if !awsRegionPattern.MatchString(scope.Region) {
+		return fmt.Errorf("scope %q region %q is not a valid AWS region name", scopeRef, scope.Region)
+	}
+	return validateAWSScopeVPC(scopeRef, scope.VPC)
 }
 
 func validateAWSScopeVPC(scopeRef string, vpc AWSScopeVPC) error {

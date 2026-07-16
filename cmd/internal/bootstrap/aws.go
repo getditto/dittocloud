@@ -20,6 +20,13 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 		Long:  "Bootstrap AWS",
 		RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 			defer releaseCommandOperationLockOnError(cmd, &runErr)
+			generated, err := maybeGenerateAWSLegacyScopesFile(cmd)
+			if err != nil {
+				return err
+			}
+			if generated {
+				return nil
+			}
 
 			scopeMode, scopes, encodedScopes, allowedScopeRemovals, err := validateAWSScopesFlags(cmd.Flags())
 			if err != nil {
@@ -100,11 +107,13 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 	cmd.Flags().String("cluster-name", "", "Tighten IAM conditions to a specific cluster name; requires an existing state file (re-runs only)")
 	cmd.Flags().Bool("scopes", false, "Enable AWS multi-scope mode using a scopes YAML file")
 	cmd.Flags().String("scopes-file", "", "Path to an AWS deployment scopes YAML file; requires --scopes")
+	cmd.Flags().Bool("generate-scopes-file", false, "Generate a review-only default-scope YAML draft from legacy Terraform state; requires --scopes")
 	cmd.Flags().StringArray(
 		"allow-scope-removal",
 		[]string{},
 		"Authorize omission of one state-backed non-default scope reference (repeatable; requires --scopes)",
 	)
+	cmd.AddCommand(awsScopesCmd())
 
 	return cmd
 }

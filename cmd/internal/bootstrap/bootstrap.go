@@ -71,7 +71,9 @@ func BootstrapCmd() *cobra.Command {
 			cmd.SetContext(ctx)
 
 			operation := "bootstrap " + cmd.Name()
-			if len(resourceImports) > 0 {
+			if flag := cmd.Flags().Lookup("generate-scopes-file"); flag != nil && flag.Value.String() == "true" {
+				operation += " generate legacy scopes file"
+			} else if len(resourceImports) > 0 {
 				operation += " import"
 			} else if cmd.Flag("dry-run").Value.String() == "true" {
 				operation += " dry-run"
@@ -100,6 +102,9 @@ func BootstrapCmd() *cobra.Command {
 					postRunErr = errors.Join(postRunErr, fmt.Errorf("unable to release Dittocloud operation lock: %w", err))
 				}
 			}()
+			if commandSkipsTerraformLifecycle(cmd) {
+				return nil
+			}
 
 			logger := log.FromContext(cmd.Context())
 			color.NoColor = cmd.Flag("no-color").Value.String() == "true"

@@ -17,6 +17,7 @@ import (
 const operationLockSuffix = ".dittocloud.lock"
 
 type operationLockContextKey struct{}
+type skipTerraformLifecycleContextKey struct{}
 
 type operationLockMetadata struct {
 	PID                int       `json:"pid"`
@@ -37,13 +38,17 @@ type stateOperationLock struct {
 }
 
 func canonicalizeStatePath(statePath string) (string, error) {
-	if strings.TrimSpace(statePath) == "" {
-		return "", fmt.Errorf("state path cannot be empty")
+	return canonicalizeLocalPath(statePath, "state")
+}
+
+func canonicalizeLocalPath(selectedPath, pathKind string) (string, error) {
+	if strings.TrimSpace(selectedPath) == "" {
+		return "", fmt.Errorf("%s path cannot be empty", pathKind)
 	}
 
-	absolutePath, err := filepath.Abs(statePath)
+	absolutePath, err := filepath.Abs(selectedPath)
 	if err != nil {
-		return "", fmt.Errorf("unable to make state path absolute: %w", err)
+		return "", fmt.Errorf("unable to make %s path absolute: %w", pathKind, err)
 	}
 	absolutePath = filepath.Clean(absolutePath)
 
@@ -52,19 +57,19 @@ func canonicalizeStatePath(statePath string) (string, error) {
 		return canonicalPath, nil
 	}
 	if !errors.Is(err, os.ErrNotExist) {
-		return "", fmt.Errorf("unable to resolve state path %q: %w", absolutePath, err)
+		return "", fmt.Errorf("unable to resolve %s path %q: %w", pathKind, absolutePath, err)
 	}
 	statePathInfo, lstatErr := os.Lstat(absolutePath)
 	if lstatErr == nil && statePathInfo.Mode()&os.ModeSymlink != 0 {
-		return "", fmt.Errorf("unable to resolve dangling state symlink %q", absolutePath)
+		return "", fmt.Errorf("unable to resolve dangling %s symlink %q", pathKind, absolutePath)
 	}
 	if lstatErr != nil && !errors.Is(lstatErr, os.ErrNotExist) {
-		return "", fmt.Errorf("unable to inspect unresolved state path %q: %w", absolutePath, lstatErr)
+		return "", fmt.Errorf("unable to inspect unresolved %s path %q: %w", pathKind, absolutePath, lstatErr)
 	}
 
 	canonicalDirectory, err := filepath.EvalSymlinks(filepath.Dir(absolutePath))
 	if err != nil {
-		return "", fmt.Errorf("unable to resolve state directory for %q: %w", absolutePath, err)
+		return "", fmt.Errorf("unable to resolve %s directory for %q: %w", pathKind, absolutePath, err)
 	}
 	return filepath.Join(canonicalDirectory, filepath.Base(absolutePath)), nil
 }
@@ -194,6 +199,15 @@ func commandCanonicalStatePath(cmd *cobra.Command) string {
 		return lock.canonicalStatePath
 	}
 	return cmd.Flag("state").Value.String()
+}
+
+func skipCommandTerraformLifecycle(cmd *cobra.Command) {
+	cmd.SetContext(context.WithValue(cmd.Context(), skipTerraformLifecycleContextKey{}, true))
+}
+
+func commandSkipsTerraformLifecycle(cmd *cobra.Command) bool {
+	skip, _ := cmd.Context().Value(skipTerraformLifecycleContextKey{}).(bool)
+	return skip
 }
 
 func releaseCommandOperationLock(cmd *cobra.Command) error {
