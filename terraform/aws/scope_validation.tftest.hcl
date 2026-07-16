@@ -50,6 +50,11 @@ run "preserves_legacy_mode_without_registry" {
     condition     = output.aws.region == "ap-southeast-2"
     error_message = "Legacy mode must continue using the legacy root Region."
   }
+
+  assert {
+    condition     = toset(keys(output.aws)) == toset(["account_id", "region", "vpc"])
+    error_message = "Legacy mode must retain the exact existing AWS output shape without scope-aware fields."
+  }
 }
 
 run "creates_registry_for_valid_multi_scope_object" {
@@ -124,6 +129,111 @@ run "creates_registry_for_valid_multi_scope_object" {
   assert {
     condition     = output.aws.region == "us-east-1"
     error_message = "Scope mode must use the default scope Region for the root provider and legacy output."
+  }
+
+  assert {
+    condition = (
+      toset(keys(output.aws)) == toset(["account_id", "region", "vpc", "scopes", "regionalResources"]) &&
+      output.aws.account_id == "123456789012" &&
+      length(output.aws.vpc) == 0 &&
+      join(",", keys(output.aws.scopes)) == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3,dsc-01k2m8g7n4p6q9r3t5v8x1y2z4,dsc-01k2m8g7n4p6q9r3t5v8x1y2z5"
+    )
+    error_message = "Scope mode must extend the legacy AWS output with complete, lexically keyed scopes and regionalResources maps."
+  }
+
+  assert {
+    condition = alltrue([
+      for scope_ref, scope_output in output.aws.scopes :
+      scope_output.scopeRef == scope_ref &&
+      toset(keys(scope_output)) == toset([
+        "scopeRef",
+        "default",
+        "accountId",
+        "region",
+        "clusterType",
+        "scopeTagPolicyVersion",
+        "controllerRoleName",
+        "controllerRoleArn",
+        "trustEditorRoleName",
+        "trustEditorRoleArn",
+        "nodesRoleName",
+        "nodesRoleArn",
+        "nodesInstanceProfileName",
+        "nodesInstanceProfileArn",
+        "controlPlaneRoleName",
+        "controlPlaneRoleArn",
+        "controlPlaneInstanceProfileName",
+        "controlPlaneInstanceProfileArn",
+        "eksControlPlaneRoleName",
+        "eksControlPlaneRoleArn",
+        "clusterBoundaryName",
+        "clusterBoundaryArn",
+        "externalBoundaryName",
+        "externalBoundaryArn",
+        "karpenterInterruptionQueueName",
+        "karpenterInterruptionQueueArn",
+        "vpcId",
+        "privateSubnetIds",
+        "publicSubnetIds",
+        "databaseSubnetIds",
+        "iamSubnetIds",
+      ])
+    ])
+    error_message = "Every scope output must repeat its map key and expose the complete stable binding schema, including explicit nullable fields."
+  }
+
+  assert {
+    condition = (
+      output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].default &&
+      output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].accountId == "123456789012" &&
+      output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].region == "us-east-1" &&
+      output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].clusterType == "kubeadm" &&
+      output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].scopeTagPolicyVersion == 0 &&
+      output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].controllerRoleName == "controllers.cluster-api-provider-aws.sigs.k8s.io" &&
+      output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].eksControlPlaneRoleName == null &&
+      output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].karpenterInterruptionQueueName == null &&
+      output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].vpcId == null &&
+      length(output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].iamSubnetIds) == 0
+    )
+    error_message = "The default CAPI kubeadm output must preserve legacy IAM names and report unavailable VPC, EKS, and Karpenter values explicitly as null or empty lists."
+  }
+
+  assert {
+    condition = (
+      !output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].default &&
+      output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].clusterType == "eks" &&
+      output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].controllerRoleName == "ditto-capa-controller-dsc-01k2m8g7n4p6q9r3t5v8x1y2z4" &&
+      output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].eksControlPlaneRoleName == "ditto-capa-eks-control-plane-dsc-01k2m8g7n4p6q9r3t5v8x1y2z4" &&
+      output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].karpenterInterruptionQueueName == "karpenter-interruption-dsc-01k2m8g7n4p6q9r3t5v8x1y2z4" &&
+      output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].vpcId == "vpc-00000000000000001" &&
+      join(",", output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].privateSubnetIds) == "subnet-00000000000000001" &&
+      join(",", output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].publicSubnetIds) == "subnet-00000000000000002" &&
+      join(",", output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].iamSubnetIds) == "subnet-00000000000000001,subnet-00000000000000002"
+    )
+    error_message = "A managed EKS scope output must use exact scoped IAM and Karpenter names and the managed VPC's deterministic subnet sets."
+  }
+
+  assert {
+    condition = (
+      output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z5"].vpcId == "vpc-09e877f9012f52241" &&
+      length(output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z5"].databaseSubnetIds) == 0 &&
+      output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z5"].karpenterInterruptionQueueName == null
+    )
+    error_message = "An existing-VPC kubeadm output must expose its configured VPC, an explicit empty database subnet list, and null Karpenter values."
+  }
+
+  assert {
+    condition = (
+      join(",", keys(output.aws.regionalResources)) == "ap-southeast-2,us-east-1,us-west-2" &&
+      output.aws.regionalResources["ap-southeast-2"].region == "ap-southeast-2" &&
+      join(",", output.aws.regionalResources["ap-southeast-2"].scopeRefs) == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z4" &&
+      join(",", output.aws.regionalResources["ap-southeast-2"].ec2InstanceMetadataDefaults.requiredByScopeRefs) == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z4" &&
+      output.aws.regionalResources["ap-southeast-2"].ec2InstanceMetadataDefaults.httpTokens == "required" &&
+      output.aws.regionalResources["ap-southeast-2"].ec2InstanceMetadataDefaults.httpPutResponseHopLimit == 2 &&
+      output.aws.regionalResources["us-east-1"].ec2InstanceMetadataDefaults == null &&
+      output.aws.regionalResources["us-west-2"].ec2InstanceMetadataDefaults == null
+    )
+    error_message = "Regional outputs must be lexically keyed, repeat their Region, and distinguish managed IMDS settings from explicit null values."
   }
 
   assert {
@@ -335,6 +445,44 @@ run "shares_default_region_imds_without_claiming_default_karpenter" {
     condition     = length(aws_sqs_queue.karpenter_interruption) == 0
     error_message = "A non-default EKS scope must not claim the default scope's unsuffixed Karpenter queue."
   }
+
+  assert {
+    condition     = length(aws_ec2_instance_metadata_defaults.scoped_imdsv2) == 0
+    error_message = "An EKS scope in the default Region must share the legacy-address IMDS singleton instead of creating a second Region-keyed resource."
+  }
+
+  assert {
+    condition = (
+      length(aws_sqs_queue.scoped_karpenter_interruption) == 1 &&
+      aws_sqs_queue.scoped_karpenter_interruption["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].name == "karpenter-interruption-dsc-01k2m8g7n4p6q9r3t5v8x1y2z4" &&
+      aws_sqs_queue.scoped_karpenter_interruption["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].region == "ap-southeast-2" &&
+      aws_sqs_queue.scoped_karpenter_interruption["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].tags["ditto.live/scope-ref"] == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"
+    )
+    error_message = "A non-default EKS scope must receive its exact scoped Karpenter queue in its own Region with the reserved identity tag."
+  }
+
+  assert {
+    condition = (
+      length(aws_cloudwatch_event_rule.scoped_karpenter_interruption) == 4 &&
+      toset([for rule in values(aws_cloudwatch_event_rule.scoped_karpenter_interruption) : rule.name]) == toset([
+        "KarpenterSpotInterruption-dsc-01k2m8g7n4p6q9r3t5v8x1y2z4",
+        "KarpenterRebalance-dsc-01k2m8g7n4p6q9r3t5v8x1y2z4",
+        "KarpenterInstanceState-dsc-01k2m8g7n4p6q9r3t5v8x1y2z4",
+        "KarpenterHealth-dsc-01k2m8g7n4p6q9r3t5v8x1y2z4",
+      ]) &&
+      alltrue([for rule in values(aws_cloudwatch_event_rule.scoped_karpenter_interruption) : rule.region == "ap-southeast-2"])
+    )
+    error_message = "A non-default EKS scope must receive all four exact scoped EventBridge rules in its own Region."
+  }
+
+  assert {
+    condition = (
+      length(aws_sqs_queue_policy.scoped_karpenter_interruption) == 1 &&
+      length(aws_cloudwatch_event_target.scoped_karpenter_interruption) == 4 &&
+      length(terraform_data.scoped_karpenter_name_validation) == 5
+    )
+    error_message = "A non-default EKS scope must receive one queue policy, four EventBridge targets, and validation for every generated name."
+  }
 }
 
 run "preserves_default_eks_legacy_resource_addresses" {
@@ -371,5 +519,247 @@ run "preserves_default_eks_legacy_resource_addresses" {
   assert {
     condition     = length(aws_cloudwatch_event_rule.karpenter_interruption) == 4
     error_message = "The default EKS scope must retain all four unsuffixed EventBridge rules."
+  }
+
+  assert {
+    condition = (
+      length(aws_sqs_queue.scoped_karpenter_interruption) == 0 &&
+      length(aws_sqs_queue_policy.scoped_karpenter_interruption) == 0 &&
+      length(aws_cloudwatch_event_rule.scoped_karpenter_interruption) == 0 &&
+      length(aws_cloudwatch_event_target.scoped_karpenter_interruption) == 0 &&
+      length(aws_ec2_instance_metadata_defaults.scoped_imdsv2) == 0 &&
+      length(terraform_data.scoped_karpenter_name_validation) == 0
+    )
+    error_message = "A default-only EKS deployment must not create any non-default Karpenter or Region-keyed IMDS resources."
+  }
+
+  assert {
+    condition = (
+      length(output.aws.scopes) == 1 &&
+      output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].controllerRoleName == "controllers.cluster-api-provider-aws.sigs.k8s.io" &&
+      output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].eksControlPlaneRoleName == "eks-controlplane.cluster-api-provider-aws.sigs.k8s.io" &&
+      output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].karpenterInterruptionQueueName == "karpenter-interruption" &&
+      output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].vpcId == null &&
+      join(",", output.aws.regionalResources["ap-southeast-2"].ec2InstanceMetadataDefaults.requiredByScopeRefs) == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"
+    )
+    error_message = "The default EKS binding must export legacy IAM and queue names while reporting the default Region's shared IMDS requirement."
+  }
+}
+
+run "preserves_default_managed_vpc_legacy_output_shape" {
+  command = plan
+
+  override_module {
+    target = module.vpc[0]
+    outputs = {
+      vpc_id = "vpc-00000000000000003"
+      vpc = {
+        vpc_id           = "vpc-00000000000000003"
+        private_subnets  = ["subnet-00000000000000003"]
+        public_subnets   = ["subnet-00000000000000004"]
+        database_subnets = ["subnet-00000000000000005"]
+      }
+    }
+  }
+
+  variables {
+    deployment_scopes = {
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" = {
+        default = true
+        region  = "ap-southeast-2"
+        vpc = {
+          mode = "dittocloud"
+          name = "default-vpc"
+          cidr = "10.220.0.0/16"
+        }
+      }
+    }
+  }
+
+  assert {
+    condition = (
+      length(output.aws.vpc) == 1 &&
+      output.aws.vpc[0].vpc_id == "vpc-00000000000000003" &&
+      join(",", output.aws.vpc[0].vpc.private_subnets) == "subnet-00000000000000003" &&
+      join(",", output.aws.vpc[0].vpc.public_subnets) == "subnet-00000000000000004" &&
+      join(",", output.aws.vpc[0].vpc.database_subnets) == "subnet-00000000000000005"
+    )
+    error_message = "A Dittocloud-managed default scope must preserve the legacy one-element aws.vpc module-output list."
+  }
+
+  assert {
+    condition = (
+      output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].vpcId == "vpc-00000000000000003" &&
+      join(",", output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].privateSubnetIds) == "subnet-00000000000000003" &&
+      join(",", output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].publicSubnetIds) == "subnet-00000000000000004" &&
+      join(",", output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].databaseSubnetIds) == "subnet-00000000000000005" &&
+      join(",", output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].iamSubnetIds) == "subnet-00000000000000003,subnet-00000000000000004" &&
+      output.aws.regionalResources["ap-southeast-2"].ec2InstanceMetadataDefaults == null
+    )
+    error_message = "The scope-aware default binding must expose the same managed VPC plus deterministic IAM subnets without inventing an IMDS requirement for kubeadm."
+  }
+}
+
+run "isolates_multiple_eks_scopes_while_sharing_region_imds" {
+  command = plan
+
+  variables {
+    deployment_scopes = {
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" = {
+        default      = true
+        cluster_type = "kubeadm"
+        region       = "us-east-1"
+        vpc = {
+          mode = "capi"
+        }
+      }
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z4" = {
+        cluster_type = "eks"
+        region       = "ap-southeast-2"
+        vpc = {
+          mode = "capi"
+        }
+      }
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z5" = {
+        cluster_type = "eks"
+        region       = "ap-southeast-2"
+        vpc = {
+          mode = "capi"
+        }
+      }
+    }
+  }
+
+  assert {
+    condition = (
+      length(aws_sqs_queue.karpenter_interruption) == 0 &&
+      length(aws_cloudwatch_event_rule.karpenter_interruption) == 0
+    )
+    error_message = "A default kubeadm scope must not create the default Karpenter resources."
+  }
+
+  assert {
+    condition = (
+      keys(aws_sqs_queue.scoped_karpenter_interruption) == [
+        "dsc-01k2m8g7n4p6q9r3t5v8x1y2z4",
+        "dsc-01k2m8g7n4p6q9r3t5v8x1y2z5",
+      ] &&
+      toset([for queue in values(aws_sqs_queue.scoped_karpenter_interruption) : queue.name]) == toset([
+        "karpenter-interruption-dsc-01k2m8g7n4p6q9r3t5v8x1y2z4",
+        "karpenter-interruption-dsc-01k2m8g7n4p6q9r3t5v8x1y2z5",
+      ]) &&
+      alltrue([for queue in values(aws_sqs_queue.scoped_karpenter_interruption) : queue.region == "ap-southeast-2"])
+    )
+    error_message = "Every non-default EKS scope must receive an isolated, exactly named queue in the shared Region."
+  }
+
+  assert {
+    condition = (
+      length(aws_cloudwatch_event_rule.scoped_karpenter_interruption) == 8 &&
+      length(aws_sqs_queue_policy.scoped_karpenter_interruption) == 2 &&
+      length(aws_cloudwatch_event_target.scoped_karpenter_interruption) == 8 &&
+      length(terraform_data.scoped_karpenter_name_validation) == 10 &&
+      alltrue([for rule in values(aws_cloudwatch_event_rule.scoped_karpenter_interruption) : rule.region == "ap-southeast-2"]) &&
+      alltrue([for target in values(aws_cloudwatch_event_target.scoped_karpenter_interruption) : target.region == "ap-southeast-2"])
+    )
+    error_message = "Two non-default EKS scopes must receive two policies, eight scoped rules and targets, and ten generated-name guards."
+  }
+
+  assert {
+    condition = (
+      length(aws_ec2_instance_metadata_defaults.imdsv2) == 0 &&
+      toset(keys(aws_ec2_instance_metadata_defaults.scoped_imdsv2)) == toset(["ap-southeast-2"]) &&
+      aws_ec2_instance_metadata_defaults.scoped_imdsv2["ap-southeast-2"].region == "ap-southeast-2" &&
+      aws_ec2_instance_metadata_defaults.scoped_imdsv2["ap-southeast-2"].http_tokens == "required" &&
+      aws_ec2_instance_metadata_defaults.scoped_imdsv2["ap-southeast-2"].http_put_response_hop_limit == 2 &&
+      toset(local.eks_scope_refs_by_region["ap-southeast-2"]) == toset([
+        "dsc-01k2m8g7n4p6q9r3t5v8x1y2z4",
+        "dsc-01k2m8g7n4p6q9r3t5v8x1y2z5",
+      ])
+    )
+    error_message = "EKS scopes sharing a non-default Region must share one Region-keyed IMDSv2 singleton with both scope references recorded in deterministic order."
+  }
+
+  assert {
+    condition = (
+      output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].karpenterInterruptionQueueName == "karpenter-interruption-dsc-01k2m8g7n4p6q9r3t5v8x1y2z4" &&
+      output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z5"].karpenterInterruptionQueueName == "karpenter-interruption-dsc-01k2m8g7n4p6q9r3t5v8x1y2z5" &&
+      join(",", output.aws.regionalResources["ap-southeast-2"].scopeRefs) == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z4,dsc-01k2m8g7n4p6q9r3t5v8x1y2z5" &&
+      join(",", output.aws.regionalResources["ap-southeast-2"].ec2InstanceMetadataDefaults.requiredByScopeRefs) == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z4,dsc-01k2m8g7n4p6q9r3t5v8x1y2z5" &&
+      output.aws.regionalResources["us-east-1"].ec2InstanceMetadataDefaults == null
+    )
+    error_message = "Same-Region EKS scope outputs must keep separate queue bindings while sharing one deterministic regional IMDS binding."
+  }
+}
+
+run "creates_imds_only_for_eks_regions_in_mixed_scope_set" {
+  command = plan
+
+  variables {
+    deployment_scopes = {
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" = {
+        default      = true
+        cluster_type = "kubeadm"
+        region       = "ap-southeast-2"
+        vpc = {
+          mode = "capi"
+        }
+      }
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z4" = {
+        cluster_type = "eks"
+        region       = "us-east-1"
+        vpc = {
+          mode = "capi"
+        }
+      }
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z5" = {
+        cluster_type = "kubeadm"
+        region       = "us-east-1"
+        vpc = {
+          mode = "capi"
+        }
+      }
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z6" = {
+        cluster_type = "eks"
+        region       = "us-west-2"
+        vpc = {
+          mode = "capi"
+        }
+      }
+    }
+  }
+
+  assert {
+    condition = (
+      length(aws_ec2_instance_metadata_defaults.imdsv2) == 0 &&
+      toset(keys(aws_ec2_instance_metadata_defaults.scoped_imdsv2)) == toset(["us-east-1", "us-west-2"]) &&
+      toset(local.eks_scope_refs_by_region["us-east-1"]) == toset(["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"]) &&
+      toset(local.eks_scope_refs_by_region["us-west-2"]) == toset(["dsc-01k2m8g7n4p6q9r3t5v8x1y2z6"])
+    )
+    error_message = "Only Regions containing EKS scopes must receive Region-keyed IMDS defaults; kubeadm scopes must not create or join them."
+  }
+
+  assert {
+    condition = (
+      keys(aws_sqs_queue.scoped_karpenter_interruption) == [
+        "dsc-01k2m8g7n4p6q9r3t5v8x1y2z4",
+        "dsc-01k2m8g7n4p6q9r3t5v8x1y2z6",
+      ] &&
+      aws_sqs_queue.scoped_karpenter_interruption["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].region == "us-east-1" &&
+      aws_sqs_queue.scoped_karpenter_interruption["dsc-01k2m8g7n4p6q9r3t5v8x1y2z6"].region == "us-west-2" &&
+      length(aws_cloudwatch_event_rule.scoped_karpenter_interruption) == 8
+    )
+    error_message = "Karpenter resources must be created only for EKS scopes and must use each owning scope's Region."
+  }
+
+  assert {
+    condition = (
+      join(",", keys(output.aws.regionalResources)) == "ap-southeast-2,us-east-1,us-west-2" &&
+      output.aws.regionalResources["ap-southeast-2"].ec2InstanceMetadataDefaults == null &&
+      join(",", output.aws.regionalResources["us-east-1"].scopeRefs) == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z4,dsc-01k2m8g7n4p6q9r3t5v8x1y2z5" &&
+      join(",", output.aws.regionalResources["us-east-1"].ec2InstanceMetadataDefaults.requiredByScopeRefs) == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z4" &&
+      join(",", output.aws.regionalResources["us-west-2"].ec2InstanceMetadataDefaults.requiredByScopeRefs) == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z6"
+    )
+    error_message = "Regional outputs must list every scope but only EKS scope references as IMDS contributors across mixed multi-Region deployments."
   }
 }

@@ -13,3 +13,15 @@ resource "aws_ec2_instance_metadata_defaults" "imdsv2" {
 
   depends_on = [terraform_data.scope_registry]
 }
+
+# Additional EKS Regions use one Region-keyed singleton shared by every EKS
+# scope in that Region. The default Region stays at the legacy address above.
+resource "aws_ec2_instance_metadata_defaults" "scoped_imdsv2" {
+  for_each = local.scoped_imds_scope_refs_by_region
+
+  region                      = each.key
+  http_tokens                 = "required"
+  http_put_response_hop_limit = 2
+
+  depends_on = [terraform_data.scope_registry]
+}

@@ -187,9 +187,19 @@ data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
 output "aws" {
-  value = {
-    account_id = data.aws_caller_identity.current.account_id
-    region     = coalesce(local.root_region, data.aws_region.current.region)
-    vpc        = module.vpc
-  }
+  value = merge(
+    {
+      account_id = data.aws_caller_identity.current.account_id
+      region     = coalesce(local.root_region, data.aws_region.current.region)
+      vpc        = module.vpc
+    },
+    {
+      for key, value in { scopes = local.aws_scope_outputs } : key => value
+      if local.scope_outputs_enabled
+    },
+    {
+      for key, value in { regionalResources = local.aws_regional_resources_output } : key => value
+      if local.scope_outputs_enabled
+    },
+  )
 }

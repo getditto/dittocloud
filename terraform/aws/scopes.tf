@@ -22,6 +22,25 @@ locals {
     for scope_ref, scope in local.non_default_scopes : scope_ref => scope
     if scope.vpc.mode == "existing"
   }
+  non_default_eks_scopes = {
+    for scope_ref, scope in local.non_default_scopes : scope_ref => scope
+    if scope.cluster_type == "eks"
+  }
+
+  eks_regions = sort(distinct([
+    for scope in values(var.deployment_scopes) : scope.region
+    if scope.cluster_type == "eks"
+  ]))
+  eks_scope_refs_by_region = {
+    for region in local.eks_regions : region => sort([
+      for scope_ref, scope in var.deployment_scopes : scope_ref
+      if scope.cluster_type == "eks" && scope.region == region
+    ])
+  }
+  scoped_imds_scope_refs_by_region = {
+    for region, scope_refs in local.eks_scope_refs_by_region : region => scope_refs
+    if local.default_scope_ref != null && region != local.root_region
+  }
 
   root_region = local.default_scope != null ? local.default_scope.region : var.region
 
