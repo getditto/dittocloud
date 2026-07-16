@@ -22,6 +22,10 @@ mock_provider "aws" {
 run "vpc_and_cluster_conditions_match_supported_resources" {
   command = plan
 
+  module {
+    source = "./cross_account_iam"
+  }
+
   variables {
     cluster_name = "test-cluster"
     vpc_id       = "vpc-09e877f9012f52241"
@@ -455,6 +459,10 @@ run "vpc_and_cluster_conditions_match_supported_resources" {
 run "security_group_mutations_without_vpc_require_project_tag" {
   command = plan
 
+  module {
+    source = "./cross_account_iam"
+  }
+
   assert {
     condition = length([
       for statement in jsondecode(aws_iam_policy.cluster_resources_boundary_policy.policy).Statement : statement
@@ -508,6 +516,10 @@ run "security_group_mutations_without_vpc_require_project_tag" {
 run "eks_permissions_are_attached_when_enabled" {
   command = plan
 
+  module {
+    source = "./cross_account_iam"
+  }
+
   variables {
     enable_eks = true
   }
@@ -531,6 +543,10 @@ run "eks_permissions_are_attached_when_enabled" {
 
 run "legacy_names_and_policy_paths_remain_unchanged" {
   command = plan
+
+  module {
+    source = "./cross_account_iam"
+  }
 
   variables {
     enable_eks = true
@@ -588,6 +604,10 @@ run "legacy_names_and_policy_paths_remain_unchanged" {
 run "scoped_module_requires_an_explicit_region" {
   command = plan
 
+  module {
+    source = "./cross_account_iam"
+  }
+
   variables {
     scope_ref              = "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"
     create_admin_view_role = false
@@ -599,6 +619,10 @@ run "scoped_module_requires_an_explicit_region" {
 run "scoped_module_cannot_duplicate_the_shared_admin_role" {
   command = plan
 
+  module {
+    source = "./cross_account_iam"
+  }
+
   variables {
     scope_ref = "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"
     region    = "ap-southeast-2"
@@ -609,6 +633,10 @@ run "scoped_module_cannot_duplicate_the_shared_admin_role" {
 
 run "scoped_names_paths_and_policy_arns_are_exact" {
   command = plan
+
+  module {
+    source = "./cross_account_iam"
+  }
 
   variables {
     scope_ref              = "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"

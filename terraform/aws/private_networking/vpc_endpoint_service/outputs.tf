@@ -10,8 +10,8 @@ output "endpoint_service" {
 output "nlb" {
   description = "Network Load Balancer details"
   value = {
-    arn  = data.aws_lb.big_peer_nlb.arn
-    name = data.aws_lb.big_peer_nlb.name
+    arn      = data.aws_lb.big_peer_nlb.arn
+    name     = data.aws_lb.big_peer_nlb.name
     dns_name = data.aws_lb.big_peer_nlb.dns_name
   }
 }

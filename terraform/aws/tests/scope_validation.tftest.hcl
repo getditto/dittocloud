@@ -1,3 +1,4 @@
+# Root-module coverage for the multi-scope AWS configuration.
 mock_provider "aws" {
   mock_data "aws_caller_identity" {
     defaults = {

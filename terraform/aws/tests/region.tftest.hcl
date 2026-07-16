@@ -32,6 +32,10 @@ mock_provider "aws" {
 run "uses_the_explicit_scope_region" {
   command = plan
 
+  module {
+    source = "./vpc"
+  }
+
   override_module {
     target  = module.vpc_endpoints
     outputs = {}
