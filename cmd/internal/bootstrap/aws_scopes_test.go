@@ -20,7 +20,6 @@ func TestLoadAWSDeploymentScopes(t *testing.T) {
 	t.Run("accepts all supported VPC modes and defaults cluster type", func(t *testing.T) {
 		path := writeAWSScopeTestFile(t, `
 dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
-  name: Legacy Sydney
   default: true
   clusterName: cluster-x
   clusterType: eks
@@ -169,16 +168,16 @@ this-scope-reference-is-over-limit:
 			wantError: "must contain 1-32 lowercase letters",
 		},
 		{
-			name: "rejects display name whitespace",
+			name: "rejects removed scope display name field",
 			content: `
 legacy:
-  name: " legacy "
+  name: "Legacy Sydney"
   default: true
   region: ap-southeast-2
   vpc:
     mode: capi
 `,
-			wantError: "name must not have leading or trailing whitespace",
+			wantError: "field name not found",
 		},
 		{
 			name: "rejects unsupported cluster type",
@@ -343,6 +342,30 @@ legacy:
 			wantError: "--aws-region cannot be used with --scopes=true",
 		},
 		{
+			name: "rejects hidden Terraform variable overrides",
+			args: []string{
+				"aws",
+				"--scopes=true",
+				"--scopes-file=" + validScopesPath,
+				"--tf-var=region=us-east-1",
+				"--dry-run",
+			},
+			wantError: "--tf-var cannot be used with --scopes=true",
+		},
+		{
+			name: "accepts account-level profile and trusted role flags",
+			args: []string{
+				"aws",
+				"--scopes=true",
+				"--scopes-file=" + validScopesPath,
+				"--aws-profile=test-profile",
+				"--controller-trusted-role-arns=arn:aws:iam::123456789012:role/controller",
+				"--iam-trusted-role-arns=arn:aws:iam::123456789012:role/trust-editor",
+				"--dry-run",
+			},
+			wantError: "Terraform resource wiring is not implemented yet; no plan or apply was run",
+		},
+		{
 			name: "validates then fails closed before Terraform",
 			args: []string{
 				"aws",
@@ -366,5 +389,83 @@ legacy:
 			}
 			assertCallCounts(t, mock, 0, 0, 0)
 		})
+	}
+
+	legacyScopeFlags := map[string]string{
+		"aws-vpc-name":         "ditto-secondary",
+		"aws-vpc-cidr":         "10.220.0.0/16",
+		"create-vpc":           "false",
+		"enable-eks":           "true",
+		"customer-managed-vpc": "true",
+		"vpc-id":               "vpc-09e877f9012f52241",
+		"cluster-name":         "cluster-x",
+	}
+	for flagName, flagValue := range legacyScopeFlags {
+		t.Run("rejects explicit "+flagName, func(t *testing.T) {
+			cmd, mock := setupBootstrapTest(t, []string{
+				"aws",
+				"--scopes=true",
+				"--scopes-file=" + validScopesPath,
+				"--" + flagName + "=" + flagValue,
+				"--dry-run",
+			})
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatalf("expected --%s to be rejected", flagName)
+			}
+			wantError := "--" + flagName + " cannot be used with --scopes=true"
+			if !strings.Contains(err.Error(), wantError) {
+				t.Fatalf("got error %q, want it to contain %q", err, wantError)
+			}
+			assertCallCounts(t, mock, 0, 0, 0)
+		})
+	}
+}
+
+func TestAWSScopeTerraformVariables(t *testing.T) {
+	cmd, _ := setupBootstrapTest(t, nil)
+	awsCommand, _, err := cmd.Find([]string{"aws"})
+	if err != nil {
+		t.Fatalf("unable to find AWS command: %v", err)
+	}
+	if err := awsCommand.ParseFlags([]string{
+		"--scopes=true",
+		"--scopes-file=unused-by-this-test",
+		"--aws-profile=test-profile",
+		"--controller-trusted-role-arns=arn:aws:iam::123456789012:role/controller",
+		"--controller-trusted-role-arns=arn:aws:iam::123456789012:role/valet-controller",
+		"--iam-trusted-role-arns=arn:aws:iam::123456789012:role/trust-editor",
+	}); err != nil {
+		t.Fatalf("unable to parse AWS flags: %v", err)
+	}
+
+	encodedScopes := `{"legacy":{"default":true,"cluster_type":"kubeadm","region":"ap-southeast-2","vpc":{"mode":"capi"}}}`
+	values, err := awsScopeTerraformVariables(awsCommand.Flags(), encodedScopes)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got := make(map[string]string, len(values))
+	for _, value := range values {
+		name, encodedValue, found := strings.Cut(value, "=")
+		if !found {
+			t.Fatalf("Terraform variable %q is not in name=value form", value)
+		}
+		got[name] = encodedValue
+	}
+
+	want := map[string]string{
+		"deployment_scopes":            encodedScopes,
+		"profile":                      "test-profile",
+		"controller_trusted_role_arns": `["arn:aws:iam::123456789012:role/controller","arn:aws:iam::123456789012:role/valet-controller"]`,
+		"iam_trusted_role_arns":        `["arn:aws:iam::123456789012:role/trust-editor"]`,
+	}
+	for name, wantValue := range want {
+		if gotValue := got[name]; gotValue != wantValue {
+			t.Errorf("%s: got %q, want %q", name, gotValue, wantValue)
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got Terraform variables %v, want exactly %v", got, want)
 	}
 }

@@ -25,7 +25,6 @@ run "accepts_valid_multi_scope_object" {
   variables {
     deployment_scopes = {
       legacy = {
-        name         = "Legacy Sydney"
         default      = true
         cluster_type = "kubeadm"
         region       = "ap-southeast-2"

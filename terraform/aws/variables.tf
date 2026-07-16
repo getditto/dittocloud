@@ -16,7 +16,6 @@ variable "profile" {
 variable "deployment_scopes" {
   description = "Complete desired AWS deployment scope map. An empty map preserves legacy single-scope behavior; a non-empty map enables scope mode and requires exactly one default scope."
   type = map(object({
-    name         = optional(string)
     default      = optional(bool, false)
     cluster_name = optional(string)
     cluster_type = optional(string, "kubeadm")
@@ -45,19 +44,6 @@ variable "deployment_scopes" {
       can(regex("^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$", scope_ref))
     ])
     error_message = "Each deployment scope reference must contain 1-32 lowercase letters, digits, or internal hyphens and must begin and end with a letter or digit."
-  }
-
-  validation {
-    condition = alltrue([
-      for scope in values(var.deployment_scopes) :
-      try(
-        scope.name == trimspace(scope.name) &&
-        length(scope.name) <= 100 &&
-        !can(regex("[[:cntrl:]]", scope.name)),
-        true,
-      )
-    ])
-    error_message = "Deployment scope display names must not have leading or trailing whitespace, contain control characters, or exceed 100 characters."
   }
 
   validation {

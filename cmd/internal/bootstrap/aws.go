@@ -19,11 +19,18 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 		Short: "Bootstrap AWS",
 		Long:  "Bootstrap AWS",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			scopeMode, err := validateAWSScopesFlags(cmd.Flags())
+			scopeMode, encodedScopes, err := validateAWSScopesFlags(cmd.Flags())
 			if err != nil {
 				return err
 			}
 			if scopeMode {
+				scopeVars, err := awsScopeTerraformVariables(cmd.Flags(), encodedScopes)
+				if err != nil {
+					return err
+				}
+				for _, value := range scopeVars {
+					*vars = append(*vars, tfexec.Var(value))
+				}
 				return fmt.Errorf("AWS scope mode configuration is valid, but Terraform resource wiring is not implemented yet; no plan or apply was run")
 			}
 
@@ -88,24 +95,27 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 	return cmd
 }
 
-func validateAWSScopesFlags(flags *pflag.FlagSet) (bool, error) {
+func validateAWSScopesFlags(flags *pflag.FlagSet) (bool, string, error) {
 	scopeMode, err := flags.GetBool("scopes")
 	if err != nil {
-		return false, fmt.Errorf("unable to get scopes: %w", err)
+		return false, "", fmt.Errorf("unable to get scopes: %w", err)
 	}
 	scopesFile, err := flags.GetString("scopes-file")
 	if err != nil {
-		return false, fmt.Errorf("unable to get scopes-file: %w", err)
+		return false, "", fmt.Errorf("unable to get scopes-file: %w", err)
 	}
 
 	if !scopeMode {
 		if strings.TrimSpace(scopesFile) != "" {
-			return false, fmt.Errorf("--scopes-file requires --scopes=true")
+			return false, "", fmt.Errorf("--scopes-file requires --scopes=true")
 		}
-		return false, nil
+		return false, "", nil
 	}
 	if strings.TrimSpace(scopesFile) == "" {
-		return false, fmt.Errorf("--scopes-file is required with --scopes=true")
+		return false, "", fmt.Errorf("--scopes-file is required with --scopes=true")
+	}
+	if flags.Changed("tf-var") {
+		return false, "", fmt.Errorf("--tf-var cannot be used with --scopes=true; scope mode accepts only validated scope YAML and explicit account-level flags")
 	}
 
 	legacyScopeFlags := []string{
@@ -120,18 +130,58 @@ func validateAWSScopesFlags(flags *pflag.FlagSet) (bool, error) {
 	}
 	for _, flagName := range legacyScopeFlags {
 		if flags.Changed(flagName) {
-			return false, fmt.Errorf("--%s cannot be used with --scopes=true; configure it in the scopes YAML", flagName)
+			return false, "", fmt.Errorf("--%s cannot be used with --scopes=true; configure it in the scopes YAML", flagName)
 		}
 	}
 
 	scopes, err := loadAWSDeploymentScopes(scopesFile)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
-	if _, err := marshalAWSDeploymentScopes(scopes); err != nil {
-		return false, err
+	encodedScopes, err := marshalAWSDeploymentScopes(scopes)
+	if err != nil {
+		return false, "", err
 	}
-	return true, nil
+	return true, encodedScopes, nil
+}
+
+// awsScopeTerraformVariables returns the complete account-level input shared by
+// every deployment scope. Scope-owned values are carried only in the validated
+// deployment_scopes object.
+func awsScopeTerraformVariables(flags *pflag.FlagSet, encodedScopes string) ([]string, error) {
+	values := []string{"deployment_scopes=" + encodedScopes}
+
+	if flags.Changed("aws-profile") {
+		profile, err := flags.GetString("aws-profile")
+		if err != nil {
+			return nil, fmt.Errorf("unable to get aws-profile: %w", err)
+		}
+		values = append(values, "profile="+profile)
+	}
+
+	sharedARNFlags := []struct {
+		flagName     string
+		variableName string
+	}{
+		{flagName: "controller-trusted-role-arns", variableName: "controller_trusted_role_arns"},
+		{flagName: "iam-trusted-role-arns", variableName: "iam_trusted_role_arns"},
+	}
+	for _, sharedFlag := range sharedARNFlags {
+		if !flags.Changed(sharedFlag.flagName) {
+			continue
+		}
+		arns, err := flags.GetStringArray(sharedFlag.flagName)
+		if err != nil {
+			return nil, fmt.Errorf("unable to get %s: %w", sharedFlag.flagName, err)
+		}
+		encodedARNs, err := json.Marshal(arns)
+		if err != nil {
+			return nil, fmt.Errorf("unable to marshal %s: %w", sharedFlag.flagName, err)
+		}
+		values = append(values, sharedFlag.variableName+"="+string(encodedARNs))
+	}
+
+	return values, nil
 }
 
 func promptAWSValues(flags *pflag.FlagSet) ([]*tfexec.VarOption, error) {

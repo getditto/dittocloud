@@ -10,20 +10,17 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 )
 
 const (
-	awsVPCModeDittocloud      = "dittocloud"
-	awsVPCModeCAPI            = "capi"
-	awsVPCModeExisting        = "existing"
-	awsClusterTypeKubeadm     = "kubeadm"
-	awsClusterTypeEKS         = "eks"
-	awsScopeReferenceMaxLen   = 32
-	awsScopeDisplayNameMaxLen = 100
+	awsVPCModeDittocloud    = "dittocloud"
+	awsVPCModeCAPI          = "capi"
+	awsVPCModeExisting      = "existing"
+	awsClusterTypeKubeadm   = "kubeadm"
+	awsClusterTypeEKS       = "eks"
+	awsScopeReferenceMaxLen = 32
 )
 
 var (
@@ -35,11 +32,10 @@ var (
 
 // AWSDeploymentScopes is the desired set of Dittocloud deployments in one AWS
 // account. The map key is the immutable scope reference shared with downstream
-// services; it is not a mutable display name or a Kubernetes cluster name.
+// services; it is distinct from the optional Kubernetes cluster name.
 type AWSDeploymentScopes map[string]AWSDeploymentScope
 
 type AWSDeploymentScope struct {
-	Name        string      `yaml:"name,omitempty" json:"name,omitempty"`
 	Default     bool        `yaml:"default,omitempty" json:"default"`
 	ClusterName string      `yaml:"clusterName,omitempty" json:"cluster_name,omitempty"`
 	ClusterType string      `yaml:"clusterType,omitempty" json:"cluster_type"`
@@ -109,9 +105,6 @@ func (scopes AWSDeploymentScopes) Validate() error {
 		if !awsScopeReferencePattern.MatchString(scopeRef) {
 			return fmt.Errorf("scope reference %q must contain 1-%d lowercase letters, digits, or internal hyphens and must begin and end with a letter or digit", scopeRef, awsScopeReferenceMaxLen)
 		}
-		if err := validateAWSScopeDisplayName(scopeRef, scope.Name); err != nil {
-			return err
-		}
 		if scope.Default {
 			defaultScopeCount++
 		}
@@ -137,24 +130,6 @@ func (scopes AWSDeploymentScopes) Validate() error {
 
 	if defaultScopeCount != 1 {
 		return fmt.Errorf("exactly one deployment scope must set default: true; found %d", defaultScopeCount)
-	}
-	return nil
-}
-
-func validateAWSScopeDisplayName(scopeRef, name string) error {
-	if name == "" {
-		return nil
-	}
-	if name != strings.TrimSpace(name) {
-		return fmt.Errorf("scope %q name must not have leading or trailing whitespace", scopeRef)
-	}
-	if utf8.RuneCountInString(name) > awsScopeDisplayNameMaxLen {
-		return fmt.Errorf("scope %q name must not exceed %d characters", scopeRef, awsScopeDisplayNameMaxLen)
-	}
-	for _, value := range name {
-		if unicode.IsControl(value) {
-			return fmt.Errorf("scope %q name must not contain control characters", scopeRef)
-		}
 	}
 	return nil
 }
