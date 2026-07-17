@@ -5,10 +5,15 @@ account and one Terraform state. Each scope has an immutable generated
 `scopeRef`; exactly one scope is the default migration bridge that preserves
 the existing unsuffixed Terraform addresses and AWS IAM names.
 
-Scope tag-policy version `0` is the only currently supported operational
-version. It propagates the reserved `ditto.live/scope-ref` identity tag without
-requiring that tag in IAM. Do not manually change a scope to version `1`; the
-cross-system verification and enable workflow is not available yet.
+Scope tag-policy version `0` is compatibility mode for zero, one, or multiple
+clusters in a scope VPC. Version `1` is the secure single-cluster mode and
+requires one exact `clusterName` plus the guarded live verification and enable
+workflow described below. Do not enable version `1` by editing YAML directly.
+
+> [!IMPORTANT]
+> Dittocloud can create and manage additional non-default scopes, but dependent
+> services do not yet consume their scope bindings. Additional scopes are not
+> end-to-end supported until those downstream integrations are available.
 
 ## Scope file
 
