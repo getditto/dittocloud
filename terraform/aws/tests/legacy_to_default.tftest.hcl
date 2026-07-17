@@ -110,6 +110,10 @@ variables {
   vpc_name             = "migration-vpc"
   vpc_cidr             = "10.220.0.0/16"
   cluster_name         = "migration-eks"
+  # The CLI derives this bridge only when legacy state proves that phase-two
+  # cluster conditions are already applied. It prevents migration from
+  # temporarily broadening those IAM policies while the scope marker is 0.
+  scope_tag_policy_v0_legacy_cluster_refs = ["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"]
   deployment_scopes = {
     "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" = {
       default      = true
@@ -129,7 +133,8 @@ run "apply_legacy_configuration" {
   command = apply
 
   variables {
-    deployment_scopes = {}
+    deployment_scopes                       = {}
+    scope_tag_policy_v0_legacy_cluster_refs = []
   }
 
   assert {

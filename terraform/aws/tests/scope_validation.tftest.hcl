@@ -189,6 +189,14 @@ run "creates_registry_for_valid_multi_scope_object" {
 
   assert {
     condition = (
+      local.default_iam_cluster_name == null &&
+      local.scoped_iam_cluster_names["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"] == null
+    )
+    error_message = "Policy version 0 must not enable single-cluster IAM conditions even when cluster_name is recorded."
+  }
+
+  assert {
+    condition = (
       terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].input.schema_version == 1 &&
       terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].input.scope_ref == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z4" &&
       !terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].input.configuration.default &&
@@ -542,6 +550,108 @@ run "rejects_invalid_scope_tag_policy_version" {
   }
 
   expect_failures = [var.deployment_scopes]
+}
+
+run "requires_named_cluster_for_scope_tag_policy_version_one" {
+  command = plan
+
+  variables {
+    deployment_scopes = {
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" = {
+        default                  = true
+        region                   = "ap-southeast-2"
+        scope_tag_policy_version = 1
+        vpc = {
+          mode = "capi"
+        }
+      }
+    }
+  }
+
+  expect_failures = [var.deployment_scopes]
+}
+
+run "rejects_direct_terraform_scope_tag_policy_enablement" {
+  command = plan
+
+  variables {
+    deployment_scopes = {
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" = {
+        default                  = true
+        cluster_name             = "secure-cluster"
+        region                   = "ap-southeast-2"
+        scope_tag_policy_version = 1
+        vpc = {
+          mode = "capi"
+        }
+      }
+    }
+  }
+
+  expect_failures = [terraform_data.scope_tag_policy["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"]]
+}
+
+run "accepts_cli_authorized_scope_tag_policy_version_one" {
+  command = plan
+
+  variables {
+    scope_tag_policy_cli_authorized_refs = ["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"]
+    deployment_scopes = {
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" = {
+        default                  = true
+        cluster_name             = "secure-cluster"
+        region                   = "ap-southeast-2"
+        scope_tag_policy_version = 1
+        vpc = {
+          mode = "capi"
+        }
+      }
+    }
+  }
+
+  assert {
+    condition = (
+      local.default_iam_cluster_name == "secure-cluster" &&
+      terraform_data.scope_tag_policy["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].input.policy_version == 1
+    )
+    error_message = "CLI-authorized policy version 1 must pass the exact cluster name into single-cluster IAM and advance the marker."
+  }
+}
+
+run "applies_version_one_only_to_the_authorized_non_default_scope" {
+  command = plan
+
+  variables {
+    scope_tag_policy_cli_authorized_refs = ["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"]
+    deployment_scopes = {
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" = {
+        default = true
+        region  = "us-east-1"
+        vpc = {
+          mode = "capi"
+        }
+      }
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z4" = {
+        cluster_name             = "secure-eks"
+        cluster_type             = "eks"
+        region                   = "ap-southeast-2"
+        scope_tag_policy_version = 1
+        vpc = {
+          mode = "capi"
+        }
+      }
+    }
+  }
+
+  assert {
+    condition = (
+      local.default_iam_cluster_name == null &&
+      local.scoped_iam_cluster_names["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"] == "secure-eks" &&
+      terraform_data.scope_tag_policy["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].input.policy_version == 0 &&
+      terraform_data.scope_tag_policy["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].input.policy_version == 1
+    )
+    error_message = "Version-1 IAM tightening and the applied marker must be isolated to the authorized non-default scope."
+  }
 }
 
 run "accepts_duplicate_cluster_names" {

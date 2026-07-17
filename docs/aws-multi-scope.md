@@ -188,6 +188,87 @@ version. Registry-backed states created before configuration snapshots were
 available require manual recovery followed by a successful normal scope-mode
 apply; Dittocloud does not guess missing intent from resource outputs.
 
+## Verify readiness for single-cluster lockdown
+
+Scope tag-policy version `0` is compatibility mode. It supports zero, one, or
+multiple clusters in the scope VPC and does not require `clusterName`. Version
+`1` is the secure single-cluster mode and requires one exact `clusterName`.
+
+Before a version-0 scope can be considered for version `1`, run the read-only
+verification command. When the YAML does not yet persist a cluster name, pass
+the candidate explicitly:
+
+```bash
+dittocloud bootstrap aws scopes tags verify \
+  --state terraform.tfstate \
+  --scopes-file scopes.yaml \
+  --scope-ref dsc-... \
+  --cluster-name iam-test-timc \
+  --aws-profile customer-account
+```
+
+The verifier derives Dittocloud-managed resources from the selected applied
+state and requires their live `ditto.live/scope-ref` tag to match exactly. It
+discovers single-cluster resources using the controllers' native identities:
+
+```text
+kubernetes.io/cluster/<clusterName> = owned
+sigs.k8s.io/cluster-api-provider-aws/cluster/<clusterName> = owned
+elbv2.k8s.aws/cluster = <clusterName>
+```
+
+For an EKS scope it also resolves the exact named EKS cluster. The command
+verifies that the active AWS credentials match the account recorded by the
+state, queries only the scope Region, rejects conflicting scope or owned-cluster
+tags, and reports customer-owned and Region/account singleton exclusions. Its
+resource-class catalog and AWS readers are built into Dittocloud; no separate
+inventory file is used.
+
+Verification holds the state-operation lock and then the scopes-file lock. It
+does not initialize Terraform, refresh or change state, mutate AWS, edit the
+scopes file, or enable version `1`. A shared scope can remain at version `0`
+indefinitely.
+
+To enable the reviewed single-cluster configuration, repeat the same command
+with `--enable`:
+
+```bash
+dittocloud bootstrap aws scopes tags verify \
+  --state terraform.tfstate \
+  --scopes-file scopes.yaml \
+  --scope-ref dsc-... \
+  --cluster-name iam-test-timc \
+  --aws-profile customer-account \
+  --enable
+```
+
+The command repeats live verification and then atomically updates only that
+scope in `scopes.yaml`. It persists the candidate `clusterName` when needed and
+changes `scopeTagPolicyVersion` from `0` to `1`; it still runs no Terraform
+lifecycle and makes no AWS change. Existing YAML ordering and comments are
+preserved.
+
+Review the file, then run normal scope mode with `--dry-run`. Because state
+still records applied policy version `0`, Dittocloud repeats the complete live
+inventory verification before Terraform planning. The non-dry-run command
+verifies once before planning and again after confirmation, immediately before
+applying. Either failure stops before the corresponding Terraform operation.
+Only a successful apply advances the state marker and tightens IAM.
+
+At version `0`, a recorded `clusterName` does not enable cluster-specific IAM.
+At version `1`, IAM receives the exact name and uses the verified Kubernetes,
+CAPA, and load-balancer native tags. Downgrading version `1` to `0` and changing
+its applied `clusterName` are rejected. Direct Terraform version-1 enablement
+is also rejected; the supported transition is the Dittocloud CLI workflow.
+
+One migration bridge is deliberately narrower: when legacy Terraform state
+proves that the default deployment already has phase-2 cluster-specific IAM,
+the CLI preserves those existing conditions while the newly registered scope
+marker is still version `0`. This prevents migration from temporarily
+broadening access. The bridge is derived from the existing IAM policy state,
+cannot be selected through scope YAML, and is removed naturally when the scope
+completes verified version-1 enablement.
+
 ## Roll back a registry seed or import
 
 Rollback restores the exact pre-operation state, so it also discards every

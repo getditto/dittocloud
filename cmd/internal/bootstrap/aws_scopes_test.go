@@ -246,6 +246,18 @@ dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
 			wantError: "scopeTagPolicyVersion must be 0 or 1",
 		},
 		{
+			name: "requires a single named cluster for policy version one",
+			content: `
+dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
+  default: true
+  region: ap-southeast-2
+  scopeTagPolicyVersion: 1
+  vpc:
+    mode: capi
+`,
+			wantError: "scopeTagPolicyVersion 1 requires one exact clusterName",
+		},
+		{
 			name: "rejects invalid region",
 			content: `
 dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
@@ -413,6 +425,7 @@ dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
 	versionOneScopesPath := writeAWSScopeTestFile(t, `
 `+testDefaultScopeRef+`:
   default: true
+  clusterName: secure-cluster
   region: ap-southeast-2
   scopeTagPolicyVersion: 1
   vpc:
@@ -496,14 +509,14 @@ dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
 			wantError: "scope-mode imports require a seeded scope registry",
 		},
 		{
-			name: "keeps tag policy version one fail closed",
+			name: "rejects starting a new scope at tag policy version one",
 			args: []string{
 				"aws",
 				"--scopes=true",
 				"--scopes-file=" + versionOneScopesPath,
 				"--dry-run",
 			},
-			wantError: "cannot use scopeTagPolicyVersion: 1",
+			wantError: "cannot start at scopeTagPolicyVersion 1",
 		},
 	}
 
@@ -781,7 +794,12 @@ func TestAWSScopeTerraformVariables(t *testing.T) {
 	}
 
 	encodedScopes := `{"dsc-01k2m8g7n4p6q9r3t5v8x1y2z3":{"default":true,"cluster_type":"kubeadm","region":"ap-southeast-2","vpc":{"mode":"capi"}}}`
-	values, err := awsScopeTerraformVariables(awsCommand.Flags(), encodedScopes)
+	values, err := awsScopeTerraformVariables(
+		awsCommand.Flags(),
+		encodedScopes,
+		[]string{testDefaultScopeRef},
+		nil,
+	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -796,10 +814,11 @@ func TestAWSScopeTerraformVariables(t *testing.T) {
 	}
 
 	want := map[string]string{
-		"deployment_scopes":            encodedScopes,
-		"profile":                      "test-profile",
-		"controller_trusted_role_arns": `["arn:aws:iam::123456789012:role/controller","arn:aws:iam::123456789012:role/valet-controller"]`,
-		"iam_trusted_role_arns":        `["arn:aws:iam::123456789012:role/trust-editor"]`,
+		"deployment_scopes":                    encodedScopes,
+		"scope_tag_policy_cli_authorized_refs": `["` + testDefaultScopeRef + `"]`,
+		"profile":                              "test-profile",
+		"controller_trusted_role_arns":         `["arn:aws:iam::123456789012:role/controller","arn:aws:iam::123456789012:role/valet-controller"]`,
+		"iam_trusted_role_arns":                `["arn:aws:iam::123456789012:role/trust-editor"]`,
 	}
 	for name, wantValue := range want {
 		if gotValue := got[name]; gotValue != wantValue {
@@ -808,5 +827,18 @@ func TestAWSScopeTerraformVariables(t *testing.T) {
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got Terraform variables %v, want exactly %v", got, want)
+	}
+
+	legacyValues, err := awsScopeTerraformVariables(
+		awsCommand.Flags(),
+		encodedScopes,
+		nil,
+		[]string{testDefaultScopeRef},
+	)
+	if err != nil {
+		t.Fatalf("unexpected legacy bridge variable error: %v", err)
+	}
+	if !slices.Contains(legacyValues, `scope_tag_policy_v0_legacy_cluster_refs=["`+testDefaultScopeRef+`"]`) {
+		t.Fatalf("legacy bridge Terraform variable missing from %v", legacyValues)
 	}
 }

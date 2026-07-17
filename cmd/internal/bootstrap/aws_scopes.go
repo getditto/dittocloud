@@ -130,6 +130,9 @@ func validateAWSDeploymentScopeFields(scopeRef string, scope AWSDeploymentScope)
 	if scope.ScopeTagPolicyVersion != 0 && scope.ScopeTagPolicyVersion != 1 {
 		return fmt.Errorf("scope %q scopeTagPolicyVersion must be 0 or 1", scopeRef)
 	}
+	if scope.ScopeTagPolicyVersion == 1 && scope.ClusterName == "" {
+		return fmt.Errorf("scope %q scopeTagPolicyVersion 1 requires one exact clusterName", scopeRef)
+	}
 	if scope.ClusterName != "" {
 		if len(scope.ClusterName) > 63 || !awsClusterNamePattern.MatchString(scope.ClusterName) {
 			return fmt.Errorf("scope %q clusterName %q must be a lowercase DNS label with at most 63 characters", scopeRef, scope.ClusterName)

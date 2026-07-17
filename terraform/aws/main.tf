@@ -144,7 +144,7 @@ module "cross_account_iam" {
   iam_trusted_operations_condition_arns = var.iam_trusted_operations_condition_arns
   enable_eks                            = local.default_enable_eks
   customer_managed_vpc                  = local.default_customer_managed_vpc
-  cluster_name                          = local.default_cluster_name
+  cluster_name                          = local.default_iam_cluster_name
   scope_identity_ref                    = local.scope_mode ? local.default_scope_ref : null
   vpc_id                                = local.effective_vpc_id
   vpc_subnet_ids                        = local.effective_vpc_subnet_ids
@@ -166,7 +166,7 @@ module "scoped_cross_account_iam" {
   iam_trusted_operations_condition_arns = var.iam_trusted_operations_condition_arns
   enable_eks                            = each.value.cluster_type == "eks"
   customer_managed_vpc                  = each.value.vpc.mode == "existing"
-  cluster_name                          = each.value.cluster_name
+  cluster_name                          = local.scoped_iam_cluster_names[each.key]
   vpc_id                                = local.scoped_effective_vpc_ids[each.key]
   vpc_subnet_ids                        = local.scoped_effective_vpc_subnet_ids[each.key]
   tags                                  = var.tags

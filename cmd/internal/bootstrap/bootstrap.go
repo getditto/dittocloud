@@ -122,6 +122,20 @@ func BootstrapCmd() *cobra.Command {
 				imports = slices.Clone(scopedImportConfiguration.Imports)
 			}
 			importOnly := len(imports) > 0
+			tagPolicyTransition, hasTagPolicyTransition := commandAWSScopeTagPolicyTransitionConfiguration(cmd.Context())
+			if hasTagPolicyTransition {
+				reports, err := verifyAWSScopeTagPolicyTransitions(cmd.Context(), tagPolicyTransition)
+				if err != nil {
+					return fmt.Errorf("version-1 tag verification before Terraform plan failed: %w", err)
+				}
+				for _, report := range reports {
+					_, _ = progress.Printf(
+						"Verified scope %q for cluster %q before Terraform plan.\n",
+						report.ScopeRef,
+						report.ClusterName,
+					)
+				}
+			}
 
 			// Copy the packaged terrafrom files into a temporary directory
 			tmpDir, err := os.MkdirTemp(os.TempDir(), "dittocloud")
@@ -295,6 +309,9 @@ func BootstrapCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("unable to run terraform plan: %w", err)
 			}
+			if hasTagPolicyTransition && !planChanged {
+				return fmt.Errorf("refusing version-1 transition because Terraform reported no changes while state still records applied tag-policy version 0")
+			}
 			if initialMigration {
 				tf.SetStdout(io.Discard)
 				plan, showErr := tf.ShowPlanFile(cmd.Context(), initialMigrationPlanPath)
@@ -357,6 +374,19 @@ func BootstrapCmd() *cobra.Command {
 				_, _ = progress.Println("Only \"y\" or \"n\" inputs are accepted.")
 			}
 
+			if hasTagPolicyTransition {
+				reports, err := verifyAWSScopeTagPolicyTransitions(cmd.Context(), tagPolicyTransition)
+				if err != nil {
+					return fmt.Errorf("version-1 tag verification immediately before Terraform apply failed: %w", err)
+				}
+				for _, report := range reports {
+					_, _ = progress.Printf(
+						"Reverified scope %q for cluster %q immediately before Terraform apply.\n",
+						report.ScopeRef,
+						report.ClusterName,
+					)
+				}
+			}
 			_, _ = progress.Println("Running terraform apply...")
 			applyOptions := toApplyOptions(vars)
 			if initialMigration {

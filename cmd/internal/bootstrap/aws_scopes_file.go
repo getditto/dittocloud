@@ -234,6 +234,75 @@ func (document *awsDeploymentScopesDocument) appendScope(scopeRef string, scope 
 		awsDeploymentScopeYAMLNode(scope),
 	)
 	document.scopes[scopeRef] = scope
+	return document.encodeValidated()
+}
+
+func (document *awsDeploymentScopesDocument) enableScopeTagPolicyVersionOne(
+	scopeRef string,
+	updatedScope AWSDeploymentScope,
+) ([]byte, error) {
+	currentScope, exists := document.scopes[scopeRef]
+	if !exists {
+		return nil, fmt.Errorf("AWS scopes file %q does not contain scope %q", document.path, scopeRef)
+	}
+	if currentScope.ScopeTagPolicyVersion != 0 {
+		return nil, fmt.Errorf("scope %q must use scopeTagPolicyVersion 0 before enablement", scopeRef)
+	}
+	if updatedScope.ScopeTagPolicyVersion != 1 || updatedScope.ClusterName == "" {
+		return nil, fmt.Errorf("scope %q enablement requires scopeTagPolicyVersion 1 and one exact clusterName", scopeRef)
+	}
+	if err := validateAWSDeploymentScopeFields(scopeRef, updatedScope); err != nil {
+		return nil, err
+	}
+
+	root := document.document.Content[0]
+	var scopeNode *yaml.Node
+	for index := 0; index < len(root.Content); index += 2 {
+		if root.Content[index].Value == scopeRef {
+			scopeNode = root.Content[index+1]
+			break
+		}
+	}
+	if scopeNode == nil || scopeNode.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("AWS scopes file %q has no writable mapping for scope %q", document.path, scopeRef)
+	}
+
+	setScalarMappingField(scopeNode, "scopeTagPolicyVersion", "1", "!!int", "")
+	setScalarMappingField(scopeNode, "clusterName", updatedScope.ClusterName, "!!str", "clusterType")
+	document.scopes[scopeRef] = updatedScope
+	return document.encodeValidated()
+}
+
+func setScalarMappingField(mapping *yaml.Node, name, value, tag, insertBefore string) {
+	for index := 0; index < len(mapping.Content); index += 2 {
+		if mapping.Content[index].Value != name {
+			continue
+		}
+		mapping.Content[index+1].Kind = yaml.ScalarNode
+		mapping.Content[index+1].Tag = tag
+		mapping.Content[index+1].Value = value
+		return
+	}
+
+	insertAt := len(mapping.Content)
+	if insertBefore != "" {
+		for index := 0; index < len(mapping.Content); index += 2 {
+			if mapping.Content[index].Value == insertBefore {
+				insertAt = index
+				break
+			}
+		}
+	}
+	field := []*yaml.Node{
+		{Kind: yaml.ScalarNode, Tag: "!!str", Value: name},
+		{Kind: yaml.ScalarNode, Tag: tag, Value: value},
+	}
+	mapping.Content = append(mapping.Content, nil, nil)
+	copy(mapping.Content[insertAt+2:], mapping.Content[insertAt:len(mapping.Content)-2])
+	copy(mapping.Content[insertAt:insertAt+2], field)
+}
+
+func (document *awsDeploymentScopesDocument) encodeValidated() ([]byte, error) {
 	if err := document.scopes.Validate(); err != nil {
 		return nil, fmt.Errorf("updated AWS scopes file %q is invalid: %w", document.path, err)
 	}

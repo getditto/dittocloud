@@ -29,7 +29,17 @@ func awsScopesCmd() *cobra.Command {
 	}
 	cmd.AddCommand(awsScopesAddCmd())
 	cmd.AddCommand(awsScopesRecoverCmd())
+	cmd.AddCommand(awsScopesTagsCmd())
 	cmd.AddCommand(awsScopesMigrateCmd())
+	return cmd
+}
+
+func awsScopesTagsCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "tags",
+		Short: "Inspect AWS deployment scope tag readiness",
+	}
+	cmd.AddCommand(awsScopesTagsVerifyCmd())
 	return cmd
 }
 

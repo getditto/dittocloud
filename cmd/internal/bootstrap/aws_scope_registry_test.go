@@ -245,6 +245,7 @@ func TestLoadAWSStateScopeRegistry(t *testing.T) {
 		))
 		defaultConfiguration := testScope(true)
 		secondaryConfiguration := testScope(false)
+		secondaryConfiguration.ClusterName = "secondary-eks"
 		secondaryConfiguration.ClusterType = awsClusterTypeEKS
 		secondaryConfiguration.ScopeTagPolicyVersion = 1
 		appendRawTerraformStateResource(state, rawScopeConfigurationResource(

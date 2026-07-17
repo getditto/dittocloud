@@ -52,8 +52,18 @@ locals {
   default_vpc_name             = local.default_scope != null ? local.default_scope.vpc.name : var.vpc_name
   default_vpc_cidr             = local.default_scope != null ? local.default_scope.vpc.cidr : var.vpc_cidr
   default_cluster_name         = local.default_scope != null ? local.default_scope.cluster_name : var.cluster_name
-  default_nat_gateway_name     = local.default_scope != null ? local.default_scope.vpc.nat_gateway_name : null
-  default_enable_eks           = local.scope_mode ? try(local.default_scope.cluster_type == "eks", false) : var.enable_eks
+  default_iam_cluster_name = local.scope_mode ? (
+    try(local.default_scope.scope_tag_policy_version == 1, false) ||
+    try(contains(var.scope_tag_policy_v0_legacy_cluster_refs, local.default_scope_ref), false) ?
+    local.default_scope.cluster_name : null
+  ) : var.cluster_name
+  scoped_iam_cluster_names = {
+    for scope_ref, scope in local.non_default_scopes : scope_ref => (
+      scope.scope_tag_policy_version == 1 ? scope.cluster_name : null
+    )
+  }
+  default_nat_gateway_name = local.default_scope != null ? local.default_scope.vpc.nat_gateway_name : null
+  default_enable_eks       = local.scope_mode ? try(local.default_scope.cluster_type == "eks", false) : var.enable_eks
   default_scope_tags = local.scope_mode && local.default_scope_ref != null ? merge(
     var.tags,
     { "ditto.live/scope-ref" = local.default_scope_ref },
@@ -87,6 +97,16 @@ resource "terraform_data" "scope_tag_policy" {
     schema_version = 1
     scope_ref      = each.key
     policy_version = each.value.scope_tag_policy_version
+  }
+
+  lifecycle {
+    precondition {
+      condition = (
+        each.value.scope_tag_policy_version == 0 ||
+        contains(var.scope_tag_policy_cli_authorized_refs, each.key)
+      )
+      error_message = "Enabling scope tag-policy version 1 through direct Terraform is unsupported. Use dittocloud bootstrap aws scopes tags verify --enable, then run normal Dittocloud scope mode."
+    }
   }
 
   depends_on = [

@@ -72,6 +72,13 @@ variable "deployment_scopes" {
 
   validation {
     condition = alltrue([
+      for scope in values(var.deployment_scopes) : scope.scope_tag_policy_version == 0 || scope.cluster_name != null
+    ])
+    error_message = "Each deployment scope with scope_tag_policy_version 1 must identify one exact cluster_name."
+  }
+
+  validation {
+    condition = alltrue([
       for scope in values(var.deployment_scopes) : contains(["dittocloud", "capi", "existing"], scope.vpc.mode)
     ])
     error_message = "Each deployment scope VPC mode must be dittocloud, capi, or existing."
@@ -108,6 +115,39 @@ variable "deployment_scopes" {
       )
     ])
     error_message = "nat_gateway_name can only be set for a Dittocloud-managed VPC and must contain 1 to 256 non-whitespace-bounded characters."
+  }
+}
+
+variable "scope_tag_policy_cli_authorized_refs" {
+  description = "Internal Dittocloud CLI authorization for scopes whose verified policy version is 1. Direct Terraform callers must leave this empty."
+  type        = set(string)
+  default     = []
+
+  validation {
+    condition = alltrue([
+      for scope_ref in var.scope_tag_policy_cli_authorized_refs :
+      try(var.deployment_scopes[scope_ref].scope_tag_policy_version == 1, false)
+    ])
+    error_message = "scope_tag_policy_cli_authorized_refs may contain only configured version-1 scopes verified by the Dittocloud CLI."
+  }
+}
+
+variable "scope_tag_policy_v0_legacy_cluster_refs" {
+  description = "Internal migration bridge that preserves an already-applied legacy phase-two cluster policy while its default scope remains at version 0."
+  type        = set(string)
+  default     = []
+
+  validation {
+    condition = alltrue([
+      for scope_ref in var.scope_tag_policy_v0_legacy_cluster_refs :
+      try(
+        var.deployment_scopes[scope_ref].default &&
+        var.deployment_scopes[scope_ref].scope_tag_policy_version == 0 &&
+        var.deployment_scopes[scope_ref].cluster_name != null,
+        false,
+      )
+    ])
+    error_message = "scope_tag_policy_v0_legacy_cluster_refs may contain only the named default version-0 scope detected from legacy phase-two IAM state."
   }
 }
 

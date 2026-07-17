@@ -472,6 +472,7 @@ func TestAWSScopesSeedRegistryPreflightGuards(t *testing.T) {
 `)
 	tagPolicyScopesPath := writeAWSScopeTestFile(t, testDefaultScopeRef+`:
   default: true
+  clusterName: secure-cluster
   clusterType: kubeadm
   region: ap-southeast-2
   scopeTagPolicyVersion: 1

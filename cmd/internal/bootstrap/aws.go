@@ -42,6 +42,31 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 				); err != nil {
 					return err
 				}
+				profile, err := cmd.Flags().GetString("aws-profile")
+				if err != nil {
+					return fmt.Errorf("unable to get aws-profile: %w", err)
+				}
+				transitionConfiguration, authorizedPolicyRefs, err := prepareAWSScopeTagPolicyTransition(
+					commandCanonicalStatePath(cmd),
+					profile,
+					scopes,
+				)
+				if err != nil {
+					return err
+				}
+				legacyVersionZeroClusterPolicyRefs, err := detectAWSLegacyVersionZeroClusterPolicyRefs(
+					commandCanonicalStatePath(cmd),
+					scopes,
+				)
+				if err != nil {
+					return err
+				}
+				if len(transitionConfiguration.Scopes) > 0 {
+					if cmd.Flags().Changed("import-resource") {
+						return fmt.Errorf("--import-resource cannot be combined with a scopeTagPolicyVersion 0 to 1 transition; complete imports at version 0 first")
+					}
+					cmd.SetContext(setAWSScopeTagPolicyTransitionConfiguration(cmd.Context(), transitionConfiguration))
+				}
 				if cmd.Flags().Changed("import-resource") {
 					importValues, err := cmd.Flags().GetStringArray("import-resource")
 					if err != nil {
@@ -73,7 +98,12 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 						cmd.SetContext(setAWSInitialScopeMigrationPlanConfiguration(cmd.Context(), initialMigrationConfiguration))
 					}
 				}
-				scopeVars, err := awsScopeTerraformVariables(cmd.Flags(), encodedScopes)
+				scopeVars, err := awsScopeTerraformVariables(
+					cmd.Flags(),
+					encodedScopes,
+					authorizedPolicyRefs,
+					legacyVersionZeroClusterPolicyRefs,
+				)
 				if err != nil {
 					return err
 				}
@@ -207,15 +237,6 @@ func validateAWSScopesFlags(flags *pflag.FlagSet) (bool, AWSDeploymentScopes, st
 	if err != nil {
 		return false, nil, "", nil, err
 	}
-	for _, scopeRef := range sortedAWSDeploymentScopeRefs(scopes) {
-		scope := scopes[scopeRef]
-		if scope.ScopeTagPolicyVersion == 1 {
-			return false, nil, "", nil, fmt.Errorf(
-				"scope %q cannot use scopeTagPolicyVersion: 1 until the verified tag-policy transition workflow is implemented; keep it at 0",
-				scopeRef,
-			)
-		}
-	}
 	encodedScopes, err := marshalAWSDeploymentScopes(scopes)
 	if err != nil {
 		return false, nil, "", nil, err
@@ -239,14 +260,20 @@ func writeAWSScopesSummary(writer io.Writer, scopes AWSDeploymentScopes) error {
 		if scope.VPC.NATGatewayName != "" {
 			natGatewayName = " natGatewayName=" + scope.VPC.NATGatewayName
 		}
+		clusterName := ""
+		if scope.ClusterName != "" {
+			clusterName = " clusterName=" + scope.ClusterName
+		}
 		if _, err := fmt.Fprintf(
 			writer,
-			"  - %s%s: region=%s clusterType=%s vpcMode=%s%s\n",
+			"  - %s%s: region=%s clusterType=%s vpcMode=%s%s scopeTagPolicyVersion=%d%s\n",
 			scopeRef,
 			defaultMarker,
 			scope.Region,
 			scope.ClusterType,
 			scope.VPC.Mode,
+			clusterName,
+			scope.ScopeTagPolicyVersion,
 			natGatewayName,
 		); err != nil {
 			return err
@@ -267,8 +294,27 @@ func sortedAWSDeploymentScopeRefs(scopes AWSDeploymentScopes) []string {
 // awsScopeTerraformVariables returns the complete account-level input shared by
 // every deployment scope. Scope-owned values are carried only in the validated
 // deployment_scopes object.
-func awsScopeTerraformVariables(flags *pflag.FlagSet, encodedScopes string) ([]string, error) {
+func awsScopeTerraformVariables(
+	flags *pflag.FlagSet,
+	encodedScopes string,
+	authorizedPolicyRefs []string,
+	legacyVersionZeroClusterPolicyRefs []string,
+) ([]string, error) {
 	values := []string{"deployment_scopes=" + encodedScopes}
+	if len(authorizedPolicyRefs) > 0 {
+		encodedRefs, err := json.Marshal(authorizedPolicyRefs)
+		if err != nil {
+			return nil, fmt.Errorf("unable to marshal verified scope tag-policy references: %w", err)
+		}
+		values = append(values, "scope_tag_policy_cli_authorized_refs="+string(encodedRefs))
+	}
+	if len(legacyVersionZeroClusterPolicyRefs) > 0 {
+		encodedRefs, err := json.Marshal(legacyVersionZeroClusterPolicyRefs)
+		if err != nil {
+			return nil, fmt.Errorf("unable to marshal preserved legacy version-0 cluster-policy references: %w", err)
+		}
+		values = append(values, "scope_tag_policy_v0_legacy_cluster_refs="+string(encodedRefs))
+	}
 
 	if flags.Changed("aws-profile") {
 		profile, err := flags.GetString("aws-profile")
