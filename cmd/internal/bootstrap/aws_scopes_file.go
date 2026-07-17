@@ -253,6 +253,36 @@ func (document *awsDeploymentScopesDocument) appendScope(scopeRef string, scope 
 	return encoded.Bytes(), nil
 }
 
+func encodeAWSDeploymentScopesDocument(path string, scopes AWSDeploymentScopes) ([]byte, error) {
+	if err := scopes.Validate(); err != nil {
+		return nil, fmt.Errorf("recovered AWS scopes configuration is invalid: %w", err)
+	}
+
+	root := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	for _, scopeRef := range sortedAWSDeploymentScopeRefs(scopes) {
+		root.Content = append(
+			root.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: scopeRef},
+			awsDeploymentScopeYAMLNode(scopes[scopeRef]),
+		)
+	}
+	document := &yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{root}}
+
+	var encoded bytes.Buffer
+	encoder := yaml.NewEncoder(&encoded)
+	encoder.SetIndent(2)
+	if err := encoder.Encode(document); err != nil {
+		return nil, fmt.Errorf("unable to encode recovered AWS scopes file %q: %w", path, err)
+	}
+	if err := encoder.Close(); err != nil {
+		return nil, fmt.Errorf("unable to finish encoding recovered AWS scopes file %q: %w", path, err)
+	}
+	if _, err := decodeAWSDeploymentScopes(encoded.Bytes(), path); err != nil {
+		return nil, fmt.Errorf("encoded recovered AWS scopes file failed validation: %w", err)
+	}
+	return encoded.Bytes(), nil
+}
+
 func awsDeploymentScopeYAMLNode(scope AWSDeploymentScope) *yaml.Node {
 	root := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	appendScalarYAMLField := func(name, value, tag string) {
@@ -289,6 +319,9 @@ func awsDeploymentScopeYAMLNode(scope AWSDeploymentScope) *yaml.Node {
 	}
 	if scope.VPC.ID != "" {
 		appendVPCField("id", scope.VPC.ID)
+	}
+	if scope.VPC.NATGatewayName != "" {
+		appendVPCField("natGatewayName", scope.VPC.NATGatewayName)
 	}
 	root.Content = append(
 		root.Content,

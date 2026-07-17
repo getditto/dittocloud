@@ -264,6 +264,13 @@ func BootstrapCmd() *cobra.Command {
 			}
 
 			_, _ = progress.Println("Running terraform plan...")
+			initialMigrationConfiguration, initialMigration := commandAWSInitialScopeMigrationPlanConfiguration(cmd.Context())
+			planOptions := toPlanOptions(vars)
+			initialMigrationPlanPath := ""
+			if initialMigration {
+				initialMigrationPlanPath = filepath.Join(workingDir, "initial-default-scope-migration.tfplan")
+				planOptions = append(planOptions, tfexec.Out(initialMigrationPlanPath))
+			}
 
 			// Import workflows always show the post-import plan. Other workflows show
 			// detailed plan output only when debug logging is enabled.
@@ -278,42 +285,48 @@ func BootstrapCmd() *cobra.Command {
 				}
 				tf.SetStdout(os.Stdout)
 				tf.SetStderr(os.Stderr)
+			} else {
+				// For normal operation, suppress terraform output and just check if changes exist
+				tf.SetStdout(io.Discard)
+				tf.SetStderr(io.Discard)
+			}
 
-				// Show the human-readable plan
-				planChanged, err := tf.Plan(cmd.Context(), toPlanOptions(vars)...)
-				if err != nil {
-					return fmt.Errorf("unable to run terraform plan: %w", err)
+			planChanged, err := tf.Plan(cmd.Context(), planOptions...)
+			if err != nil {
+				return fmt.Errorf("unable to run terraform plan: %w", err)
+			}
+			if initialMigration {
+				tf.SetStdout(io.Discard)
+				plan, showErr := tf.ShowPlanFile(cmd.Context(), initialMigrationPlanPath)
+				if showDetailedPlan {
+					tf.SetStdout(os.Stdout)
 				}
+				if showErr != nil {
+					return fmt.Errorf("unable to inspect saved initial AWS scope migration plan: %w", showErr)
+				}
+				if err := validateAWSInitialScopeMigrationPlan(plan, initialMigrationConfiguration); err != nil {
+					return fmt.Errorf("refusing unsafe initial AWS scope migration plan: %w", err)
+				}
+				_, _ = progress.Printf(
+					"Validated initial scope migration for %q: one policy marker, one applied configuration snapshot, additive scope tags and outputs, retained Cluster API tag namespaces, and stable NAT names only.\n",
+					initialMigrationConfiguration.ScopeRef,
+				)
+			}
 
-				if !planChanged {
-					color.Green("\n✅ No changes detected. Infrastructure is up to date.\n")
-					if err := showOutputs(cmd.Context(), tf); err != nil {
-						return err
-					}
-					return nil
+			if !planChanged {
+				color.Green("\n✅ No changes detected. Infrastructure is up to date.\n")
+				if err := showOutputs(cmd.Context(), tf); err != nil {
+					return err
 				}
+				return nil
+			}
+			if showDetailedPlan {
 				if importOnly {
 					color.Yellow("\n📋 Changes detected. The import workflow will not apply them.\n")
 				} else {
 					color.Yellow("\n📋 Changes detected and will be applied.\n")
 				}
 			} else {
-				// For normal operation, suppress terraform output and just check if changes exist
-				tf.SetStdout(io.Discard)
-				tf.SetStderr(io.Discard)
-
-				planChanged, err := tf.Plan(cmd.Context(), toPlanOptions(vars)...)
-				if err != nil {
-					return fmt.Errorf("unable to run terraform plan: %w", err)
-				}
-
-				if !planChanged {
-					color.Green("\n✅ No changes detected. Infrastructure is up to date.\n")
-					if err := showOutputs(cmd.Context(), tf); err != nil {
-						return err
-					}
-					return nil
-				}
 				color.Yellow("\n📋 Terraform Plan Summary:")
 				color.Yellow("Changes have been detected and will be applied.")
 				color.Yellow("Use --log-level debug to see detailed plan output.\n")
@@ -345,7 +358,11 @@ func BootstrapCmd() *cobra.Command {
 			}
 
 			_, _ = progress.Println("Running terraform apply...")
-			applyErr := tf.Apply(cmd.Context(), toApplyOptions(vars)...)
+			applyOptions := toApplyOptions(vars)
+			if initialMigration {
+				applyOptions = []tfexec.ApplyOption{tfexec.DirOrPlan(initialMigrationPlanPath)}
+			}
+			applyErr := tf.Apply(cmd.Context(), applyOptions...)
 
 			var outputErr error
 			if applyErr == nil {

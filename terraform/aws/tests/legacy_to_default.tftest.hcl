@@ -11,6 +11,12 @@ mock_provider "aws" {
     }
   }
 
+  mock_data "aws_partition" {
+    defaults = {
+      reverse_dns_prefix = "com.amazonaws"
+    }
+  }
+
   mock_data "aws_availability_zones" {
     defaults = {
       names = [
@@ -25,12 +31,6 @@ mock_provider "aws" {
     defaults = {
       json          = jsonencode({ Version = "2012-10-17", Statement = [] })
       minified_json = jsonencode({ Version = "2012-10-17", Statement = [] })
-    }
-  }
-
-  mock_data "aws_vpc_endpoint_service" {
-    defaults = {
-      service_name = "com.amazonaws.ap-southeast-2.mock"
     }
   }
 
@@ -89,15 +89,6 @@ mock_provider "aws" {
   }
 }
 
-# The upstream VPC endpoints child requires real service discovery when an
-# explicit provider-v6 Region is set. Keep this migration fixture focused on
-# state identity for the VPC, IAM, Karpenter, and IMDS resources Dittocloud
-# addresses directly.
-override_module {
-  target  = module.vpc[0].module.vpc_endpoints
-  outputs = {}
-}
-
 override_data {
   target = module.vpc[0].data.aws_availability_zones.available
   values = {
@@ -144,6 +135,7 @@ run "apply_legacy_configuration" {
   assert {
     condition = (
       length(terraform_data.scope_registry) == 0 &&
+      length(terraform_data.scope_configuration) == 0 &&
       length(module.vpc) == 1 &&
       length(module.cross_account_iam) == 1 &&
       length(aws_sqs_queue.karpenter_interruption) == 1 &&
@@ -201,6 +193,9 @@ run "plan_equivalent_default_scope" {
   assert {
     condition = (
       length(terraform_data.scope_registry) == 1 &&
+      length(terraform_data.scope_tag_policy) == 1 &&
+      length(terraform_data.scope_configuration) == 1 &&
+      terraform_data.scope_tag_policy["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].input.policy_version == 0 &&
       length(module.vpc) == 1 &&
       length(module.cross_account_iam) == 1 &&
       length(module.scoped_vpc) == 0 &&
@@ -213,6 +208,24 @@ run "plan_equivalent_default_scope" {
       length(aws_ec2_instance_metadata_defaults.scoped_imdsv2) == 0
     )
     error_message = "An equivalent default scope must retain every legacy resource address and add no scoped replacement instances."
+  }
+
+  assert {
+    condition = (
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].input.schema_version == 1 &&
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].input.scope_ref == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" &&
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].input.configuration.default &&
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].input.configuration.cluster_name == "migration-eks" &&
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].input.configuration.cluster_type == "eks" &&
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].input.configuration.region == "ap-southeast-2" &&
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].input.configuration.scope_tag_policy_version == 0 &&
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].input.configuration.vpc.mode == "dittocloud" &&
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].input.configuration.vpc.name == "migration-vpc" &&
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].input.configuration.vpc.cidr == "10.220.0.0/16" &&
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].input.configuration.vpc.id == null &&
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].input.configuration.vpc.nat_gateway_name == null
+    )
+    error_message = "The initial full scope-mode plan must add an exact normalized configuration snapshot for future recovery."
   }
 
   assert {

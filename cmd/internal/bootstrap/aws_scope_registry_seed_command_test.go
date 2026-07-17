@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -123,6 +124,15 @@ func TestAWSScopesSeedRegistryAppliesOnlyReviewedPlanAndBacksUpState(t *testing.
 	if mock.showPlanCallCount != 1 {
 		t.Fatalf("expected one ShowPlanFile call, got %d", mock.showPlanCallCount)
 	}
+	if mock.showPlanStdout != io.Discard {
+		t.Fatal("registry-seed plan JSON was not suppressed during internal validation")
+	}
+	if mock.applyStdout != io.Discard {
+		t.Fatal("registry-seed apply output was not suppressed")
+	}
+	if mock.stdout != &output {
+		t.Fatal("registry-seed command output was not restored after apply")
+	}
 	expectedTarget := `terraform_data.scope_registry["` + testDefaultScopeRef + `"]`
 	if !slices.Equal(mock.planTargets, []string{expectedTarget}) {
 		t.Fatalf("plan targets: got %v, want only %q", mock.planTargets, expectedTarget)
@@ -173,6 +183,9 @@ func TestAWSScopesSeedRegistryDryRunDoesNotBackUpOrApply(t *testing.T) {
 	assertCallCounts(t, mock, 1, 1, 0)
 	if mock.showPlanCallCount != 1 {
 		t.Fatalf("expected one ShowPlanFile call, got %d", mock.showPlanCallCount)
+	}
+	if mock.showPlanStdout != io.Discard {
+		t.Fatal("registry-seed dry-run plan JSON was not suppressed during internal validation")
 	}
 	stateAfter, err := os.ReadFile(statePath)
 	if err != nil || !bytes.Equal(stateAfter, originalState) {

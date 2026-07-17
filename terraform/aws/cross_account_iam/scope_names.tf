@@ -16,6 +16,11 @@ resource "terraform_data" "scope_contract" {
       condition     = !var.create_admin_view_role
       error_message = "scope ${var.scope_ref} cannot create the shared account-wide IAM admin view role."
     }
+
+    precondition {
+      condition     = var.scope_identity_ref == null || var.scope_identity_ref == var.scope_ref
+      error_message = "scope ${var.scope_ref} cannot use a different scope_identity_ref."
+    }
   }
 }
 

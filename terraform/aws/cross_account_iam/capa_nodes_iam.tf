@@ -1,7 +1,7 @@
 resource "aws_iam_instance_profile" "capa_nodes" {
   name = local.iam_names.nodes_instance_profile
   role = aws_iam_role.capa_nodes.name
-  tags = local.scope_enabled ? local.tags : null
+  tags = local.scope_identity_enabled ? local.tags : null
 }
 
 resource "aws_iam_policy" "capa_nodes" {

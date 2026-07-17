@@ -45,10 +45,11 @@ type AWSDeploymentScope struct {
 }
 
 type AWSScopeVPC struct {
-	Mode string `yaml:"mode" json:"mode"`
-	Name string `yaml:"name,omitempty" json:"name,omitempty"`
-	CIDR string `yaml:"cidr,omitempty" json:"cidr,omitempty"`
-	ID   string `yaml:"id,omitempty" json:"id,omitempty"`
+	Mode           string `yaml:"mode" json:"mode"`
+	Name           string `yaml:"name,omitempty" json:"name,omitempty"`
+	CIDR           string `yaml:"cidr,omitempty" json:"cidr,omitempty"`
+	ID             string `yaml:"id,omitempty" json:"id,omitempty"`
+	NATGatewayName string `yaml:"natGatewayName,omitempty" json:"nat_gateway_name,omitempty"`
 }
 
 func loadAWSDeploymentScopes(path string) (AWSDeploymentScopes, error) {
@@ -153,9 +154,12 @@ func validateAWSScopeVPC(scopeRef string, vpc AWSScopeVPC) error {
 		if vpc.ID != "" {
 			return fmt.Errorf("scope %q cannot set vpc.id when vpc.mode is %q", scopeRef, awsVPCModeDittocloud)
 		}
+		if vpc.NATGatewayName != "" && (strings.TrimSpace(vpc.NATGatewayName) != vpc.NATGatewayName || len(vpc.NATGatewayName) > 256) {
+			return fmt.Errorf("scope %q vpc.natGatewayName must contain 1 to 256 non-whitespace-bounded characters", scopeRef)
+		}
 	case awsVPCModeCAPI:
-		if vpc.Name != "" || vpc.CIDR != "" {
-			return fmt.Errorf("scope %q cannot set vpc.name or vpc.cidr when vpc.mode is %q", scopeRef, awsVPCModeCAPI)
+		if vpc.Name != "" || vpc.CIDR != "" || vpc.NATGatewayName != "" {
+			return fmt.Errorf("scope %q cannot set vpc.name, vpc.cidr, or vpc.natGatewayName when vpc.mode is %q", scopeRef, awsVPCModeCAPI)
 		}
 		if vpc.ID != "" && !awsVPCIDPattern.MatchString(vpc.ID) {
 			return fmt.Errorf("scope %q vpc.id %q must be a valid VPC ID", scopeRef, vpc.ID)
@@ -164,8 +168,8 @@ func validateAWSScopeVPC(scopeRef string, vpc AWSScopeVPC) error {
 		if !awsVPCIDPattern.MatchString(vpc.ID) {
 			return fmt.Errorf("scope %q requires a valid vpc.id when vpc.mode is %q", scopeRef, awsVPCModeExisting)
 		}
-		if vpc.Name != "" || vpc.CIDR != "" {
-			return fmt.Errorf("scope %q cannot set vpc.name or vpc.cidr when vpc.mode is %q", scopeRef, awsVPCModeExisting)
+		if vpc.Name != "" || vpc.CIDR != "" || vpc.NATGatewayName != "" {
+			return fmt.Errorf("scope %q cannot set vpc.name, vpc.cidr, or vpc.natGatewayName when vpc.mode is %q", scopeRef, awsVPCModeExisting)
 		}
 	default:
 		return fmt.Errorf("scope %q vpc.mode must be one of %q, %q, or %q", scopeRef, awsVPCModeDittocloud, awsVPCModeCAPI, awsVPCModeExisting)

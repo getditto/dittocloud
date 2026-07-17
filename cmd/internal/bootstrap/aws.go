@@ -61,6 +61,17 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 						return err
 					}
 					cmd.SetContext(setAWSScopedImportConfiguration(cmd.Context(), configuration))
+				} else {
+					initialMigrationConfiguration, initialMigration, err := prepareAWSInitialScopeMigrationPlanConfiguration(
+						commandCanonicalStatePath(cmd),
+						scopes,
+					)
+					if err != nil {
+						return err
+					}
+					if initialMigration {
+						cmd.SetContext(setAWSInitialScopeMigrationPlanConfiguration(cmd.Context(), initialMigrationConfiguration))
+					}
 				}
 				scopeVars, err := awsScopeTerraformVariables(cmd.Flags(), encodedScopes)
 				if err != nil {
@@ -224,14 +235,19 @@ func writeAWSScopesSummary(writer io.Writer, scopes AWSDeploymentScopes) error {
 		if scope.Default {
 			defaultMarker = " [default]"
 		}
+		natGatewayName := ""
+		if scope.VPC.NATGatewayName != "" {
+			natGatewayName = " natGatewayName=" + scope.VPC.NATGatewayName
+		}
 		if _, err := fmt.Fprintf(
 			writer,
-			"  - %s%s: region=%s clusterType=%s vpcMode=%s\n",
+			"  - %s%s: region=%s clusterType=%s vpcMode=%s%s\n",
 			scopeRef,
 			defaultMarker,
 			scope.Region,
 			scope.ClusterType,
 			scope.VPC.Mode,
+			natGatewayName,
 		); err != nil {
 			return err
 		}

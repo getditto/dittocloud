@@ -22,10 +22,11 @@ variable "deployment_scopes" {
     region                   = string
     scope_tag_policy_version = optional(number, 0)
     vpc = object({
-      mode = string
-      name = optional(string)
-      cidr = optional(string)
-      id   = optional(string)
+      mode             = string
+      name             = optional(string)
+      cidr             = optional(string)
+      id               = optional(string)
+      nat_gateway_name = optional(string)
     })
   }))
   default = {}
@@ -94,6 +95,19 @@ variable "deployment_scopes" {
       ) : true
     ])
     error_message = "Dittocloud VPC scopes require name and IPv4 cidr; CAPI scopes permit only an optional VPC id; existing scopes require a valid VPC id."
+  }
+
+  validation {
+    condition = alltrue([
+      for scope in values(var.deployment_scopes) :
+      scope.vpc.nat_gateway_name == null || (
+        scope.vpc.mode == "dittocloud" &&
+        length(scope.vpc.nat_gateway_name) > 0 &&
+        length(scope.vpc.nat_gateway_name) <= 256 &&
+        trimspace(scope.vpc.nat_gateway_name) == scope.vpc.nat_gateway_name
+      )
+    ])
+    error_message = "nat_gateway_name can only be set for a Dittocloud-managed VPC and must contain 1 to 256 non-whitespace-bounded characters."
   }
 }
 

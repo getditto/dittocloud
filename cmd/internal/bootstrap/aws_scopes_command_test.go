@@ -302,7 +302,7 @@ func TestAWSScopesAddValidatesModeSpecificFields(t *testing.T) {
 		{name: "requires VPC mode", extraArgs: nil, wantError: "--vpc-mode is required"},
 		{name: "requires Dittocloud VPC name", extraArgs: []string{"--vpc-mode=dittocloud", "--vpc-cidr=10.210.0.0/16"}, wantError: "--vpc-name is required"},
 		{name: "requires existing VPC ID", extraArgs: []string{"--vpc-mode=existing"}, wantError: "--vpc-id is required"},
-		{name: "rejects VPC name in CAPI mode", extraArgs: []string{"--vpc-mode=capi", "--vpc-name=unused"}, wantError: "cannot set vpc.name or vpc.cidr"},
+		{name: "rejects VPC name in CAPI mode", extraArgs: []string{"--vpc-mode=capi", "--vpc-name=unused"}, wantError: "cannot set vpc.name, vpc.cidr, or vpc.natGatewayName"},
 		{name: "rejects VPC ID in Dittocloud mode", extraArgs: []string{"--vpc-mode=dittocloud", "--vpc-name=ditto", "--vpc-cidr=10.210.0.0/16", "--vpc-id=vpc-09e877f9012f52241"}, wantError: "cannot set vpc.id"},
 		{name: "rejects unsupported cluster type", extraArgs: []string{"--vpc-mode=capi", "--cluster-type=kops"}, wantError: "clusterType must be"},
 	}

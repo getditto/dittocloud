@@ -33,6 +33,7 @@ dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
     mode: dittocloud
     name: ditto-k8s
     cidr: 10.210.0.0/16
+    natGatewayName: founding-cluster-nat
 dsc-01k2m8g7n4p6q9r3t5v8x1y2z4:
   region: us-east-1
   vpc:
@@ -58,6 +59,9 @@ dsc-01k2m8g7n4p6q9r3t5v8x1y2z5:
 		if got := scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].ClusterType; got != awsClusterTypeKubeadm {
 			t.Errorf("existing VPC scope default cluster type: got %q, want %q", got, awsClusterTypeKubeadm)
 		}
+		if got := scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].VPC.NATGatewayName; got != "founding-cluster-nat" {
+			t.Errorf("default scope NAT gateway name: got %q, want %q", got, "founding-cluster-nat")
+		}
 	})
 
 	t.Run("marshals Terraform field names", func(t *testing.T) {
@@ -67,8 +71,10 @@ dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
   clusterName: cluster-x
   region: ap-southeast-2
   vpc:
-    mode: existing
-    id: vpc-09e877f9012f52241
+    mode: dittocloud
+    name: ditto-k8s
+    cidr: 10.210.0.0/16
+    natGatewayName: founding-cluster-nat
 `)
 		scopes, err := loadAWSDeploymentScopes(path)
 		if err != nil {
@@ -78,7 +84,7 @@ dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
 		if err != nil {
 			t.Fatalf("unexpected marshal error: %v", err)
 		}
-		for _, want := range []string{`"default":true`, `"cluster_name":"cluster-x"`, `"cluster_type":"kubeadm"`, `"scope_tag_policy_version":0`} {
+		for _, want := range []string{`"default":true`, `"cluster_name":"cluster-x"`, `"cluster_type":"kubeadm"`, `"scope_tag_policy_version":0`, `"nat_gateway_name":"founding-cluster-nat"`} {
 			if !strings.Contains(encoded, want) {
 				t.Errorf("encoded scopes %q do not contain %q", encoded, want)
 			}
@@ -284,7 +290,34 @@ dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
     mode: capi
     cidr: 10.210.0.0/16
 `,
-			wantError: "cannot set vpc.name or vpc.cidr",
+			wantError: "cannot set vpc.name, vpc.cidr, or vpc.natGatewayName",
+		},
+		{
+			name: "rejects NAT gateway name outside Dittocloud mode",
+			content: `
+dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
+  default: true
+  region: ap-southeast-2
+  vpc:
+    mode: existing
+    id: vpc-09e877f9012f52241
+    natGatewayName: founding-cluster-nat
+`,
+			wantError: "cannot set vpc.name, vpc.cidr, or vpc.natGatewayName",
+		},
+		{
+			name: "rejects whitespace-bounded NAT gateway name",
+			content: `
+dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
+  default: true
+  region: ap-southeast-2
+  vpc:
+    mode: dittocloud
+    name: ditto-k8s
+    cidr: 10.210.0.0/16
+    natGatewayName: " founding-cluster-nat"
+`,
+			wantError: "vpc.natGatewayName must contain 1 to 256",
 		},
 		{
 			name: "requires existing VPC ID",
@@ -603,9 +636,13 @@ func TestAWSScopesNormalApplyPersistsPartialStateAfterFailure(t *testing.T) {
 	terraformApplyPrompt = func(label, defaultValue string) string { return "yes" }
 	t.Cleanup(func() { terraformApplyPrompt = originalPrompt })
 
-	statePath := writeTerraformStateTestFile(t, rawScopeRegistryState(
+	initialStateValue := rawScopeRegistryState(
 		rawScopeRegistryInstance(testDefaultScopeRef, testDefaultScopeRef, true),
+	)
+	appendRawTerraformStateResource(initialStateValue, rawScopeTagPolicyResource(
+		rawScopeTagPolicyInstance(testDefaultScopeRef, testDefaultScopeRef, 0),
 	))
+	statePath := writeTerraformStateTestFile(t, initialStateValue)
 	scopesPath := writeAWSScopeTestFile(t, `
 `+testDefaultScopeRef+`:
   default: true
@@ -627,6 +664,10 @@ func TestAWSScopesNormalApplyPersistsPartialStateAfterFailure(t *testing.T) {
 		rawScopeRegistryInstance(testDefaultScopeRef, testDefaultScopeRef, true),
 		rawScopeRegistryInstance(testSecondaryScopeRef, testSecondaryScopeRef, false),
 	)
+	appendRawTerraformStateResource(partialStateValue, rawScopeTagPolicyResource(
+		rawScopeTagPolicyInstance(testDefaultScopeRef, testDefaultScopeRef, 0),
+	))
+	appendRawTerraformStateResource(partialStateValue, rawScopedAWSResource(testSecondaryScopeRef))
 	partialStateValue["serial"] = int64(2)
 	partialState, err := json.Marshal(partialStateValue)
 	if err != nil {
@@ -653,6 +694,64 @@ func TestAWSScopesNormalApplyPersistsPartialStateAfterFailure(t *testing.T) {
 		t.Fatalf("state operation lock was not released after failed apply: %v", lockErr)
 	}
 	_ = operationLock.Release()
+}
+
+func TestAWSScopesFailedRemovalPersistsScopeSentinelUntilResourcesAreGone(t *testing.T) {
+	originalPrompt := terraformApplyPrompt
+	terraformApplyPrompt = func(label, defaultValue string) string { return "yes" }
+	t.Cleanup(func() { terraformApplyPrompt = originalPrompt })
+
+	initialStateValue := rawScopeRegistryState(
+		rawScopeRegistryInstance(testDefaultScopeRef, testDefaultScopeRef, true),
+		rawScopeRegistryInstance(testSecondaryScopeRef, testSecondaryScopeRef, false),
+	)
+	appendRawTerraformStateResource(initialStateValue, rawScopedAWSResource(testSecondaryScopeRef))
+	statePath := writeTerraformStateTestFile(t, initialStateValue)
+	scopesPath := writeAWSScopeTestFile(t, `
+`+testDefaultScopeRef+`:
+  default: true
+  region: ap-southeast-2
+  vpc:
+    mode: capi
+`)
+	cmd, mock := setupBootstrapTest(t, []string{
+		"aws",
+		"--scopes=true",
+		"--scopes-file=" + scopesPath,
+		"--state=" + statePath,
+		"--allow-scope-removal=" + testSecondaryScopeRef,
+	})
+
+	partialStateValue := rawScopeRegistryState(
+		rawScopeRegistryInstance(testDefaultScopeRef, testDefaultScopeRef, true),
+		rawScopeRegistryInstance(testSecondaryScopeRef, testSecondaryScopeRef, false),
+	)
+	appendRawTerraformStateResource(partialStateValue, rawScopedAWSResource(testSecondaryScopeRef))
+	partialStateValue["serial"] = int64(2)
+	partialState, err := json.Marshal(partialStateValue)
+	if err != nil {
+		t.Fatalf("unable to encode partial removal state: %v", err)
+	}
+	mock.applyState = partialState
+	mock.applyReturnError = errors.New("injected scope removal failure")
+
+	err = cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "partial Terraform state was saved") {
+		t.Fatalf("expected failed-removal persistence error, got %v", err)
+	}
+	assertCallCounts(t, mock, 1, 1, 1)
+	persistedState, readErr := os.ReadFile(statePath)
+	if readErr != nil || !bytes.Equal(persistedState, partialState) {
+		t.Fatalf("partial removal state was not persisted exactly: err=%v", readErr)
+	}
+	registry, registryErr := loadAWSStateScopeRegistry(statePath)
+	if registryErr != nil || !registry.Present || !slices.Equal(sortedScopeRefs(registry.Scopes), []string{testDefaultScopeRef, testSecondaryScopeRef}) {
+		t.Fatalf("failed removal did not retain both scope sentinels: registry=%#v err=%v", registry, registryErr)
+	}
+	desiredScopes := AWSDeploymentScopes{testDefaultScopeRef: testScope(true)}
+	if lifecycleErr := validateAWSStateScopeLifecycle(statePath, desiredScopes, []string{testSecondaryScopeRef}); lifecycleErr != nil {
+		t.Fatalf("persisted failed-removal state cannot be retried safely: %v", lifecycleErr)
+	}
 }
 
 func sortedScopeRefs(scopes map[string]awsStateScopeIdentity) []string {

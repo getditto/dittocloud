@@ -93,6 +93,13 @@ dittocloud bootstrap aws \
 Kubeadm is the default. Add `--enable-eks` only when provisioning an EKS
 cluster and its supporting IAM resources.
 
+AWS multi-scope configuration, legacy conversion, registry seeding, and
+backup-based rollback are documented in
+[AWS Multi-Scope Configuration and Migration](docs/aws-multi-scope.md).
+Scope mode leaves the open-ended Cluster API membership tag namespaces on
+shared VPC resources externally managed, so one VPC can safely retain tags for
+multiple clusters without enabling the optional phase-2 IAM lock-down.
+
 #### Customer-Managed VPC
 
 If your organisation provides an existing VPC rather than letting Ditto create one, pass `--customer-managed-vpc` together with the required `--vpc-id`. This skips VPC creation, restricts supported EC2 operations to that VPC, confines load-balancer subnet selection to the Kubernetes-role-tagged subnets discovered in that VPC, and omits VPC lifecycle permissions (create/delete VPC, subnets, internet gateways, NAT gateways) from the CAPA controller IAM role:

@@ -17,7 +17,7 @@ module "iam_trust_editor_role" {
   use_name_prefix = false
   description     = "Ditto Cross Account IAM trust editor role"
   path            = "/ditto/"
-  tags            = local.scope_enabled ? local.tags : {}
+  tags            = local.scope_identity_enabled ? local.tags : {}
 
   trust_policy_permissions = {
     TrustedRoles = {
@@ -60,7 +60,7 @@ resource "aws_iam_policy" "cluster_resources_boundary_policy" {
     vpc_arn                 = local.ec2_vpc_arn
     vpc_subnet_ids          = var.vpc_subnet_ids
     karpenter_queue_arn     = local.karpenter_queue_arn
-    capa_pass_role_resource = local.scope_enabled ? jsonencode(local.capa_pass_role_arns) : jsonencode(one(local.capa_pass_role_arns))
+    capa_pass_role_resource = local.scope_enabled ? jsonencode(local.capa_boundary_pass_role_arns) : jsonencode(one(local.capa_boundary_pass_role_arns))
     cluster_secret_arn      = local.cluster_secret_arn
   })
   tags = local.tags

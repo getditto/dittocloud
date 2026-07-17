@@ -19,6 +19,21 @@ variable "scope_ref" {
   }
 }
 
+variable "scope_identity_ref" {
+  type        = string
+  description = "Immutable deployment-scope identity used for tags and tag-policy enforcement. It may be set while scope_ref stays null so the default scope preserves legacy names."
+  default     = null
+  nullable    = true
+
+  validation {
+    condition = (
+      var.scope_identity_ref == null ||
+      (length(var.scope_identity_ref) == 30 && can(regex("^dsc-[0-7][0-9a-hjkmnp-tv-z]{25}$", var.scope_identity_ref)))
+    )
+    error_message = "scope_identity_ref must be null or exactly 30 characters in generated dsc-<lowercase-crockford-ulid> form."
+  }
+}
+
 variable "region" {
   type        = string
   description = "AWS Region owned by this deployment scope. Null preserves the provider Region used by legacy callers."

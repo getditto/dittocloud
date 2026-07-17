@@ -22,7 +22,7 @@ module "capa_controller_role" {
   name            = local.iam_names.controller_role
   use_name_prefix = false
   description     = "Ditto Cross Account Infrastructure Controller"
-  tags            = local.scope_enabled ? local.tags : {}
+  tags            = local.scope_identity_enabled ? local.tags : {}
 
   trust_policy_permissions = {
     TrustedRoles = {

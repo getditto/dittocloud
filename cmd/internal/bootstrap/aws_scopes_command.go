@@ -28,6 +28,7 @@ func awsScopesCmd() *cobra.Command {
 		PersistentPostRunE: func(cmd *cobra.Command, args []string) error { return nil },
 	}
 	cmd.AddCommand(awsScopesAddCmd())
+	cmd.AddCommand(awsScopesRecoverCmd())
 	cmd.AddCommand(awsScopesMigrateCmd())
 	return cmd
 }
@@ -129,6 +130,10 @@ func awsScopesAddCmd() *cobra.Command {
 }
 
 func rejectAWSScopesAddTerraformFlags(flags *pflag.FlagSet) error {
+	return rejectAWSScopesConfigurationOnlyTerraformFlags(flags, "configuration-only scopes add")
+}
+
+func rejectAWSScopesConfigurationOnlyTerraformFlags(flags *pflag.FlagSet, operation string) error {
 	for _, flagName := range []string{
 		"dry-run",
 		"force-terraform-download",
@@ -139,7 +144,7 @@ func rejectAWSScopesAddTerraformFlags(flags *pflag.FlagSet) error {
 		"tf-var",
 	} {
 		if flags.Changed(flagName) {
-			return fmt.Errorf("--%s cannot be used with configuration-only scopes add", flagName)
+			return fmt.Errorf("--%s cannot be used with %s", flagName, operation)
 		}
 	}
 	return nil
@@ -251,7 +256,7 @@ func validateAWSScopesAddStateBoundary(
 			return fmt.Errorf("--default is required to create the first scope in a greenfield configuration")
 		}
 		if registry.Present {
-			return fmt.Errorf("Terraform state %q already contains a scope registry but the scopes file is empty; manual recovery is required", statePath)
+			return fmt.Errorf("Terraform state %q already contains a scope registry but the scopes file is empty; run bootstrap aws scopes recover", statePath)
 		}
 		if !registry.StateEmpty {
 			return fmt.Errorf("Terraform state %q contains a legacy deployment; use the guarded legacy scopes-file generation workflow instead of scopes add --default", statePath)

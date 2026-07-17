@@ -6,6 +6,8 @@ data "aws_region" "current" {
   region = var.region
 }
 
+data "aws_partition" "current" {}
+
 locals {
   name   = var.vpc_name
   region = coalesce(var.region, data.aws_region.current.region)
@@ -44,6 +46,10 @@ locals {
   } : {}
 
   kubernetes_cluster_name = coalesce(var.kubernetes_cluster_name, var.vpc_name)
+  kubernetes_cluster_tags = var.manage_kubernetes_cluster_tag ? {
+    "kubernetes.io/cluster/${local.kubernetes_cluster_name}" = "shared"
+  } : {}
+  nat_gateway_tags = var.nat_gateway_name != null ? { Name = var.nat_gateway_name } : {}
 
   // us-east-1 uses ec2.internal, all other regions use <region>.compute.internal
   dhcp_domain = local.region == "us-east-1" ? "ec2.internal" : "${local.region}.compute.internal"
@@ -99,17 +105,21 @@ module "vpc" {
   private_subnets = [for subnet in local.private_subnets : module.subnets.network_cidr_blocks[subnet.name]]
   public_subnets  = [for subnet in local.public_subnets : module.subnets.network_cidr_blocks[subnet.name]]
 
-  private_subnet_tags = {
-    "kubernetes.io/cluster/${local.kubernetes_cluster_name}" = "shared"
-    "kubernetes.io/role/internal-elb"                        = "1"
-  }
+  private_subnet_tags = merge(
+    {
+      "kubernetes.io/role/internal-elb" = "1"
+    },
+    local.kubernetes_cluster_tags,
+  )
 
-  public_subnet_tags = {
-    "kubernetes.io/cluster/${local.kubernetes_cluster_name}" = "shared"
-    "kubernetes.io/role/elb"                                 = "1"
-  }
+  public_subnet_tags = merge(
+    {
+      "kubernetes.io/role/elb" = "1"
+    },
+    local.kubernetes_cluster_tags,
+  )
 
-  # Capi might delete those ^
+  nat_gateway_tags = local.nat_gateway_tags
 
   database_subnets = var.enable_database_subnets ? [for subnet in local.db_subnets : module.subnets.network_cidr_blocks[subnet.name]] : []
 
@@ -167,21 +177,21 @@ module "vpc_endpoints" {
 
   endpoints = {
     s3 = {
-      service             = "s3"
+      service_endpoint    = "${data.aws_partition.current.reverse_dns_prefix}.${local.region}.s3"
       private_dns_enabled = true
       subnet_ids          = module.vpc.private_subnets
       tags                = { Name = "s3-vpc-endpoint" }
       service_type        = "Gateway"
     },
     ecr_api = {
-      service             = "ecr.api"
+      service_endpoint    = "${data.aws_partition.current.reverse_dns_prefix}.${local.region}.ecr.api"
       private_dns_enabled = true
       subnet_ids          = module.vpc.private_subnets
       policy              = data.aws_iam_policy_document.generic_endpoint_policy.json
       tags                = { Name = "ecr-api-endpoint" }
     },
     ecr_dkr = {
-      service             = "ecr.dkr"
+      service_endpoint    = "${data.aws_partition.current.reverse_dns_prefix}.${local.region}.ecr.dkr"
       private_dns_enabled = true
       subnet_ids          = module.vpc.private_subnets
       policy              = data.aws_iam_policy_document.generic_endpoint_policy.json

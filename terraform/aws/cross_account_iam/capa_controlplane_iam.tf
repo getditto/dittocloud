@@ -1,7 +1,7 @@
 resource "aws_iam_instance_profile" "capa_control_plane" {
   name = local.iam_names.control_plane_instance_profile
   role = aws_iam_role.capa_control_plane.name
-  tags = local.scope_enabled ? local.tags : null
+  tags = local.scope_identity_enabled ? local.tags : null
 }
 
 # Control plane instance policy — phase-1 allows broad EC2 mutations; phase-2
@@ -288,7 +288,7 @@ resource "aws_iam_role" "capa_control_plane" {
     Version = "2012-10-17"
   })
   name = local.iam_names.control_plane_role
-  tags = local.scope_enabled ? local.tags : null
+  tags = local.scope_identity_enabled ? local.tags : null
 }
 
 resource "aws_iam_role_policy_attachment" "capa_control_plane" {

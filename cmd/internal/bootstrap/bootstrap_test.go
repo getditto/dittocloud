@@ -46,6 +46,9 @@ type mockTerraformExecutor struct {
 	applyState          []byte
 	applyPlanPath       string
 	outputReturn        map[string]tfexec.OutputMeta
+	stdout              io.Writer
+	showPlanStdout      io.Writer
+	applyStdout         io.Writer
 }
 
 type mockImportCall struct {
@@ -107,11 +110,13 @@ func (m *mockTerraformExecutor) Plan(ctx context.Context, opts ...tfexec.PlanOpt
 
 func (m *mockTerraformExecutor) ShowPlanFile(ctx context.Context, planPath string, opts ...tfexec.ShowOption) (*tfjson.Plan, error) {
 	m.showPlanCallCount++
+	m.showPlanStdout = m.stdout
 	return m.showPlanReturn, m.showPlanReturnError
 }
 
 func (m *mockTerraformExecutor) Apply(ctx context.Context, opts ...tfexec.ApplyOption) error {
 	m.applyCallCount++
+	m.applyStdout = m.stdout
 	for _, opt := range opts {
 		if _, isDirOrPlan := opt.(*tfexec.DirOrPlanOption); !isDirOrPlan {
 			continue
@@ -132,7 +137,7 @@ func (m *mockTerraformExecutor) Output(ctx context.Context, opts ...tfexec.Outpu
 	return m.outputReturn, nil
 }
 
-func (m *mockTerraformExecutor) SetStdout(w io.Writer) {}
+func (m *mockTerraformExecutor) SetStdout(w io.Writer) { m.stdout = w }
 
 func (m *mockTerraformExecutor) SetStderr(w io.Writer) {}
 

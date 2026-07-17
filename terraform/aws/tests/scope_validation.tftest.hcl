@@ -73,6 +73,11 @@ run "preserves_legacy_mode_without_registry" {
   }
 
   assert {
+    condition     = length(terraform_data.scope_tag_policy) == 0
+    error_message = "Legacy mode must not create applied tag-policy markers."
+  }
+
+  assert {
     condition     = output.aws.region == "ap-southeast-2"
     error_message = "Legacy mode must continue using the legacy root Region."
   }
@@ -134,6 +139,17 @@ run "creates_registry_for_valid_multi_scope_object" {
     error_message = "Scope mode must create one registry sentinel per configured scope."
   }
 
+
+  assert {
+    condition     = length(terraform_data.scope_tag_policy) == 3
+    error_message = "Scope mode must create one applied tag-policy marker per configured scope."
+  }
+
+  assert {
+    condition     = length(terraform_data.scope_configuration) == 3
+    error_message = "Scope mode must persist one normalized applied-configuration snapshot per configured scope."
+  }
+
   assert {
     condition = terraform_data.scope_registry["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].input == {
       schema_version = 1
@@ -150,6 +166,43 @@ run "creates_registry_for_valid_multi_scope_object" {
       default        = false
     }
     error_message = "A non-default registry sentinel must persist its identity without claiming the default."
+  }
+
+
+  assert {
+    condition = terraform_data.scope_tag_policy["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].input == {
+      schema_version = 1
+      scope_ref      = "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"
+      policy_version = 0
+    }
+    error_message = "The default scope must persist its applied tag-policy version separately from identity."
+  }
+
+  assert {
+    condition = terraform_data.scope_tag_policy["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].input == {
+      schema_version = 1
+      scope_ref      = "dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"
+      policy_version = 0
+    }
+    error_message = "A non-default scope must persist its applied tag-policy version separately from identity."
+  }
+
+  assert {
+    condition = (
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].input.schema_version == 1 &&
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].input.scope_ref == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z4" &&
+      !terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].input.configuration.default &&
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].input.configuration.cluster_name == "sydney-eks" &&
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].input.configuration.cluster_type == "eks" &&
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].input.configuration.region == "ap-southeast-2" &&
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].input.configuration.scope_tag_policy_version == 0 &&
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].input.configuration.vpc.mode == "dittocloud" &&
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].input.configuration.vpc.name == "ditto-sydney" &&
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].input.configuration.vpc.cidr == "10.210.0.0/16" &&
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].input.configuration.vpc.id == null &&
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].input.configuration.vpc.nat_gateway_name == null
+    )
+    error_message = "The applied configuration snapshot must retain the complete normalized EKS scope intent for exact recovery."
   }
 
   assert {
@@ -452,6 +505,26 @@ run "rejects_invalid_existing_vpc" {
   expect_failures = [var.deployment_scopes]
 }
 
+run "rejects_nat_gateway_name_outside_managed_vpc" {
+  command = plan
+
+  variables {
+    deployment_scopes = {
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" = {
+        default = true
+        region  = "ap-southeast-2"
+        vpc = {
+          mode             = "existing"
+          id               = "vpc-09e877f9012f52241"
+          nat_gateway_name = "founding-cluster-nat"
+        }
+      }
+    }
+  }
+
+  expect_failures = [var.deployment_scopes]
+}
+
 run "rejects_invalid_scope_tag_policy_version" {
   command = plan
 
@@ -576,6 +649,9 @@ run "preserves_default_eks_legacy_resource_addresses" {
   command = plan
 
   variables {
+    tags = {
+      "ditto.live/scope-ref" = "cannot-override"
+    }
     deployment_scopes = {
       "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" = {
         default      = true
@@ -594,6 +670,14 @@ run "preserves_default_eks_legacy_resource_addresses" {
   }
 
   assert {
+    condition = (
+      module.cross_account_iam[0].scope_iam.scope_ref == null &&
+      module.cross_account_iam[0].scope_iam.scope_identity_ref == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"
+    )
+    error_message = "The default scope must preserve legacy IAM naming while carrying its immutable tag identity."
+  }
+
+  assert {
     condition     = length(aws_ec2_instance_metadata_defaults.imdsv2) == 1
     error_message = "The default EKS scope must continue using aws_ec2_instance_metadata_defaults.imdsv2[0]."
   }
@@ -606,6 +690,17 @@ run "preserves_default_eks_legacy_resource_addresses" {
   assert {
     condition     = length(aws_cloudwatch_event_rule.karpenter_interruption) == 4
     error_message = "The default EKS scope must retain all four unsuffixed EventBridge rules."
+  }
+
+  assert {
+    condition = (
+      aws_sqs_queue.karpenter_interruption[0].tags["ditto.live/scope-ref"] == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" &&
+      alltrue([
+        for rule in values(aws_cloudwatch_event_rule.karpenter_interruption) :
+        rule.tags["ditto.live/scope-ref"] == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"
+      ])
+    )
+    error_message = "The default scope's unsuffixed Karpenter resources must carry the reserved identity tag and reject user override."
   }
 
   assert {

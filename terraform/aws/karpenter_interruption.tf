@@ -77,6 +77,11 @@ resource "terraform_data" "scoped_karpenter_name_validation" {
 
   input = each.value
 
+  # Terraform requires a static depends_on reference. Depending on the complete
+  # registry is deliberately conservative: every matching scope sentinel is
+  # created before this state-backed validation object and destroyed after it.
+  depends_on = [terraform_data.scope_registry]
+
   lifecycle {
     precondition {
       condition = (
@@ -93,7 +98,7 @@ resource "aws_sqs_queue" "karpenter_interruption" {
   name                      = "karpenter-interruption"
   message_retention_seconds = 300
   sqs_managed_sse_enabled   = true
-  tags                      = var.tags
+  tags                      = local.default_scope_tags
 
   depends_on = [terraform_data.scope_registry]
 }
@@ -143,7 +148,7 @@ resource "aws_cloudwatch_event_rule" "karpenter_interruption" {
     source        = [each.value.source]
     "detail-type" = [each.value.detail_type]
   })
-  tags = var.tags
+  tags = local.default_scope_tags
 
   depends_on = [terraform_data.scope_registry]
 }

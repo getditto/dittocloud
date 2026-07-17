@@ -51,6 +51,100 @@ func rawScopeRegistryInstance(addressScopeRef, storedScopeRef string, defaultSco
 	}
 }
 
+func rawScopeTagPolicyInstance(addressScopeRef, storedScopeRef string, policyVersion int) map[string]any {
+	policy := map[string]any{
+		"schema_version": 1,
+		"scope_ref":      storedScopeRef,
+		"policy_version": policyVersion,
+	}
+	dynamicPolicy := map[string]any{
+		"value": policy,
+		"type": []any{
+			"object",
+			map[string]string{
+				"schema_version": "number",
+				"scope_ref":      "string",
+				"policy_version": "number",
+			},
+		},
+	}
+	return map[string]any{
+		"index_key": addressScopeRef,
+		"attributes": map[string]any{
+			"id":               "tag-policy-id",
+			"input":            dynamicPolicy,
+			"output":           dynamicPolicy,
+			"triggers_replace": nil,
+		},
+	}
+}
+
+func rawScopeConfigurationInstance(addressScopeRef, storedScopeRef string, scope AWSDeploymentScope) map[string]any {
+	optionalString := func(value string) any {
+		if value == "" {
+			return nil
+		}
+		return value
+	}
+	configuration := map[string]any{
+		"default":                  scope.Default,
+		"cluster_name":             optionalString(scope.ClusterName),
+		"cluster_type":             scope.ClusterType,
+		"region":                   scope.Region,
+		"scope_tag_policy_version": scope.ScopeTagPolicyVersion,
+		"vpc": map[string]any{
+			"mode":             scope.VPC.Mode,
+			"name":             optionalString(scope.VPC.Name),
+			"cidr":             optionalString(scope.VPC.CIDR),
+			"id":               optionalString(scope.VPC.ID),
+			"nat_gateway_name": optionalString(scope.VPC.NATGatewayName),
+		},
+	}
+	dynamicConfiguration := map[string]any{
+		"value": map[string]any{
+			"schema_version": awsScopeConfigurationSchemaVersion,
+			"scope_ref":      storedScopeRef,
+			"configuration":  configuration,
+		},
+		"type": []any{
+			"object",
+			map[string]any{
+				"schema_version": "number",
+				"scope_ref":      "string",
+				"configuration": []any{
+					"object",
+					map[string]any{
+						"default":                  "bool",
+						"cluster_name":             "string",
+						"cluster_type":             "string",
+						"region":                   "string",
+						"scope_tag_policy_version": "number",
+						"vpc": []any{
+							"object",
+							map[string]any{
+								"mode":             "string",
+								"name":             "string",
+								"cidr":             "string",
+								"id":               "string",
+								"nat_gateway_name": "string",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	return map[string]any{
+		"index_key": addressScopeRef,
+		"attributes": map[string]any{
+			"id":               "configuration-id",
+			"input":            dynamicConfiguration,
+			"output":           dynamicConfiguration,
+			"triggers_replace": nil,
+		},
+	}
+}
+
 func rawTerraformStateWithResources(resources []any) map[string]any {
 	return map[string]any{
 		"version":           supportedTerraformStateVersion,
@@ -78,6 +172,54 @@ func rawScopeRegistryState(instances ...map[string]any) map[string]any {
 	})
 }
 
+func rawScopeTagPolicyResource(instances ...map[string]any) map[string]any {
+	rawInstances := make([]any, 0, len(instances))
+	for _, instance := range instances {
+		rawInstances = append(rawInstances, instance)
+	}
+	return map[string]any{
+		"mode":      "managed",
+		"type":      "terraform_data",
+		"name":      "scope_tag_policy",
+		"provider":  "terraform.io/builtin/terraform",
+		"instances": rawInstances,
+	}
+}
+
+func rawScopeConfigurationResource(instances ...map[string]any) map[string]any {
+	rawInstances := make([]any, 0, len(instances))
+	for _, instance := range instances {
+		rawInstances = append(rawInstances, instance)
+	}
+	return map[string]any{
+		"mode":      "managed",
+		"type":      "terraform_data",
+		"name":      "scope_configuration",
+		"provider":  "terraform.io/builtin/terraform",
+		"instances": rawInstances,
+	}
+}
+
+func appendRawTerraformStateResource(state map[string]any, resource map[string]any) {
+	state["resources"] = append(state["resources"].([]any), resource)
+}
+
+func rawScopedAWSResource(scopeRef string) map[string]any {
+	return map[string]any{
+		"module":   `module.scoped_cross_account_iam["` + scopeRef + `"]`,
+		"mode":     "managed",
+		"type":     "aws_iam_role",
+		"name":     "capa_nodes",
+		"provider": `provider["registry.terraform.io/hashicorp/aws"]`,
+		"instances": []any{map[string]any{
+			"attributes": map[string]any{
+				"id":   "ditto-capa-nodes-" + scopeRef,
+				"name": "ditto-capa-nodes-" + scopeRef,
+			},
+		}},
+	}
+}
+
 func writeTerraformStateTestFile(t *testing.T, state any) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "terraform.tfstate")
@@ -93,10 +235,23 @@ func writeTerraformStateTestFile(t *testing.T, state any) string {
 
 func TestLoadAWSStateScopeRegistry(t *testing.T) {
 	t.Run("loads exact versioned identities", func(t *testing.T) {
-		statePath := writeTerraformStateTestFile(t, rawScopeRegistryState(
+		state := rawScopeRegistryState(
 			rawScopeRegistryInstance(testDefaultScopeRef, testDefaultScopeRef, true),
 			rawScopeRegistryInstance(testSecondaryScopeRef, testSecondaryScopeRef, false),
+		)
+		appendRawTerraformStateResource(state, rawScopeTagPolicyResource(
+			rawScopeTagPolicyInstance(testDefaultScopeRef, testDefaultScopeRef, 0),
+			rawScopeTagPolicyInstance(testSecondaryScopeRef, testSecondaryScopeRef, 1),
 		))
+		defaultConfiguration := testScope(true)
+		secondaryConfiguration := testScope(false)
+		secondaryConfiguration.ClusterType = awsClusterTypeEKS
+		secondaryConfiguration.ScopeTagPolicyVersion = 1
+		appendRawTerraformStateResource(state, rawScopeConfigurationResource(
+			rawScopeConfigurationInstance(testDefaultScopeRef, testDefaultScopeRef, defaultConfiguration),
+			rawScopeConfigurationInstance(testSecondaryScopeRef, testSecondaryScopeRef, secondaryConfiguration),
+		))
+		statePath := writeTerraformStateTestFile(t, state)
 
 		registry, err := loadAWSStateScopeRegistry(statePath)
 		if err != nil {
@@ -104,6 +259,26 @@ func TestLoadAWSStateScopeRegistry(t *testing.T) {
 		}
 		if !registry.Present || registry.StateEmpty || registry.DefaultScopeRef != testDefaultScopeRef || len(registry.Scopes) != 2 {
 			t.Fatalf("unexpected registry: %#v", registry)
+		}
+		if registry.AppliedTagPolicyVersions[testDefaultScopeRef] != 0 || registry.AppliedTagPolicyVersions[testSecondaryScopeRef] != 1 {
+			t.Fatalf("unexpected applied tag-policy versions: %#v", registry.AppliedTagPolicyVersions)
+		}
+		if !registry.ConfigurationPresent || len(registry.Configurations) != 2 || registry.Configurations[testSecondaryScopeRef].ClusterType != awsClusterTypeEKS {
+			t.Fatalf("unexpected configuration snapshots: %#v", registry.Configurations)
+		}
+	})
+
+	t.Run("treats an absent marker as applied policy version zero", func(t *testing.T) {
+		statePath := writeTerraformStateTestFile(t, rawScopeRegistryState(
+			rawScopeRegistryInstance(testDefaultScopeRef, testDefaultScopeRef, true),
+		))
+
+		registry, err := loadAWSStateScopeRegistry(statePath)
+		if err != nil {
+			t.Fatalf("unexpected registry error: %v", err)
+		}
+		if registry.AppliedTagPolicyVersions[testDefaultScopeRef] != 0 {
+			t.Fatalf("absent marker did not default to policy version zero: %#v", registry.AppliedTagPolicyVersions)
 		}
 	})
 
@@ -183,6 +358,107 @@ func TestLoadAWSStateScopeRegistry(t *testing.T) {
 				},
 			}),
 			wantError: "apparent scope-mode resources but no valid root terraform_data.scope_registry",
+		},
+		{
+			name: "rejects an applied tag-policy marker without a registry",
+			state: rawTerraformStateWithResources([]any{
+				rawScopeTagPolicyResource(
+					rawScopeTagPolicyInstance(testDefaultScopeRef, testDefaultScopeRef, 0),
+				),
+			}),
+			wantError: "apparent scope-mode resources but no valid root terraform_data.scope_registry",
+		},
+		{
+			name: "rejects an applied tag-policy address and stored reference mismatch",
+			state: func() map[string]any {
+				state := rawScopeRegistryState(
+					rawScopeRegistryInstance(testDefaultScopeRef, testDefaultScopeRef, true),
+				)
+				appendRawTerraformStateResource(state, rawScopeTagPolicyResource(
+					rawScopeTagPolicyInstance(testDefaultScopeRef, testSecondaryScopeRef, 0),
+				))
+				return state
+			}(),
+			wantError: "applied tag-policy address key",
+		},
+		{
+			name: "rejects an unsupported applied tag-policy version",
+			state: func() map[string]any {
+				state := rawScopeRegistryState(
+					rawScopeRegistryInstance(testDefaultScopeRef, testDefaultScopeRef, true),
+				)
+				appendRawTerraformStateResource(state, rawScopeTagPolicyResource(
+					rawScopeTagPolicyInstance(testDefaultScopeRef, testDefaultScopeRef, 2),
+				))
+				return state
+			}(),
+			wantError: "policy_version must be 0 or 1",
+		},
+		{
+			name: "rejects an applied tag-policy marker for an unknown scope",
+			state: func() map[string]any {
+				state := rawScopeRegistryState(
+					rawScopeRegistryInstance(testDefaultScopeRef, testDefaultScopeRef, true),
+				)
+				appendRawTerraformStateResource(state, rawScopeTagPolicyResource(
+					rawScopeTagPolicyInstance(testSecondaryScopeRef, testSecondaryScopeRef, 0),
+				))
+				return state
+			}(),
+			wantError: "applied tag-policy marker for unknown scope",
+		},
+		{
+			name: "rejects a configuration snapshot without a registry",
+			state: rawTerraformStateWithResources([]any{
+				rawScopeConfigurationResource(
+					rawScopeConfigurationInstance(testDefaultScopeRef, testDefaultScopeRef, testScope(true)),
+				),
+			}),
+			wantError: "apparent scope-mode resources but no valid root terraform_data.scope_registry",
+		},
+		{
+			name: "rejects a configuration address and stored reference mismatch",
+			state: func() map[string]any {
+				state := rawScopeRegistryState(
+					rawScopeRegistryInstance(testDefaultScopeRef, testDefaultScopeRef, true),
+				)
+				appendRawTerraformStateResource(state, rawScopeConfigurationResource(
+					rawScopeConfigurationInstance(testDefaultScopeRef, testSecondaryScopeRef, testScope(true)),
+				))
+				return state
+			}(),
+			wantError: "scope configuration address key",
+		},
+		{
+			name: "rejects an unsupported configuration snapshot schema",
+			state: func() map[string]any {
+				state := rawScopeRegistryState(
+					rawScopeRegistryInstance(testDefaultScopeRef, testDefaultScopeRef, true),
+				)
+				configurationResource := rawScopeConfigurationResource(
+					rawScopeConfigurationInstance(testDefaultScopeRef, testDefaultScopeRef, testScope(true)),
+				)
+				instance := configurationResource["instances"].([]any)[0].(map[string]any)
+				attributes := instance["attributes"].(map[string]any)
+				input := attributes["input"].(map[string]any)
+				input["value"].(map[string]any)["schema_version"] = 2
+				appendRawTerraformStateResource(state, configurationResource)
+				return state
+			}(),
+			wantError: "unsupported schema_version",
+		},
+		{
+			name: "rejects a configuration snapshot for an unknown scope",
+			state: func() map[string]any {
+				state := rawScopeRegistryState(
+					rawScopeRegistryInstance(testDefaultScopeRef, testDefaultScopeRef, true),
+				)
+				appendRawTerraformStateResource(state, rawScopeConfigurationResource(
+					rawScopeConfigurationInstance(testSecondaryScopeRef, testSecondaryScopeRef, testScope(false)),
+				))
+				return state
+			}(),
+			wantError: "configuration snapshot for unknown scope",
 		},
 	}
 

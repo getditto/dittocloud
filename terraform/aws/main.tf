@@ -85,10 +85,12 @@ module "vpc" {
   source = "./vpc"
   count  = local.create_dittocloud_vpc ? 1 : 0
 
-  region   = local.root_region
-  vpc_name = local.default_vpc_name
-  vpc_cidr = local.default_vpc_cidr
-  tags     = var.tags
+  region                        = local.root_region
+  vpc_name                      = local.default_vpc_name
+  vpc_cidr                      = local.default_vpc_cidr
+  manage_kubernetes_cluster_tag = !local.scope_mode
+  nat_gateway_name              = local.default_nat_gateway_name
+  tags                          = local.default_scope_tags
 
   depends_on = [terraform_data.scope_registry]
 }
@@ -97,10 +99,11 @@ module "scoped_vpc" {
   source   = "./vpc"
   for_each = local.non_default_dittocloud_scopes
 
-  region                  = each.value.region
-  vpc_name                = each.value.vpc.name
-  vpc_cidr                = each.value.vpc.cidr
-  kubernetes_cluster_name = each.value.cluster_name
+  region                        = each.value.region
+  vpc_name                      = each.value.vpc.name
+  vpc_cidr                      = each.value.vpc.cidr
+  manage_kubernetes_cluster_tag = false
+  nat_gateway_name              = each.value.vpc.nat_gateway_name
   tags = merge(
     var.tags,
     { "ditto.live/scope-ref" = each.key },
@@ -142,8 +145,10 @@ module "cross_account_iam" {
   enable_eks                            = local.default_enable_eks
   customer_managed_vpc                  = local.default_customer_managed_vpc
   cluster_name                          = local.default_cluster_name
+  scope_identity_ref                    = local.scope_mode ? local.default_scope_ref : null
   vpc_id                                = local.effective_vpc_id
   vpc_subnet_ids                        = local.effective_vpc_subnet_ids
+  tags                                  = local.default_scope_tags
 
   depends_on = [terraform_data.scope_registry]
 }

@@ -1,7 +1,9 @@
 
 locals {
-  scope_enabled    = var.scope_ref != null
-  effective_region = coalesce(var.region, data.aws_region.current.region)
+  scope_enabled            = var.scope_ref != null
+  effective_scope_identity = var.scope_identity_ref != null ? var.scope_identity_ref : var.scope_ref
+  scope_identity_enabled   = local.effective_scope_identity != null
+  effective_region         = coalesce(var.region, data.aws_region.current.region)
 
   iam_names = {
     controller_role                 = local.scope_enabled ? "ditto-capa-controller-${var.scope_ref}" : "controllers.cluster-api-provider-aws.sigs.k8s.io"
@@ -60,13 +62,16 @@ locals {
       local.iam_names.eks_control_plane_role,
     ] : "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${role_name}"
   ] : ["arn:*:iam::*:role/*.cluster-api-provider-aws.sigs.k8s.io"]
+  capa_boundary_pass_role_arns = local.scope_enabled ? local.capa_pass_role_arns : [
+    "arn:aws:iam::*:role/*.cluster-api-provider-aws.sigs.k8s.io",
+  ]
   karpenter_queue_arn = local.scope_enabled ? "arn:aws:sqs:${local.effective_region}:${data.aws_caller_identity.current.account_id}:${local.iam_names.karpenter_queue}" : "arn:aws:sqs:*:*:karpenter-*"
   cluster_secret_arn  = local.scope_enabled ? "arn:aws:secretsmanager:*:*:secret:dittocluster/${var.scope_ref}/*" : "arn:aws:secretsmanager:*:*:secret:dittocluster/*"
 
   tags = merge(
     { "ditto.live/managed_by" = "dittocloud" },
     var.tags,
-    local.scope_enabled ? { "ditto.live/scope-ref" = var.scope_ref } : {},
+    local.scope_identity_enabled ? { "ditto.live/scope-ref" = local.effective_scope_identity } : {},
   )
 
   # Phase-2 lock-down: when cluster_name is set, IAM conditions switch from generic

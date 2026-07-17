@@ -67,7 +67,6 @@ readonly final_changes="$(jq -c -s '
       )
     | .test_plan.resource_changes[]?
     | select(.change.actions != ["no-op"])
-    | {address, actions: .change.actions}
   ]
 ' "${result_file}")"
 
@@ -76,10 +75,71 @@ if [[ "${final_plan_count}" != "1" ]]; then
   exit 1
 fi
 
-if [[ "${final_changes}" != "[]" ]]; then
-  echo "Equivalent default-scope plan changed existing infrastructure:" >&2
-  jq . <<<"${final_changes}" >&2
+readonly unexpected_final_changes="$(jq -c \
+  --arg scope_ref "${scope_ref}" \
+  --arg marker_address "terraform_data.scope_tag_policy[\"${scope_ref}\"]" \
+  --arg configuration_address "terraform_data.scope_configuration[\"${scope_ref}\"]" \
+  '
+  [
+    .[]
+    | select(
+        if .address == $marker_address then
+          .change.actions != ["create"] or
+          .mode != "managed" or
+          .type != "terraform_data" or
+          .name != "scope_tag_policy" or
+          .index != $scope_ref or
+          .provider_name != "terraform.io/builtin/terraform" or
+          .change.after.input != {
+            schema_version: 1,
+            scope_ref: $scope_ref,
+            policy_version: 0
+          }
+        elif .address == $configuration_address then
+          .change.actions != ["create"] or
+          .mode != "managed" or
+          .type != "terraform_data" or
+          .name != "scope_configuration" or
+          .index != $scope_ref or
+          .provider_name != "terraform.io/builtin/terraform" or
+          .change.after.input != {
+            schema_version: 1,
+            scope_ref: $scope_ref,
+            configuration: {
+              default: true,
+              cluster_name: "migration-eks",
+              cluster_type: "eks",
+              region: "ap-southeast-2",
+              scope_tag_policy_version: 0,
+              vpc: {
+                mode: "dittocloud",
+                name: "migration-vpc",
+                cidr: "10.220.0.0/16",
+                id: null,
+                nat_gateway_name: null
+              }
+            }
+          }
+        elif .address == "data.aws_iam_policy_document.karpenter_interruption[0]" then
+          .change.actions != ["read"]
+        elif .address == "aws_sqs_queue_policy.karpenter_interruption[0]" then
+          .change.actions != ["update"] or
+          (.change.before | del(.policy)) != .change.after or
+          .change.after_unknown != {policy: true}
+        else
+          .change.actions != ["update"] or
+          (.change.before | del(.tags, .tags_all)) != (.change.after | del(.tags, .tags_all)) or
+          .change.after.tags["ditto.live/scope-ref"] != $scope_ref
+        end
+      )
+    | {address, actions: .change.actions}
+  ]
+  ' <<<"${final_changes}")"
+
+if [[ "${unexpected_final_changes}" != "[]" ]]; then
+  echo "Equivalent default-scope plan contained a change other than the applied policy marker, applied configuration snapshot, and in-place scope identity tags:" >&2
+  jq . <<<"${unexpected_final_changes}" >&2
   exit 1
 fi
 
-echo "Legacy-to-default migration verified: registry seed only, then zero infrastructure changes."
+echo "Legacy-to-default migration verified: registry seed only, then one policy marker, one applied configuration snapshot, and in-place identity tags without replacement."

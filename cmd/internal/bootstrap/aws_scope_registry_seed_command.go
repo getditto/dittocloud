@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -165,7 +166,12 @@ func runAWSScopesSeedRegistry(cmd *cobra.Command, args []string) (runErr error) 
 	if !planChanged {
 		return fmt.Errorf("default-scope registry-seed plan contains no change; rerun preflight against the selected state")
 	}
+	// terraform-exec mirrors `terraform show -json` to its configured stdout
+	// while also decoding it. Keep that internal validation payload out of the
+	// user-facing command output, then restore normal command output.
+	tf.SetStdout(io.Discard)
 	plan, err := tf.ShowPlanFile(cmd.Context(), planPath)
+	tf.SetStdout(cmd.OutOrStdout())
 	if err != nil {
 		return fmt.Errorf("unable to inspect default-scope registry-seed plan: %w", err)
 	}
@@ -223,7 +229,12 @@ func runAWSScopesSeedRegistry(cmd *cobra.Command, args []string) (runErr error) 
 		return err
 	}
 
+	// Applying the one-resource saved plan otherwise prints every unchanged
+	// Terraform output, including the full legacy AWS output. The command emits
+	// its own concise backup and completion messages around this guarded apply.
+	tf.SetStdout(io.Discard)
 	applyErr := tf.Apply(cmd.Context(), tfexec.DirOrPlan(planPath))
+	tf.SetStdout(cmd.OutOrStdout())
 	if applyErr != nil {
 		retainTemporaryDirectory = true
 		return persistFailedAWSRegistrySeedApply(

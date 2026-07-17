@@ -192,6 +192,24 @@ run "vpc_and_cluster_conditions_match_supported_resources" {
 
   assert {
     condition = length([
+      for statement in jsondecode(aws_iam_policy.cluster_resources_boundary_policy.policy).Statement : statement
+      if contains(try(statement.Action, []), "iam:PassRole") &&
+      try(statement.Resource, null) == "arn:aws:iam::*:role/*.cluster-api-provider-aws.sigs.k8s.io"
+    ]) == 1
+    error_message = "The legacy cluster boundary must retain its existing aws-partition PassRole ARN during default-scope migration."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.capa_controller_base.policy).Statement : statement
+      if contains(try(statement.Action, []), "iam:PassRole") &&
+      try(statement.Resource[0], null) == "arn:*:iam::*:role/*.cluster-api-provider-aws.sigs.k8s.io"
+    ]) == 1
+    error_message = "The legacy controller policy must retain its existing partition-wildcard PassRole ARN during default-scope migration."
+  }
+
+  assert {
+    condition = length([
       for statement in jsondecode(aws_iam_policy.capa_controller_base.policy).Statement : statement
       if try(statement.Condition.StringEquals["ec2:Vpc"], null) != null && length(setintersection(
         toset(try(statement.Action, [])),
@@ -656,6 +674,45 @@ run "scoped_module_cannot_duplicate_the_shared_admin_role" {
   }
 
   expect_failures = [terraform_data.scope_contract[0]]
+}
+
+run "default_scope_identity_tags_preserve_legacy_names" {
+  command = plan
+
+  module {
+    source = "./cross_account_iam"
+  }
+
+  variables {
+    scope_identity_ref = "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"
+    tags = {
+      Owner                  = "platform"
+      "ditto.live/scope-ref" = "cannot-override"
+    }
+  }
+
+  assert {
+    condition = (
+      module.capa_controller_role.name == "controllers.cluster-api-provider-aws.sigs.k8s.io" &&
+      module.iam_trust_editor_role.name == "iam-trust-editor.ditto.live" &&
+      aws_iam_role.capa_nodes.name == "nodes.cluster-api-provider-aws.sigs.k8s.io" &&
+      aws_iam_role.capa_control_plane.name == "control-plane.cluster-api-provider-aws.sigs.k8s.io"
+    )
+    error_message = "A default scope identity must not suffix any legacy IAM names."
+  }
+
+  assert {
+    condition = alltrue([
+      local.tags["ditto.live/scope-ref"] == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
+      local.tags["Owner"] == "platform",
+      aws_iam_role.capa_nodes.tags["ditto.live/scope-ref"] == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
+      aws_iam_instance_profile.capa_nodes.tags["ditto.live/scope-ref"] == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
+      aws_iam_role.capa_control_plane.tags["ditto.live/scope-ref"] == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
+      aws_iam_instance_profile.capa_control_plane.tags["ditto.live/scope-ref"] == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
+      aws_iam_policy.capa_nodes.tags["ditto.live/scope-ref"] == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
+    ])
+    error_message = "Default-scope IAM resources must receive the exact reserved identity tag as an in-place tag-only migration."
+  }
 }
 
 run "scoped_names_paths_and_policy_arns_are_exact" {

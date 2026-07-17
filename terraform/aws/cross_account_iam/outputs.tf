@@ -1,8 +1,9 @@
 output "scope_iam" {
   description = "Exact IAM names and ARNs for this module instance. Scoped consumers must use these values rather than reconstructing names."
   value = {
-    scope_ref = var.scope_ref
-    region    = local.effective_region
+    scope_ref          = var.scope_ref
+    scope_identity_ref = local.effective_scope_identity
+    region             = local.effective_region
     confinement = {
       vpc_id     = var.vpc_id
       subnet_ids = sort(var.vpc_subnet_ids)

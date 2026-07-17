@@ -80,7 +80,7 @@ func maybeGenerateAWSLegacyScopesFile(cmd *cobra.Command) (handled bool, runErr 
 	}
 	if registry.Present {
 		return true, fmt.Errorf(
-			"Terraform state %q already contains a scope registry but scopes file %q is missing or empty; manual recovery is required",
+			"Terraform state %q already contains a scope registry but scopes file %q is missing or empty; run bootstrap aws scopes recover with this state and destination",
 			commandCanonicalStatePath(cmd),
 			scopesFilePath,
 		)

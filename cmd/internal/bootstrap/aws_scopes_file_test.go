@@ -30,8 +30,10 @@ func TestAWSDeploymentScopesDocumentPreservesCommentsAndOrder(t *testing.T) {
 		ClusterType: awsClusterTypeEKS,
 		Region:      "us-west-2",
 		VPC: AWSScopeVPC{
-			Mode: awsVPCModeExisting,
-			ID:   "vpc-09e877f9012f52241",
+			Mode:           awsVPCModeDittocloud,
+			Name:           "ditto-west",
+			CIDR:           "10.220.0.0/16",
+			NATGatewayName: "founding-cluster-nat",
 		},
 	})
 	if err != nil {
@@ -50,6 +52,9 @@ func TestAWSDeploymentScopesDocumentPreservesCommentsAndOrder(t *testing.T) {
 	}
 	if !strings.Contains(encodedString[secondaryIndex:], "scopeTagPolicyVersion: 0") {
 		t.Fatalf("new scope does not explicitly start at tag policy version 0:\n%s", encodedString)
+	}
+	if !strings.Contains(encodedString[secondaryIndex:], "natGatewayName: founding-cluster-nat") {
+		t.Fatalf("new scope omitted its stable NAT gateway Name:\n%s", encodedString)
 	}
 
 	if err := persistAWSDeploymentScopesFile(path, encoded, document.permissions); err != nil {
