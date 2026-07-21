@@ -266,10 +266,10 @@ func validateAWSScopesAddStateBoundary(
 			return fmt.Errorf("--default is required to create the first scope in a greenfield configuration")
 		}
 		if registry.Present {
-			return fmt.Errorf("Terraform state %q already contains a scope registry but the scopes file is empty; run bootstrap aws scopes recover", statePath)
+			return fmt.Errorf("terraform state %q already contains a scope registry but the scopes file is empty; run bootstrap aws scopes recover", statePath)
 		}
 		if !registry.StateEmpty {
-			return fmt.Errorf("Terraform state %q contains a legacy deployment; use the guarded legacy scopes-file generation workflow instead of scopes add --default", statePath)
+			return fmt.Errorf("terraform state %q contains a legacy deployment; use the guarded legacy scopes-file generation workflow instead of scopes add --default", statePath)
 		}
 		return nil
 	}

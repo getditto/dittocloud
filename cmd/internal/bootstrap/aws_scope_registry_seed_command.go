@@ -141,7 +141,7 @@ func runAWSScopesSeedRegistry(cmd *cobra.Command, args []string) (runErr error) 
 	}
 	terraformPath, err := GetTerraform(cmd.Context(), forceDownload)
 	if err != nil {
-		return fmt.Errorf("Terraform executable not available: %w", err)
+		return fmt.Errorf("terraform executable not available: %w", err)
 	}
 	tf, err := terraformFactory(workingDirectory, terraformPath)
 	if err != nil {
@@ -306,7 +306,7 @@ func preflightAWSRegistrySeed(statePath, scopesFilePath string) (awsScopeRegistr
 		return awsScopeRegistrySeedPreflight{}, err
 	}
 	if registry.Present {
-		return awsScopeRegistrySeedPreflight{}, fmt.Errorf("Terraform state %q already contains a scope registry; registry seeding is a one-time legacy migration", statePath)
+		return awsScopeRegistrySeedPreflight{}, fmt.Errorf("terraform state %q already contains a scope registry; registry seeding is a one-time legacy migration", statePath)
 	}
 	if registry.StateEmpty {
 		return awsScopeRegistrySeedPreflight{}, fmt.Errorf("registry seeding requires an existing non-empty legacy Terraform state")
@@ -323,7 +323,7 @@ func preflightAWSRegistrySeed(statePath, scopesFilePath string) (awsScopeRegistr
 		return awsScopeRegistrySeedPreflight{}, fmt.Errorf("unable to re-read legacy Terraform state %q: %w", statePath, err)
 	}
 	if !bytes.Equal(originalState, stateAfterDecode) {
-		return awsScopeRegistrySeedPreflight{}, fmt.Errorf("Terraform state %q changed during migration preflight; rerun the command", statePath)
+		return awsScopeRegistrySeedPreflight{}, fmt.Errorf("terraform state %q changed during migration preflight; rerun the command", statePath)
 	}
 	discovery, err := discoverAWSLegacyScope(state)
 	if err != nil {

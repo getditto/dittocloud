@@ -111,14 +111,14 @@ func createTerraformOperationBackup(
 		return terraformMigrationBackup{}, fmt.Errorf("unable to inspect Terraform state before migration backup: %w", err)
 	}
 	if !info.Mode().IsRegular() {
-		return terraformMigrationBackup{}, fmt.Errorf("Terraform state %q must be a regular file before migration backup", canonicalStatePath)
+		return terraformMigrationBackup{}, fmt.Errorf("terraform state %q must be a regular file before migration backup", canonicalStatePath)
 	}
 	currentState, err := os.ReadFile(canonicalStatePath)
 	if err != nil {
 		return terraformMigrationBackup{}, fmt.Errorf("unable to read Terraform state before migration backup: %w", err)
 	}
 	if !bytes.Equal(currentState, expectedState) {
-		return terraformMigrationBackup{}, fmt.Errorf("Terraform state %q changed after migration preflight; rerun the command", canonicalStatePath)
+		return terraformMigrationBackup{}, fmt.Errorf("terraform state %q changed after migration preflight; rerun the command", canonicalStatePath)
 	}
 
 	createdAt := terraformStateBackupNow().UTC()
@@ -131,10 +131,10 @@ func createTerraformOperationBackup(
 	}
 	backupContent, err := os.ReadFile(backupPath)
 	if err != nil || !bytes.Equal(backupContent, currentState) {
-		return terraformMigrationBackup{}, fmt.Errorf("Terraform migration state backup %q could not be verified", backupPath)
+		return terraformMigrationBackup{}, fmt.Errorf("terraform migration state backup %q could not be verified", backupPath)
 	}
 	if err := syncStateBackupDirectory(filepath.Dir(backupPath)); err != nil {
-		return terraformMigrationBackup{}, fmt.Errorf("Terraform migration state backup %q was written but its directory could not be flushed: %w", backupPath, err)
+		return terraformMigrationBackup{}, fmt.Errorf("terraform migration state backup %q was written but its directory could not be flushed: %w", backupPath, err)
 	}
 
 	stateDigest := sha256.Sum256(currentState)
@@ -164,7 +164,7 @@ func createTerraformOperationBackup(
 	manifestPath := backupPath + ".manifest.json"
 	if err := writeExclusiveSyncedFile(manifestPath, manifestContent, 0600); err != nil {
 		return terraformMigrationBackup{}, fmt.Errorf(
-			"Terraform migration state backup was retained at %q, but its manifest could not be written to %q: %w",
+			"terraform migration state backup was retained at %q, but its manifest could not be written to %q: %w",
 			backupPath,
 			manifestPath,
 			err,
@@ -172,7 +172,7 @@ func createTerraformOperationBackup(
 	}
 	if err := syncStateBackupDirectory(filepath.Dir(manifestPath)); err != nil {
 		return terraformMigrationBackup{}, fmt.Errorf(
-			"Terraform migration backup and manifest were retained at %q and %q, but their directory could not be flushed: %w",
+			"terraform migration backup and manifest were retained at %q and %q, but their directory could not be flushed: %w",
 			backupPath,
 			manifestPath,
 			err,

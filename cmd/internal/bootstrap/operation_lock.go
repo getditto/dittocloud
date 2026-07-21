@@ -152,7 +152,7 @@ func operationLockContentionError(canonicalStatePath, lockPath string) error {
 		var metadata operationLockMetadata
 		if json.Unmarshal(metadataContent, &metadata) == nil && metadata.PID != 0 {
 			return fmt.Errorf(
-				"Dittocloud operation already in progress for state %q: pid %d on %s started %s (%s)",
+				"dittocloud operation already in progress for state %q: pid %d on %s started %s (%s)",
 				canonicalStatePath,
 				metadata.PID,
 				metadata.Hostname,
@@ -162,7 +162,7 @@ func operationLockContentionError(canonicalStatePath, lockPath string) error {
 		}
 	}
 
-	return fmt.Errorf("Dittocloud operation already in progress for state %q; lock owner metadata is unavailable", canonicalStatePath)
+	return fmt.Errorf("dittocloud operation already in progress for state %q; lock owner metadata is unavailable", canonicalStatePath)
 }
 
 func (lock *stateOperationLock) Release() error {

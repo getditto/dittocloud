@@ -47,7 +47,7 @@ func loadAWSStateScopeTagInventory(
 		return nil, nil, err
 	}
 	if !exists {
-		return nil, nil, fmt.Errorf("Terraform state %q does not exist", statePath)
+		return nil, nil, fmt.Errorf("terraform state %q does not exist", statePath)
 	}
 
 	resources := make([]awsScopeTagExpectedResource, 0)
@@ -62,7 +62,7 @@ func loadAWSStateScopeTagInventory(
 			}
 			attributes, tags, err := decodeAWSStateTaggableAttributes(instance.Attributes)
 			if err != nil {
-				return nil, nil, fmt.Errorf("Terraform state resource %q has malformed tag attributes: %w", awsRawTerraformResourceAddress(resource, instance), err)
+				return nil, nil, fmt.Errorf("terraform state resource %q has malformed tag attributes: %w", awsRawTerraformResourceAddress(resource, instance), err)
 			}
 			if tags[awsScopeIdentityTagKey] != scopeRef {
 				continue
@@ -74,7 +74,7 @@ func loadAWSStateScopeTagInventory(
 			identity := expected.Type + "\x00" + expected.Identifier
 			if prior, duplicate := seen[identity]; duplicate {
 				return nil, nil, fmt.Errorf(
-					"Terraform state %q contains duplicate scope-tag inventory identity %s at %q and %q",
+					"terraform state %q contains duplicate scope-tag inventory identity %s at %q and %q",
 					statePath,
 					expected.Identifier,
 					prior,
@@ -86,7 +86,7 @@ func loadAWSStateScopeTagInventory(
 		}
 	}
 	if len(resources) == 0 {
-		return nil, nil, fmt.Errorf("Terraform state %q contains no Dittocloud-managed resources tagged for scope %q", statePath, scopeRef)
+		return nil, nil, fmt.Errorf("terraform state %q contains no Dittocloud-managed resources tagged for scope %q", statePath, scopeRef)
 	}
 	sort.Slice(resources, func(i, j int) bool { return resources[i].Address < resources[j].Address })
 
@@ -145,33 +145,33 @@ func awsScopeTagExpectedResourceFromState(
 
 	if _, ec2Resource := awsScopeTagEC2StateResourceTypes[resource.Type]; ec2Resource {
 		if identifier == "" {
-			return expected, fmt.Errorf("Terraform state scope-tag resource %q has no EC2 resource ID", address)
+			return expected, fmt.Errorf("terraform state scope-tag resource %q has no EC2 resource ID", address)
 		}
 		return expected, nil
 	}
 	switch resource.Type {
 	case "aws_iam_role", "aws_iam_instance_profile":
 		if identifier == "" {
-			return expected, fmt.Errorf("Terraform state scope-tag resource %q has no IAM name", address)
+			return expected, fmt.Errorf("terraform state scope-tag resource %q has no IAM name", address)
 		}
 	case "aws_iam_policy":
 		if arn == "" {
-			return expected, fmt.Errorf("Terraform state scope-tag resource %q has no IAM policy ARN", address)
+			return expected, fmt.Errorf("terraform state scope-tag resource %q has no IAM policy ARN", address)
 		}
 		expected.Identifier = arn
 	case "aws_sqs_queue":
 		if expected.QueueURL == "" || arn == "" {
-			return expected, fmt.Errorf("Terraform state scope-tag resource %q has no SQS queue URL or ARN", address)
+			return expected, fmt.Errorf("terraform state scope-tag resource %q has no SQS queue URL or ARN", address)
 		}
 		expected.Identifier = arn
 	case "aws_cloudwatch_event_rule":
 		if arn == "" {
-			return expected, fmt.Errorf("Terraform state scope-tag resource %q has no EventBridge rule ARN", address)
+			return expected, fmt.Errorf("terraform state scope-tag resource %q has no EventBridge rule ARN", address)
 		}
 		expected.Identifier = arn
 	default:
 		return expected, fmt.Errorf(
-			"Terraform state scope-tag resource %q uses unsupported verification type %q; update Dittocloud's built-in inventory catalog before enabling version 1",
+			"terraform state scope-tag resource %q uses unsupported verification type %q; update Dittocloud's built-in inventory catalog before enabling version 1",
 			address,
 			resource.Type,
 		)

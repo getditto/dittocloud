@@ -78,13 +78,13 @@ func loadAWSStateScopeRegistry(statePath string) (awsStateScopeRegistry, error) 
 		if resource.Type == "terraform_data" && resource.Name == "scope_registry" {
 			if !isAWSStateScopeRegistryResource(resource) {
 				return registry, fmt.Errorf(
-					"Terraform state %q contains terraform_data.scope_registry outside its required root managed address",
+					"terraform state %q contains terraform_data.scope_registry outside its required root managed address",
 					statePath,
 				)
 			}
 			registryResourceCount++
 			if registryResourceCount > 1 {
-				return registry, fmt.Errorf("Terraform state %q contains duplicate root terraform_data.scope_registry resources", statePath)
+				return registry, fmt.Errorf("terraform state %q contains duplicate root terraform_data.scope_registry resources", statePath)
 			}
 			if err := decodeAWSStateScopeRegistryResource(statePath, resource, &registry); err != nil {
 				return registry, err
@@ -95,13 +95,13 @@ func loadAWSStateScopeRegistry(statePath string) (awsStateScopeRegistry, error) 
 			registry.ApparentScopeData = true
 			if !isAWSStateScopeTagPolicyResource(resource) {
 				return registry, fmt.Errorf(
-					"Terraform state %q contains terraform_data.scope_tag_policy outside its required root managed address",
+					"terraform state %q contains terraform_data.scope_tag_policy outside its required root managed address",
 					statePath,
 				)
 			}
 			tagPolicyResourceCount++
 			if tagPolicyResourceCount > 1 {
-				return registry, fmt.Errorf("Terraform state %q contains duplicate root terraform_data.scope_tag_policy resources", statePath)
+				return registry, fmt.Errorf("terraform state %q contains duplicate root terraform_data.scope_tag_policy resources", statePath)
 			}
 			if err := decodeAWSStateScopeTagPolicyResource(statePath, resource, &registry); err != nil {
 				return registry, err
@@ -112,13 +112,13 @@ func loadAWSStateScopeRegistry(statePath string) (awsStateScopeRegistry, error) 
 			registry.ApparentScopeData = true
 			if !isAWSStateScopeConfigurationResource(resource) {
 				return registry, fmt.Errorf(
-					"Terraform state %q contains terraform_data.scope_configuration outside its required root managed address",
+					"terraform state %q contains terraform_data.scope_configuration outside its required root managed address",
 					statePath,
 				)
 			}
 			configurationResourceCount++
 			if configurationResourceCount > 1 {
-				return registry, fmt.Errorf("Terraform state %q contains duplicate root terraform_data.scope_configuration resources", statePath)
+				return registry, fmt.Errorf("terraform state %q contains duplicate root terraform_data.scope_configuration resources", statePath)
 			}
 			if err := decodeAWSStateScopeConfigurationResource(statePath, resource, &registry); err != nil {
 				return registry, err
@@ -132,7 +132,7 @@ func loadAWSStateScopeRegistry(statePath string) (awsStateScopeRegistry, error) 
 
 	if registry.Present {
 		if len(registry.Scopes) == 0 {
-			return registry, fmt.Errorf("Terraform state %q contains an empty scope registry", statePath)
+			return registry, fmt.Errorf("terraform state %q contains an empty scope registry", statePath)
 		}
 		defaultScopeRefs := make([]string, 0, 1)
 		for scopeRef, identity := range registry.Scopes {
@@ -143,7 +143,7 @@ func loadAWSStateScopeRegistry(statePath string) (awsStateScopeRegistry, error) 
 		sort.Strings(defaultScopeRefs)
 		if len(defaultScopeRefs) != 1 {
 			return registry, fmt.Errorf(
-				"Terraform state %q scope registry must contain exactly one default scope; found %d",
+				"terraform state %q scope registry must contain exactly one default scope; found %d",
 				statePath,
 				len(defaultScopeRefs),
 			)
@@ -152,7 +152,7 @@ func loadAWSStateScopeRegistry(statePath string) (awsStateScopeRegistry, error) 
 		for scopeRef := range registry.AppliedTagPolicyVersions {
 			if _, exists := registry.Scopes[scopeRef]; !exists {
 				return registry, fmt.Errorf(
-					"Terraform state %q contains an applied tag-policy marker for unknown scope %q",
+					"terraform state %q contains an applied tag-policy marker for unknown scope %q",
 					statePath,
 					scopeRef,
 				)
@@ -161,7 +161,7 @@ func loadAWSStateScopeRegistry(statePath string) (awsStateScopeRegistry, error) 
 		for scopeRef := range registry.Configurations {
 			if _, exists := registry.Scopes[scopeRef]; !exists {
 				return registry, fmt.Errorf(
-					"Terraform state %q contains a configuration snapshot for unknown scope %q",
+					"terraform state %q contains a configuration snapshot for unknown scope %q",
 					statePath,
 					scopeRef,
 				)
@@ -171,7 +171,7 @@ func loadAWSStateScopeRegistry(statePath string) (awsStateScopeRegistry, error) 
 
 	if !registry.Present && registry.ApparentScopeData {
 		return registry, fmt.Errorf(
-			"Terraform state %q contains apparent scope-mode resources but no valid root terraform_data.scope_registry; manual recovery is required",
+			"terraform state %q contains apparent scope-mode resources but no valid root terraform_data.scope_registry; manual recovery is required",
 			statePath,
 		)
 	}
@@ -185,7 +185,7 @@ func validateAWSLegacyModeState(statePath string) error {
 	}
 	if registry.Present {
 		return fmt.Errorf(
-			"Terraform state %q is managed in AWS scope mode; rerun with --scopes=true and the matching --scopes-file; no Terraform operation was run",
+			"terraform state %q is managed in AWS scope mode; rerun with --scopes=true and the matching --scopes-file; no Terraform operation was run",
 			statePath,
 		)
 	}
@@ -202,7 +202,7 @@ func loadRawTerraformState(statePath string) (rawTerraformState, bool, error) {
 		return state, false, fmt.Errorf("unable to read Terraform state %q: %w", statePath, err)
 	}
 	if len(bytes.TrimSpace(content)) == 0 {
-		return state, false, fmt.Errorf("Terraform state %q is empty and cannot be decoded", statePath)
+		return state, false, fmt.Errorf("terraform state %q is empty and cannot be decoded", statePath)
 	}
 	var topLevel map[string]json.RawMessage
 	if err := json.Unmarshal(content, &topLevel); err != nil {
@@ -210,7 +210,7 @@ func loadRawTerraformState(statePath string) (rawTerraformState, bool, error) {
 	}
 	for _, requiredField := range []string{"version", "terraform_version", "serial", "lineage", "outputs", "resources"} {
 		if topLevel[requiredField] == nil {
-			return state, false, fmt.Errorf("Terraform state %q is missing required field %q", statePath, requiredField)
+			return state, false, fmt.Errorf("terraform state %q is missing required field %q", statePath, requiredField)
 		}
 	}
 
@@ -220,23 +220,23 @@ func loadRawTerraformState(statePath string) (rawTerraformState, bool, error) {
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
 		if err == nil {
-			return state, false, fmt.Errorf("Terraform state %q contains multiple JSON values", statePath)
+			return state, false, fmt.Errorf("terraform state %q contains multiple JSON values", statePath)
 		}
-		return state, false, fmt.Errorf("Terraform state %q contains trailing malformed JSON: %w", statePath, err)
+		return state, false, fmt.Errorf("terraform state %q contains trailing malformed JSON: %w", statePath, err)
 	}
 	if state.Version != supportedTerraformStateVersion {
 		return state, false, fmt.Errorf(
-			"Terraform state %q uses unsupported format version %d; Dittocloud supports version %d",
+			"terraform state %q uses unsupported format version %d; Dittocloud supports version %d",
 			statePath,
 			state.Version,
 			supportedTerraformStateVersion,
 		)
 	}
 	if strings.TrimSpace(state.TerraformVersion) == "" || state.Serial < 0 || strings.TrimSpace(state.Lineage) == "" {
-		return state, false, fmt.Errorf("Terraform state %q has invalid version, serial, or lineage metadata", statePath)
+		return state, false, fmt.Errorf("terraform state %q has invalid version, serial, or lineage metadata", statePath)
 	}
 	if !jsonObject(topLevel["outputs"]) || !jsonArray(topLevel["resources"]) {
-		return state, false, fmt.Errorf("Terraform state %q outputs or resources have an invalid shape", statePath)
+		return state, false, fmt.Errorf("terraform state %q outputs or resources have an invalid shape", statePath)
 	}
 	return state, true, nil
 }
@@ -275,29 +275,29 @@ func isApparentAWSScopedResource(resource rawTerraformResource) bool {
 func decodeAWSStateScopeRegistryResource(statePath string, resource rawTerraformResource, registry *awsStateScopeRegistry) error {
 	registry.Present = true
 	if len(resource.Instances) == 0 {
-		return fmt.Errorf("Terraform state %q contains a scope registry with no instances", statePath)
+		return fmt.Errorf("terraform state %q contains a scope registry with no instances", statePath)
 	}
 
 	for _, instance := range resource.Instances {
 		if instance.Deposed != "" || instance.Status != "" {
-			return fmt.Errorf("Terraform state %q contains a deposed or non-ready scope registry instance", statePath)
+			return fmt.Errorf("terraform state %q contains a deposed or non-ready scope registry instance", statePath)
 		}
 
 		var scopeRef string
 		if len(instance.IndexKey) == 0 || json.Unmarshal(instance.IndexKey, &scopeRef) != nil || !awsScopeReferencePattern.MatchString(scopeRef) {
-			return fmt.Errorf("Terraform state %q contains an invalid scope registry address key", statePath)
+			return fmt.Errorf("terraform state %q contains an invalid scope registry address key", statePath)
 		}
 		if _, exists := registry.Scopes[scopeRef]; exists {
-			return fmt.Errorf("Terraform state %q contains duplicate scope registry key %q", statePath, scopeRef)
+			return fmt.Errorf("terraform state %q contains duplicate scope registry key %q", statePath, scopeRef)
 		}
 
 		identity, err := decodeAWSStateScopeIdentity(instance.Attributes)
 		if err != nil {
-			return fmt.Errorf("Terraform state %q scope registry key %q is invalid: %w", statePath, scopeRef, err)
+			return fmt.Errorf("terraform state %q scope registry key %q is invalid: %w", statePath, scopeRef, err)
 		}
 		if identity.ScopeRef != scopeRef {
 			return fmt.Errorf(
-				"Terraform state %q scope registry address key %q does not match stored scope_ref %q",
+				"terraform state %q scope registry address key %q does not match stored scope_ref %q",
 				statePath,
 				scopeRef,
 				identity.ScopeRef,
@@ -310,29 +310,29 @@ func decodeAWSStateScopeRegistryResource(statePath string, resource rawTerraform
 
 func decodeAWSStateScopeTagPolicyResource(statePath string, resource rawTerraformResource, registry *awsStateScopeRegistry) error {
 	if len(resource.Instances) == 0 {
-		return fmt.Errorf("Terraform state %q contains an applied tag-policy resource with no instances", statePath)
+		return fmt.Errorf("terraform state %q contains an applied tag-policy resource with no instances", statePath)
 	}
 
 	for _, instance := range resource.Instances {
 		if instance.Deposed != "" || instance.Status != "" {
-			return fmt.Errorf("Terraform state %q contains a deposed or non-ready applied tag-policy instance", statePath)
+			return fmt.Errorf("terraform state %q contains a deposed or non-ready applied tag-policy instance", statePath)
 		}
 
 		var scopeRef string
 		if len(instance.IndexKey) == 0 || json.Unmarshal(instance.IndexKey, &scopeRef) != nil || !awsScopeReferencePattern.MatchString(scopeRef) {
-			return fmt.Errorf("Terraform state %q contains an invalid applied tag-policy address key", statePath)
+			return fmt.Errorf("terraform state %q contains an invalid applied tag-policy address key", statePath)
 		}
 		if _, exists := registry.AppliedTagPolicyVersions[scopeRef]; exists {
-			return fmt.Errorf("Terraform state %q contains duplicate applied tag-policy key %q", statePath, scopeRef)
+			return fmt.Errorf("terraform state %q contains duplicate applied tag-policy key %q", statePath, scopeRef)
 		}
 
 		storedScopeRef, policyVersion, err := decodeAWSStateScopeTagPolicy(instance.Attributes)
 		if err != nil {
-			return fmt.Errorf("Terraform state %q applied tag-policy key %q is invalid: %w", statePath, scopeRef, err)
+			return fmt.Errorf("terraform state %q applied tag-policy key %q is invalid: %w", statePath, scopeRef, err)
 		}
 		if storedScopeRef != scopeRef {
 			return fmt.Errorf(
-				"Terraform state %q applied tag-policy address key %q does not match stored scope_ref %q",
+				"terraform state %q applied tag-policy address key %q does not match stored scope_ref %q",
 				statePath,
 				scopeRef,
 				storedScopeRef,
@@ -346,29 +346,29 @@ func decodeAWSStateScopeTagPolicyResource(statePath string, resource rawTerrafor
 func decodeAWSStateScopeConfigurationResource(statePath string, resource rawTerraformResource, registry *awsStateScopeRegistry) error {
 	registry.ConfigurationPresent = true
 	if len(resource.Instances) == 0 {
-		return fmt.Errorf("Terraform state %q contains a scope configuration resource with no instances", statePath)
+		return fmt.Errorf("terraform state %q contains a scope configuration resource with no instances", statePath)
 	}
 
 	for _, instance := range resource.Instances {
 		if instance.Deposed != "" || instance.Status != "" {
-			return fmt.Errorf("Terraform state %q contains a deposed or non-ready scope configuration instance", statePath)
+			return fmt.Errorf("terraform state %q contains a deposed or non-ready scope configuration instance", statePath)
 		}
 
 		var scopeRef string
 		if len(instance.IndexKey) == 0 || json.Unmarshal(instance.IndexKey, &scopeRef) != nil || !awsScopeReferencePattern.MatchString(scopeRef) {
-			return fmt.Errorf("Terraform state %q contains an invalid scope configuration address key", statePath)
+			return fmt.Errorf("terraform state %q contains an invalid scope configuration address key", statePath)
 		}
 		if _, exists := registry.Configurations[scopeRef]; exists {
-			return fmt.Errorf("Terraform state %q contains duplicate scope configuration key %q", statePath, scopeRef)
+			return fmt.Errorf("terraform state %q contains duplicate scope configuration key %q", statePath, scopeRef)
 		}
 
 		storedScopeRef, configuration, err := decodeAWSStateScopeConfiguration(instance.Attributes)
 		if err != nil {
-			return fmt.Errorf("Terraform state %q scope configuration key %q is invalid: %w", statePath, scopeRef, err)
+			return fmt.Errorf("terraform state %q scope configuration key %q is invalid: %w", statePath, scopeRef, err)
 		}
 		if storedScopeRef != scopeRef {
 			return fmt.Errorf(
-				"Terraform state %q scope configuration address key %q does not match stored scope_ref %q",
+				"terraform state %q scope configuration address key %q does not match stored scope_ref %q",
 				statePath,
 				scopeRef,
 				storedScopeRef,

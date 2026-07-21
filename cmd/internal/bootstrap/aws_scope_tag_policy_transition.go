@@ -206,18 +206,18 @@ func verifyAWSScopeTagPolicyReadiness(
 		return awsScopeTagVerificationReport{}, err
 	}
 	if !registry.Present {
-		return awsScopeTagVerificationReport{}, fmt.Errorf("Terraform state %q has no AWS scope registry", statePath)
+		return awsScopeTagVerificationReport{}, fmt.Errorf("terraform state %q has no AWS scope registry", statePath)
 	}
 	identity, exists := registry.Scopes[scopeRef]
 	if !exists {
-		return awsScopeTagVerificationReport{}, fmt.Errorf("Terraform state %q does not contain scope %q", statePath, scopeRef)
+		return awsScopeTagVerificationReport{}, fmt.Errorf("terraform state %q does not contain scope %q", statePath, scopeRef)
 	}
 	if identity.Default != verificationScope.Default {
 		return awsScopeTagVerificationReport{}, fmt.Errorf("scope %q default identity does not match Terraform state", scopeRef)
 	}
 	appliedPolicyVersion, exists := registry.AppliedTagPolicyVersions[scopeRef]
 	if !exists {
-		return awsScopeTagVerificationReport{}, fmt.Errorf("Terraform state %q has no applied tag-policy marker for scope %q", statePath, scopeRef)
+		return awsScopeTagVerificationReport{}, fmt.Errorf("terraform state %q has no applied tag-policy marker for scope %q", statePath, scopeRef)
 	}
 	if appliedPolicyVersion != expectedAppliedPolicyVersion {
 		return awsScopeTagVerificationReport{}, fmt.Errorf(
@@ -238,7 +238,7 @@ func verifyAWSScopeTagPolicyReadiness(
 
 	appliedConfiguration, exists := registry.Configurations[scopeRef]
 	if !exists {
-		return awsScopeTagVerificationReport{}, fmt.Errorf("Terraform state %q has no applied configuration snapshot for scope %q", statePath, scopeRef)
+		return awsScopeTagVerificationReport{}, fmt.Errorf("terraform state %q has no applied configuration snapshot for scope %q", statePath, scopeRef)
 	}
 	reviewedConfiguration := verificationScope
 	reviewedConfiguration.ClusterName = ""

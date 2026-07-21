@@ -142,7 +142,7 @@ func scopesFileLockContentionError(canonicalPath, lockPath string) error {
 		var metadata scopesFileLockMetadata
 		if json.Unmarshal(content, &metadata) == nil && metadata.PID != 0 {
 			return fmt.Errorf(
-				"Dittocloud scopes-file operation already in progress for %q: pid %d on %s started %s (%s)",
+				"dittocloud scopes-file operation already in progress for %q: pid %d on %s started %s (%s)",
 				canonicalPath,
 				metadata.PID,
 				metadata.Hostname,
@@ -151,7 +151,7 @@ func scopesFileLockContentionError(canonicalPath, lockPath string) error {
 			)
 		}
 	}
-	return fmt.Errorf("Dittocloud scopes-file operation already in progress for %q; lock owner metadata is unavailable", canonicalPath)
+	return fmt.Errorf("dittocloud scopes-file operation already in progress for %q; lock owner metadata is unavailable", canonicalPath)
 }
 
 func (lock *scopesFileLock) Release() error {

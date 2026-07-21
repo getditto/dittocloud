@@ -96,14 +96,14 @@ func recoverAWSDeploymentScopesFromState(statePath string) (AWSDeploymentScopes,
 		return nil, err
 	}
 	if registry.StateEmpty {
-		return nil, fmt.Errorf("Terraform state %q is empty; exact AWS scopes recovery requires a registry-backed applied state", statePath)
+		return nil, fmt.Errorf("terraform state %q is empty; exact AWS scopes recovery requires a registry-backed applied state", statePath)
 	}
 	if !registry.Present {
-		return nil, fmt.Errorf("Terraform state %q has no scope registry; exact AWS scopes recovery is unavailable", statePath)
+		return nil, fmt.Errorf("terraform state %q has no scope registry; exact AWS scopes recovery is unavailable", statePath)
 	}
 	if !registry.ConfigurationPresent {
 		return nil, fmt.Errorf(
-			"Terraform state %q has no scope configuration snapshots; exact AWS scopes recovery is unavailable and manual recovery is required",
+			"terraform state %q has no scope configuration snapshots; exact AWS scopes recovery is unavailable and manual recovery is required",
 			statePath,
 		)
 	}
@@ -117,7 +117,7 @@ func recoverAWSDeploymentScopesFromState(statePath string) (AWSDeploymentScopes,
 	sort.Strings(missingScopeRefs)
 	if len(missingScopeRefs) > 0 || len(registry.Configurations) != len(registry.Scopes) {
 		return nil, fmt.Errorf(
-			"Terraform state %q does not contain exactly one configuration snapshot for every registry-backed scope; missing snapshots: [%s]",
+			"terraform state %q does not contain exactly one configuration snapshot for every registry-backed scope; missing snapshots: [%s]",
 			statePath,
 			strings.Join(missingScopeRefs, ", "),
 		)
@@ -129,7 +129,7 @@ func recoverAWSDeploymentScopesFromState(statePath string) (AWSDeploymentScopes,
 		configuration := registry.Configurations[scopeRef]
 		if configuration.Default != identity.Default {
 			return nil, fmt.Errorf(
-				"Terraform state %q configuration snapshot for scope %q has default=%t but the identity registry has default=%t",
+				"terraform state %q configuration snapshot for scope %q has default=%t but the identity registry has default=%t",
 				statePath,
 				scopeRef,
 				configuration.Default,
@@ -139,7 +139,7 @@ func recoverAWSDeploymentScopesFromState(statePath string) (AWSDeploymentScopes,
 		appliedPolicyVersion := registry.AppliedTagPolicyVersions[scopeRef]
 		if configuration.ScopeTagPolicyVersion != appliedPolicyVersion {
 			return nil, fmt.Errorf(
-				"Terraform state %q configuration snapshot for scope %q has tag policy version %d but the applied marker has version %d",
+				"terraform state %q configuration snapshot for scope %q has tag policy version %d but the applied marker has version %d",
 				statePath,
 				scopeRef,
 				configuration.ScopeTagPolicyVersion,
@@ -149,7 +149,7 @@ func recoverAWSDeploymentScopesFromState(statePath string) (AWSDeploymentScopes,
 		recovered[scopeRef] = configuration
 	}
 	if err := recovered.Validate(); err != nil {
-		return nil, fmt.Errorf("Terraform state %q contains an invalid recovered AWS scopes configuration: %w", statePath, err)
+		return nil, fmt.Errorf("terraform state %q contains an invalid recovered AWS scopes configuration: %w", statePath, err)
 	}
 	return recovered, nil
 }

@@ -96,7 +96,7 @@ func (verifier *awsSDKScopeTagVerifier) verifyStateResources(
 	for _, resource := range request.State {
 		if resource.Region != "" && resource.Region != request.Scope.Region {
 			return nil, fmt.Errorf(
-				"Dittocloud-managed resource %q is recorded in Region %q, outside scope Region %q",
+				"dittocloud-managed resource %q is recorded in Region %q, outside scope Region %q",
 				resource.Address,
 				resource.Region,
 				request.Scope.Region,
