@@ -12,6 +12,18 @@
       ]
     },
     {
+      "Sid": "EKSManagedMachinePoolASGStatus",
+      "Effect": "Allow",
+      "Action": [
+        "autoscaling:DescribeAutoScalingGroups",
+        "autoscaling:DescribeLaunchConfigurations",
+        "autoscaling:DescribeTags"
+      ],
+      "Resource": [
+        "*"
+      ]
+    },
+    {
       "Effect": "Allow",
       "Action": [
         "iam:CreateServiceLinkedRole"
