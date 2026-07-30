@@ -1,0 +1,189 @@
+package bootstrap
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/netip"
+	"os"
+	"regexp"
+	"sort"
+	"strings"
+
+	"gopkg.in/yaml.v3"
+)
+
+const (
+	awsVPCModeDittocloud    = "dittocloud"
+	awsVPCModeCAPI          = "capi"
+	awsVPCModeExisting      = "existing"
+	awsClusterTypeKubeadm   = "kubeadm"
+	awsClusterTypeEKS       = "eks"
+	awsScopeReferenceLength = 30
+)
+
+var (
+	awsScopeReferencePattern = regexp.MustCompile(`^dsc-[0-7][0-9a-hjkmnp-tv-z]{25}$`)
+	awsClusterNamePattern    = regexp.MustCompile(`^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$`)
+	awsRegionPattern         = regexp.MustCompile(`^[a-z]{2}(?:-[a-z0-9]+)+-[0-9]+$`)
+	awsVPCIDPattern          = regexp.MustCompile(`^vpc-(?:[0-9a-f]{8}|[0-9a-f]{17})$`)
+)
+
+// AWSDeploymentScopes is the desired set of Dittocloud deployments in one AWS
+// account. The map key is the immutable scope reference shared with downstream
+// services; it is distinct from the optional Kubernetes cluster name.
+type AWSDeploymentScopes map[string]AWSDeploymentScope
+
+type AWSDeploymentScope struct {
+	Default               bool        `yaml:"default,omitempty" json:"default"`
+	ClusterName           string      `yaml:"clusterName,omitempty" json:"cluster_name,omitempty"`
+	ClusterType           string      `yaml:"clusterType,omitempty" json:"cluster_type"`
+	Region                string      `yaml:"region" json:"region"`
+	ScopeTagPolicyVersion int         `yaml:"scopeTagPolicyVersion,omitempty" json:"scope_tag_policy_version"`
+	VPC                   AWSScopeVPC `yaml:"vpc" json:"vpc"`
+}
+
+type AWSScopeVPC struct {
+	Mode           string `yaml:"mode" json:"mode"`
+	Name           string `yaml:"name,omitempty" json:"name,omitempty"`
+	CIDR           string `yaml:"cidr,omitempty" json:"cidr,omitempty"`
+	ID             string `yaml:"id,omitempty" json:"id,omitempty"`
+	NATGatewayName string `yaml:"natGatewayName,omitempty" json:"nat_gateway_name,omitempty"`
+}
+
+func loadAWSDeploymentScopes(path string) (AWSDeploymentScopes, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("unable to read AWS scopes file %q: %w", path, err)
+	}
+	return decodeAWSDeploymentScopes(content, path)
+}
+
+func decodeAWSDeploymentScopes(content []byte, path string) (AWSDeploymentScopes, error) {
+	var scopes AWSDeploymentScopes
+	decoder := yaml.NewDecoder(bytes.NewReader(content))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&scopes); err != nil {
+		if err == io.EOF {
+			return nil, fmt.Errorf("invalid AWS scopes file %q: at least one deployment scope is required", path)
+		}
+		return nil, fmt.Errorf("unable to decode AWS scopes file %q: %w", path, err)
+	}
+
+	var trailingDocument any
+	if err := decoder.Decode(&trailingDocument); err != io.EOF {
+		if err != nil {
+			return nil, fmt.Errorf("unable to decode AWS scopes file %q: %w", path, err)
+		}
+		return nil, fmt.Errorf("AWS scopes file %q must contain exactly one YAML document", path)
+	}
+
+	for scopeRef, scope := range scopes {
+		if scope.ClusterType == "" {
+			scope.ClusterType = awsClusterTypeKubeadm
+			scopes[scopeRef] = scope
+		}
+	}
+
+	if err := scopes.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid AWS scopes file %q: %w", path, err)
+	}
+	return scopes, nil
+}
+
+func (scopes AWSDeploymentScopes) Validate() error {
+	if len(scopes) == 0 {
+		return fmt.Errorf("at least one deployment scope is required")
+	}
+
+	scopeRefs := make([]string, 0, len(scopes))
+	for scopeRef := range scopes {
+		scopeRefs = append(scopeRefs, scopeRef)
+	}
+	sort.Strings(scopeRefs)
+
+	defaultScopeCount := 0
+	for _, scopeRef := range scopeRefs {
+		scope := scopes[scopeRef]
+		if !awsScopeReferencePattern.MatchString(scopeRef) {
+			return fmt.Errorf("scope reference %q must be exactly %d characters in generated dsc-<lowercase-crockford-ulid> form", scopeRef, awsScopeReferenceLength)
+		}
+		if scope.Default {
+			defaultScopeCount++
+		}
+		if err := validateAWSDeploymentScopeFields(scopeRef, scope); err != nil {
+			return err
+		}
+	}
+
+	if defaultScopeCount != 1 {
+		return fmt.Errorf("exactly one deployment scope must set default: true; found %d", defaultScopeCount)
+	}
+	return validateAWSGeneratedScopeNames(scopes)
+}
+
+func validateAWSDeploymentScopeFields(scopeRef string, scope AWSDeploymentScope) error {
+	if scope.ClusterType != awsClusterTypeKubeadm && scope.ClusterType != awsClusterTypeEKS {
+		return fmt.Errorf("scope %q clusterType must be %q or %q", scopeRef, awsClusterTypeKubeadm, awsClusterTypeEKS)
+	}
+	if scope.ScopeTagPolicyVersion != 0 && scope.ScopeTagPolicyVersion != 1 {
+		return fmt.Errorf("scope %q scopeTagPolicyVersion must be 0 or 1", scopeRef)
+	}
+	if scope.ScopeTagPolicyVersion == 1 && scope.ClusterName == "" {
+		return fmt.Errorf("scope %q scopeTagPolicyVersion 1 requires one exact clusterName", scopeRef)
+	}
+	if scope.ClusterName != "" {
+		if len(scope.ClusterName) > 63 || !awsClusterNamePattern.MatchString(scope.ClusterName) {
+			return fmt.Errorf("scope %q clusterName %q must be a lowercase DNS label with at most 63 characters", scopeRef, scope.ClusterName)
+		}
+	}
+	if !awsRegionPattern.MatchString(scope.Region) {
+		return fmt.Errorf("scope %q region %q is not a valid AWS region name", scopeRef, scope.Region)
+	}
+	return validateAWSScopeVPC(scopeRef, scope.VPC)
+}
+
+func validateAWSScopeVPC(scopeRef string, vpc AWSScopeVPC) error {
+	switch vpc.Mode {
+	case awsVPCModeDittocloud:
+		if strings.TrimSpace(vpc.Name) == "" {
+			return fmt.Errorf("scope %q requires vpc.name when vpc.mode is %q", scopeRef, awsVPCModeDittocloud)
+		}
+		prefix, err := netip.ParsePrefix(vpc.CIDR)
+		if err != nil || !prefix.Addr().Is4() {
+			return fmt.Errorf("scope %q vpc.cidr %q must be a valid IPv4 CIDR", scopeRef, vpc.CIDR)
+		}
+		if vpc.ID != "" {
+			return fmt.Errorf("scope %q cannot set vpc.id when vpc.mode is %q", scopeRef, awsVPCModeDittocloud)
+		}
+		if vpc.NATGatewayName != "" && (strings.TrimSpace(vpc.NATGatewayName) != vpc.NATGatewayName || len(vpc.NATGatewayName) > 256) {
+			return fmt.Errorf("scope %q vpc.natGatewayName must contain 1 to 256 non-whitespace-bounded characters", scopeRef)
+		}
+	case awsVPCModeCAPI:
+		if vpc.Name != "" || vpc.CIDR != "" || vpc.NATGatewayName != "" {
+			return fmt.Errorf("scope %q cannot set vpc.name, vpc.cidr, or vpc.natGatewayName when vpc.mode is %q", scopeRef, awsVPCModeCAPI)
+		}
+		if vpc.ID != "" && !awsVPCIDPattern.MatchString(vpc.ID) {
+			return fmt.Errorf("scope %q vpc.id %q must be a valid VPC ID", scopeRef, vpc.ID)
+		}
+	case awsVPCModeExisting:
+		if !awsVPCIDPattern.MatchString(vpc.ID) {
+			return fmt.Errorf("scope %q requires a valid vpc.id when vpc.mode is %q", scopeRef, awsVPCModeExisting)
+		}
+		if vpc.Name != "" || vpc.CIDR != "" || vpc.NATGatewayName != "" {
+			return fmt.Errorf("scope %q cannot set vpc.name, vpc.cidr, or vpc.natGatewayName when vpc.mode is %q", scopeRef, awsVPCModeExisting)
+		}
+	default:
+		return fmt.Errorf("scope %q vpc.mode must be one of %q, %q, or %q", scopeRef, awsVPCModeDittocloud, awsVPCModeCAPI, awsVPCModeExisting)
+	}
+	return nil
+}
+
+func marshalAWSDeploymentScopes(scopes AWSDeploymentScopes) (string, error) {
+	encoded, err := json.Marshal(scopes)
+	if err != nil {
+		return "", fmt.Errorf("unable to marshal AWS deployment scopes: %w", err)
+	}
+	return string(encoded), nil
+}

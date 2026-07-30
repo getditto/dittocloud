@@ -7,35 +7,48 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/getditto/dittocloud/cmd/internal/log"
 	"github.com/hashicorp/terraform-exec/tfexec"
+	tfjson "github.com/hashicorp/terraform-json"
 	"github.com/spf13/cobra"
 )
 
 // mockTerraformExecutor records terraform operations for verification
 type mockTerraformExecutor struct {
 	// Call counts
-	initCallCount   int
-	importCallCount int
-	planCallCount   int
-	applyCallCount  int
+	initCallCount     int
+	importCallCount   int
+	planCallCount     int
+	showPlanCallCount int
+	applyCallCount    int
 
 	workingDir  string
 	importCalls []mockImportCall
 	importState []byte
 
 	// Parsed variables from Plan() call
-	PlanVars map[string]string
+	PlanVars    map[string]string
+	planTargets []string
+	planOutPath string
 
 	// Return values
-	planReturnChanged bool
-	planReturnError   error
-	importReturnError error
-	applyReturnError  error
-	outputReturn      map[string]tfexec.OutputMeta
+	planReturnChanged   bool
+	planReturnError     error
+	showPlanReturn      *tfjson.Plan
+	showPlanReturnError error
+	importReturnError   error
+	importReturnErrorAt int
+	applyReturnError    error
+	applyState          []byte
+	applyPlanPath       string
+	outputReturn        map[string]tfexec.OutputMeta
+	stdout              io.Writer
+	showPlanStdout      io.Writer
+	applyStdout         io.Writer
 }
 
 type mockImportCall struct {
@@ -60,7 +73,7 @@ func (m *mockTerraformExecutor) Import(ctx context.Context, address, id string, 
 	}
 	m.importCalls = append(m.importCalls, mockImportCall{address: address, id: id, vars: vars})
 
-	if m.importReturnError != nil {
+	if m.importReturnError != nil && (m.importReturnErrorAt == 0 || m.importReturnErrorAt == m.importCallCount) {
 		return m.importReturnError
 	}
 	if m.importState != nil {
@@ -80,13 +93,43 @@ func (m *mockTerraformExecutor) Plan(ctx context.Context, opts ...tfexec.PlanOpt
 		if key, value, ok := terraformVarOption(opt); ok {
 			m.PlanVars[key] = value
 		}
+		switch opt.(type) {
+		case *tfexec.TargetOption:
+			if target, ok := terraformOptionString(opt); ok {
+				m.planTargets = append(m.planTargets, target)
+			}
+		case *tfexec.OutOption:
+			if path, ok := terraformOptionString(opt); ok {
+				m.planOutPath = path
+			}
+		}
 	}
 
 	return m.planReturnChanged, m.planReturnError
 }
 
+func (m *mockTerraformExecutor) ShowPlanFile(ctx context.Context, planPath string, opts ...tfexec.ShowOption) (*tfjson.Plan, error) {
+	m.showPlanCallCount++
+	m.showPlanStdout = m.stdout
+	return m.showPlanReturn, m.showPlanReturnError
+}
+
 func (m *mockTerraformExecutor) Apply(ctx context.Context, opts ...tfexec.ApplyOption) error {
 	m.applyCallCount++
+	m.applyStdout = m.stdout
+	for _, opt := range opts {
+		if _, isDirOrPlan := opt.(*tfexec.DirOrPlanOption); !isDirOrPlan {
+			continue
+		}
+		if dirOrPlan, ok := terraformOptionString(opt); ok {
+			m.applyPlanPath = dirOrPlan
+		}
+	}
+	if m.applyState != nil {
+		if err := os.WriteFile(filepath.Join(m.workingDir, "terraform.tfstate"), m.applyState, 0600); err != nil {
+			return err
+		}
+	}
 	return m.applyReturnError
 }
 
@@ -94,7 +137,7 @@ func (m *mockTerraformExecutor) Output(ctx context.Context, opts ...tfexec.Outpu
 	return m.outputReturn, nil
 }
 
-func (m *mockTerraformExecutor) SetStdout(w io.Writer) {}
+func (m *mockTerraformExecutor) SetStdout(w io.Writer) { m.stdout = w }
 
 func (m *mockTerraformExecutor) SetStderr(w io.Writer) {}
 
@@ -123,9 +166,38 @@ func terraformVarOption(opt any) (string, string, bool) {
 	return "", "", false
 }
 
+func terraformOptionString(opt any) (string, bool) {
+	value := reflect.ValueOf(opt)
+	if value.Kind() != reflect.Pointer || value.IsNil() {
+		return "", false
+	}
+	value = value.Elem()
+	if value.Kind() != reflect.Struct {
+		return "", false
+	}
+	for index := 0; index < value.NumField(); index++ {
+		field := value.Field(index)
+		if field.Kind() == reflect.String && field.String() != "" {
+			return field.String(), true
+		}
+	}
+	return "", false
+}
+
 // setupBootstrapTest creates a test environment with a mocked terraform executor
 func setupBootstrapTest(t *testing.T, args []string) (*cobra.Command, *mockTerraformExecutor) {
 	t.Helper()
+
+	hasStatePath := false
+	for _, arg := range args {
+		if arg == "--state" || strings.HasPrefix(arg, "--state=") {
+			hasStatePath = true
+			break
+		}
+	}
+	if !hasStatePath {
+		args = append(slices.Clone(args), "--state="+filepath.Join(t.TempDir(), "terraform.tfstate"))
+	}
 
 	ctx := log.WithLogger(context.Background(), log.Setup("debug"))
 
@@ -205,10 +277,7 @@ func TestParseResourceImports(t *testing.T) {
 
 func TestBootstrap(t *testing.T) {
 	t.Run("should import resources, persist state, show a plan, and never apply", func(t *testing.T) {
-		statePath := filepath.Join(t.TempDir(), "terraform.tfstate")
-		if err := os.WriteFile(statePath, []byte(`{"serial":1}`), 0600); err != nil {
-			t.Fatalf("unable to create test state: %v", err)
-		}
+		statePath := writeTerraformStateTestFile(t, rawTerraformStateWithResources([]any{}))
 
 		cmd, mock := setupBootstrapTest(t, []string{
 			"aws",
@@ -255,10 +324,10 @@ func TestBootstrap(t *testing.T) {
 	})
 
 	t.Run("should stop before plan when an import fails", func(t *testing.T) {
-		statePath := filepath.Join(t.TempDir(), "terraform.tfstate")
-		originalState := []byte(`{"serial":1}`)
-		if err := os.WriteFile(statePath, originalState, 0600); err != nil {
-			t.Fatalf("unable to create test state: %v", err)
+		statePath := writeTerraformStateTestFile(t, rawTerraformStateWithResources([]any{}))
+		originalState, err := os.ReadFile(statePath)
+		if err != nil {
+			t.Fatalf("unable to read test state: %v", err)
 		}
 
 		cmd, mock := setupBootstrapTest(t, []string{
@@ -269,7 +338,7 @@ func TestBootstrap(t *testing.T) {
 		})
 		mock.importReturnError = errors.New("resource is already managed")
 
-		err := cmd.Execute()
+		err = cmd.Execute()
 		if err == nil || !strings.Contains(err.Error(), "unable to import Terraform resource") {
 			t.Fatalf("expected import error, got %v", err)
 		}

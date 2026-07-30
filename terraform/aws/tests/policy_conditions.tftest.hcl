@@ -22,6 +22,10 @@ mock_provider "aws" {
 run "vpc_and_cluster_conditions_match_supported_resources" {
   command = plan
 
+  module {
+    source = "./cross_account_iam"
+  }
+
   variables {
     cluster_name = "test-cluster"
     vpc_id       = "vpc-09e877f9012f52241"
@@ -184,6 +188,24 @@ run "vpc_and_cluster_conditions_match_supported_resources" {
       ])
     ]) == 1
     error_message = "The trust editor must explicitly deny permissions-boundary replacement and removal for managed roles."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.cluster_resources_boundary_policy.policy).Statement : statement
+      if contains(try(statement.Action, []), "iam:PassRole") &&
+      try(statement.Resource, null) == "arn:aws:iam::*:role/*.cluster-api-provider-aws.sigs.k8s.io"
+    ]) == 1
+    error_message = "The legacy cluster boundary must retain its existing aws-partition PassRole ARN during default-scope migration."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.capa_controller_base.policy).Statement : statement
+      if contains(try(statement.Action, []), "iam:PassRole") &&
+      try(statement.Resource[0], null) == "arn:*:iam::*:role/*.cluster-api-provider-aws.sigs.k8s.io"
+    ]) == 1
+    error_message = "The legacy controller policy must retain its existing partition-wildcard PassRole ARN during default-scope migration."
   }
 
   assert {
@@ -455,6 +477,10 @@ run "vpc_and_cluster_conditions_match_supported_resources" {
 run "security_group_mutations_without_vpc_require_project_tag" {
   command = plan
 
+  module {
+    source = "./cross_account_iam"
+  }
+
   assert {
     condition = length([
       for statement in jsondecode(aws_iam_policy.cluster_resources_boundary_policy.policy).Statement : statement
@@ -508,6 +534,10 @@ run "security_group_mutations_without_vpc_require_project_tag" {
 run "eks_permissions_are_attached_when_enabled" {
   command = plan
 
+  module {
+    source = "./cross_account_iam"
+  }
+
   variables {
     enable_eks = true
   }
@@ -526,5 +556,284 @@ run "eks_permissions_are_attached_when_enabled" {
       length(aws_iam_role_policy_attachment.capa_eks_control_plane) == 1
     )
     error_message = "enable_eks must create the EKS control-plane service role and attach AmazonEKSClusterPolicy."
+  }
+}
+
+run "legacy_names_and_policy_paths_remain_unchanged" {
+  command = plan
+
+  module {
+    source = "./cross_account_iam"
+  }
+
+  variables {
+    enable_eks = true
+  }
+
+  assert {
+    condition = (
+      module.capa_controller_role.name == "controllers.cluster-api-provider-aws.sigs.k8s.io" &&
+      module.iam_trust_editor_role.name == "iam-trust-editor.ditto.live" &&
+      module.iam_admin_view_role.name == "iam-admin-view.ditto.live" &&
+      aws_iam_role.capa_nodes.name == "nodes.cluster-api-provider-aws.sigs.k8s.io" &&
+      aws_iam_role.capa_control_plane.name == "control-plane.cluster-api-provider-aws.sigs.k8s.io" &&
+      aws_iam_role.capa_eks_control_plane[0].name == "eks-controlplane.cluster-api-provider-aws.sigs.k8s.io"
+    )
+    error_message = "A null scope_ref must preserve every legacy IAM role name."
+  }
+
+  assert {
+    condition = (
+      aws_iam_policy.iam_trust_editor_policy.name == "ditto-iam-trust-editor-policy" &&
+      aws_iam_policy.cluster_resources_boundary_policy.name == "ditto-cluster-resources-boundary-policy" &&
+      aws_iam_policy.cluster_external_resources_boundary_policy.name == "ditto-cluster-external-resources-boundary-policy" &&
+      aws_iam_policy.capa_controller_base.name == "ditto-capa-controller-policy" &&
+      aws_iam_policy.capa_controller_network.name == "ditto-capa-controller-network-policy" &&
+      aws_iam_policy.capa_controller_elb.name == "ditto-capa-controller-elb-policy" &&
+      aws_iam_policy.capa_controller_vpc_lifecycle[0].name == "ditto-capa-controller-vpc-lifecycle-policy" &&
+      aws_iam_policy.capa_controller_eks_policy[0].name == "ditto-capa-controller-eks-policy"
+    )
+    error_message = "A null scope_ref must preserve every legacy IAM policy and boundary name."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.iam_trust_editor_policy.policy).Statement : statement
+      if contains(try(statement.Action, []), "iam:CreateRole") &&
+      try(statement.Resource, null) == "arn:aws:iam::520778242457:role/dittocluster/*" &&
+      toset(try(statement.Condition.StringEquals["iam:PermissionsBoundary"], [])) == toset([
+        "arn:aws:iam::520778242457:policy/ditto-cluster-resources-boundary-policy",
+        "arn:aws:iam::520778242457:policy/ditto-cluster-external-resources-boundary-policy",
+      ])
+    ]) == 1
+    error_message = "A null scope_ref must preserve the legacy trust-editor path and boundary ARNs."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.cluster_resources_boundary_policy.policy).Statement : statement
+      if contains(try(statement.Action, []), "sqs:ReceiveMessage") &&
+      try(statement.Resource, null) == "arn:aws:sqs:*:*:karpenter-*"
+    ]) == 1
+    error_message = "A null scope_ref must preserve the legacy Karpenter queue wildcard."
+  }
+}
+
+run "rejects_more_than_nine_existing_vpc_subnets" {
+  command = plan
+
+  module {
+    source = "./cross_account_iam"
+  }
+
+  variables {
+    customer_managed_vpc = true
+    vpc_id               = "vpc-09e877f9012f52241"
+    vpc_subnet_ids = [
+      "subnet-00000000000000001",
+      "subnet-00000000000000002",
+      "subnet-00000000000000003",
+      "subnet-00000000000000004",
+      "subnet-00000000000000005",
+      "subnet-00000000000000006",
+      "subnet-00000000000000007",
+      "subnet-00000000000000008",
+      "subnet-00000000000000009",
+      "subnet-00000000000000010",
+    ]
+  }
+
+  expect_failures = [var.vpc_subnet_ids]
+}
+
+run "scoped_module_requires_an_explicit_region" {
+  command = plan
+
+  module {
+    source = "./cross_account_iam"
+  }
+
+  variables {
+    scope_ref              = "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"
+    create_admin_view_role = false
+  }
+
+  expect_failures = [terraform_data.scope_contract[0]]
+}
+
+run "scoped_module_cannot_duplicate_the_shared_admin_role" {
+  command = plan
+
+  module {
+    source = "./cross_account_iam"
+  }
+
+  variables {
+    scope_ref = "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"
+    region    = "ap-southeast-2"
+  }
+
+  expect_failures = [terraform_data.scope_contract[0]]
+}
+
+run "default_scope_identity_tags_preserve_legacy_names" {
+  command = plan
+
+  module {
+    source = "./cross_account_iam"
+  }
+
+  variables {
+    scope_identity_ref = "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"
+    tags = {
+      Owner                  = "platform"
+      "ditto.live/scope-ref" = "cannot-override"
+    }
+  }
+
+  assert {
+    condition = (
+      module.capa_controller_role.name == "controllers.cluster-api-provider-aws.sigs.k8s.io" &&
+      module.iam_trust_editor_role.name == "iam-trust-editor.ditto.live" &&
+      aws_iam_role.capa_nodes.name == "nodes.cluster-api-provider-aws.sigs.k8s.io" &&
+      aws_iam_role.capa_control_plane.name == "control-plane.cluster-api-provider-aws.sigs.k8s.io"
+    )
+    error_message = "A default scope identity must not suffix any legacy IAM names."
+  }
+
+  assert {
+    condition = alltrue([
+      local.tags["ditto.live/scope-ref"] == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
+      local.tags["Owner"] == "platform",
+      aws_iam_role.capa_nodes.tags["ditto.live/scope-ref"] == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
+      aws_iam_instance_profile.capa_nodes.tags["ditto.live/scope-ref"] == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
+      aws_iam_role.capa_control_plane.tags["ditto.live/scope-ref"] == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
+      aws_iam_instance_profile.capa_control_plane.tags["ditto.live/scope-ref"] == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
+      aws_iam_policy.capa_nodes.tags["ditto.live/scope-ref"] == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
+    ])
+    error_message = "Default-scope IAM resources must receive the exact reserved identity tag as an in-place tag-only migration."
+  }
+}
+
+run "scoped_names_paths_and_policy_arns_are_exact" {
+  command = plan
+
+  module {
+    source = "./cross_account_iam"
+  }
+
+  variables {
+    scope_ref              = "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"
+    region                 = "ap-southeast-2"
+    create_admin_view_role = false
+    enable_eks             = true
+    vpc_id                 = "vpc-09e877f9012f52241"
+    vpc_subnet_ids = [
+      "subnet-00000000000000001",
+      "subnet-00000000000000002",
+    ]
+    tags = {
+      Owner                  = "platform"
+      "ditto.live/scope-ref" = "cannot-override"
+    }
+  }
+
+  assert {
+    condition = (
+      module.capa_controller_role.name == "ditto-capa-controller-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" &&
+      module.iam_trust_editor_role.name == "ditto-iam-trust-editor-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" &&
+      aws_iam_role.capa_nodes.name == "ditto-capa-nodes-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" &&
+      aws_iam_role.capa_control_plane.name == "ditto-capa-control-plane-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" &&
+      aws_iam_role.capa_eks_control_plane[0].name == "ditto-capa-eks-control-plane-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"
+    )
+    error_message = "Scoped IAM roles must use the exact accepted scopeRef-suffixed names."
+  }
+
+  assert {
+    condition = (
+      aws_iam_policy.iam_trust_editor_policy.name == "ditto-iam-trust-editor-policy-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" &&
+      aws_iam_policy.cluster_resources_boundary_policy.name == "ditto-cluster-resources-boundary-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" &&
+      aws_iam_policy.cluster_external_resources_boundary_policy.name == "ditto-cluster-external-boundary-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" &&
+      aws_iam_policy.capa_controller_base.name == "ditto-capa-controller-base-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" &&
+      aws_iam_policy.capa_controller_vpc_lifecycle[0].name == "ditto-capa-controller-vpc-lifecycle-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"
+    )
+    error_message = "Scoped IAM policies and boundaries must use the exact accepted scopeRef-suffixed names."
+  }
+
+  assert {
+    condition     = module.iam_admin_view_role.name == null
+    error_message = "A scoped IAM module must not duplicate the shared account-wide admin view role."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.iam_trust_editor_policy.policy).Statement : statement
+      if contains(try(statement.Action, []), "iam:CreateRole") &&
+      try(statement.Resource, null) == "arn:aws:iam::520778242457:role/dittocluster/dsc-01k2m8g7n4p6q9r3t5v8x1y2z3/*" &&
+      toset(try(statement.Condition.StringEquals["iam:PermissionsBoundary"], [])) == toset([
+        "arn:aws:iam::520778242457:policy/ditto-cluster-resources-boundary-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
+        "arn:aws:iam::520778242457:policy/ditto-cluster-external-boundary-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
+      ])
+    ]) == 1
+    error_message = "The scoped trust editor must manage only its scope path and require only its exact boundaries."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.capa_controller_base.policy).Statement : statement
+      if contains(try(statement.Action, []), "iam:PassRole") &&
+      toset(try(statement.Resource, [])) == toset([
+        "arn:aws:iam::520778242457:role/ditto-capa-nodes-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
+        "arn:aws:iam::520778242457:role/ditto-capa-control-plane-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
+        "arn:aws:iam::520778242457:role/ditto-capa-eks-control-plane-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
+      ])
+    ]) == 1
+    error_message = "The scoped CAPA controller must pass only its own exact roles."
+  }
+
+  assert {
+    condition = alltrue([
+      for policy in [
+        aws_iam_policy.capa_controller_eks_policy[0].policy,
+        aws_iam_policy.cluster_resources_boundary_policy.policy,
+        ] : length([
+          for statement in jsondecode(policy).Statement : statement
+          if contains(try(statement.Action, []), "iam:PassRole") &&
+          toset(try(statement.Resource, [])) == toset([
+            "arn:aws:iam::520778242457:role/ditto-capa-nodes-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
+            "arn:aws:iam::520778242457:role/ditto-capa-control-plane-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
+            "arn:aws:iam::520778242457:role/ditto-capa-eks-control-plane-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
+          ])
+      ]) == 1
+    ])
+    error_message = "The scoped EKS controller policy and cluster boundary must pass only their scope's exact roles."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.cluster_resources_boundary_policy.policy).Statement : statement
+      if contains(try(statement.Action, []), "sqs:ReceiveMessage") &&
+      try(statement.Resource, null) == "arn:aws:sqs:ap-southeast-2:520778242457:karpenter-interruption-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"
+    ]) == 1
+    error_message = "The scoped boundary must consume only its exact Karpenter interruption queue."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.cluster_external_resources_boundary_policy.policy).Statement : statement
+      if contains(try(statement.Action, []), "secretsmanager:CreateSecret") &&
+      try(statement.Resource, null) == ["arn:aws:secretsmanager:*:*:secret:dittocluster/dsc-01k2m8g7n4p6q9r3t5v8x1y2z3/*"]
+    ]) == 1
+    error_message = "The scoped external boundary must be limited to its own secrets path."
+  }
+
+  assert {
+    condition = (
+      aws_iam_policy.capa_nodes.tags["ditto.live/scope-ref"] == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" &&
+      aws_iam_policy.capa_nodes.tags["Owner"] == "platform" &&
+      local.ec2_vpc_arn == "arn:aws:ec2:ap-southeast-2:520778242457:vpc/vpc-09e877f9012f52241" &&
+      length(terraform_data.scoped_name_validation) == length(local.scoped_generated_names)
+    )
+    error_message = "Scoped IAM resources must carry the reserved identity tag and validate every generated name."
   }
 }

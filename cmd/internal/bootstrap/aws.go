@@ -3,7 +3,9 @@ package bootstrap
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/fatih/color"
@@ -18,7 +20,105 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 		Use:   "aws",
 		Short: "Bootstrap AWS",
 		Long:  "Bootstrap AWS",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) (runErr error) {
+			defer releaseCommandOperationLockOnError(cmd, &runErr)
+			generated, err := maybeGenerateAWSLegacyScopesFile(cmd)
+			if err != nil {
+				return err
+			}
+			if generated {
+				return nil
+			}
+
+			scopeMode, scopes, encodedScopes, allowedScopeRemovals, err := validateAWSScopesFlags(cmd.Flags())
+			if err != nil {
+				return err
+			}
+			if scopeMode {
+				if err := validateAWSStateScopeLifecycle(
+					commandCanonicalStatePath(cmd),
+					scopes,
+					allowedScopeRemovals,
+				); err != nil {
+					return err
+				}
+				profile, err := cmd.Flags().GetString("aws-profile")
+				if err != nil {
+					return fmt.Errorf("unable to get aws-profile: %w", err)
+				}
+				transitionConfiguration, authorizedPolicyRefs, err := prepareAWSScopeTagPolicyTransition(
+					commandCanonicalStatePath(cmd),
+					profile,
+					scopes,
+				)
+				if err != nil {
+					return err
+				}
+				legacyVersionZeroClusterPolicyRefs, err := detectAWSLegacyVersionZeroClusterPolicyRefs(
+					commandCanonicalStatePath(cmd),
+					scopes,
+				)
+				if err != nil {
+					return err
+				}
+				if len(transitionConfiguration.Scopes) > 0 {
+					if cmd.Flags().Changed("import-resource") {
+						return fmt.Errorf("--import-resource cannot be combined with a scopeTagPolicyVersion 0 to 1 transition; complete imports at version 0 first")
+					}
+					cmd.SetContext(setAWSScopeTagPolicyTransitionConfiguration(cmd.Context(), transitionConfiguration))
+				}
+				if cmd.Flags().Changed("import-resource") {
+					importValues, err := cmd.Flags().GetStringArray("import-resource")
+					if err != nil {
+						return fmt.Errorf("unable to get import-resource: %w", err)
+					}
+					imports, err := parseResourceImports(importValues)
+					if err != nil {
+						return err
+					}
+					configuration, err := prepareAWSScopedImportConfiguration(
+						commandCanonicalStatePath(cmd),
+						scopes,
+						encodedScopes,
+						imports,
+					)
+					if err != nil {
+						return err
+					}
+					cmd.SetContext(setAWSScopedImportConfiguration(cmd.Context(), configuration))
+				} else {
+					initialMigrationConfiguration, initialMigration, err := prepareAWSInitialScopeMigrationPlanConfiguration(
+						commandCanonicalStatePath(cmd),
+						scopes,
+					)
+					if err != nil {
+						return err
+					}
+					if initialMigration {
+						cmd.SetContext(setAWSInitialScopeMigrationPlanConfiguration(cmd.Context(), initialMigrationConfiguration))
+					}
+				}
+				scopeVars, err := awsScopeTerraformVariables(
+					cmd.Flags(),
+					encodedScopes,
+					authorizedPolicyRefs,
+					legacyVersionZeroClusterPolicyRefs,
+				)
+				if err != nil {
+					return err
+				}
+				if err := writeAWSScopesSummary(cmd.OutOrStdout(), scopes); err != nil {
+					return fmt.Errorf("unable to display AWS deployment scope summary: %w", err)
+				}
+				for _, value := range scopeVars {
+					*vars = append(*vars, tfexec.Var(value))
+				}
+				return nil
+			}
+			if err := validateAWSLegacyModeState(commandCanonicalStatePath(cmd)); err != nil {
+				return err
+			}
+
 			customerManagedVPC, err := cmd.Flags().GetBool("customer-managed-vpc")
 			if err != nil {
 				return fmt.Errorf("unable to get customer-managed-vpc: %w", err)
@@ -74,8 +174,179 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 	cmd.Flags().Bool("customer-managed-vpc", false, "Set when the customer provides their own VPC; skips VPC creation and omits VPC lifecycle permissions from the CAPA controller role")
 	cmd.Flags().String("vpc-id", "", "ID of an existing VPC; required with --customer-managed-vpc so CAPA EC2 operations can be restricted to it")
 	cmd.Flags().String("cluster-name", "", "Tighten IAM conditions to a specific cluster name; requires an existing state file (re-runs only)")
+	cmd.Flags().Bool("scopes", false, "Enable AWS multi-scope mode using a scopes YAML file")
+	cmd.Flags().String("scopes-file", "", "Path to an AWS deployment scopes YAML file; requires --scopes")
+	cmd.Flags().Bool("generate-scopes-file", false, "Generate a review-only default-scope YAML draft from legacy Terraform state; requires --scopes")
+	cmd.Flags().StringArray(
+		"allow-scope-removal",
+		[]string{},
+		"Authorize omission of one state-backed non-default scope reference (repeatable; requires --scopes)",
+	)
+	cmd.AddCommand(awsScopesCmd())
 
 	return cmd
+}
+
+func validateAWSScopesFlags(flags *pflag.FlagSet) (bool, AWSDeploymentScopes, string, []string, error) {
+	scopeMode, err := flags.GetBool("scopes")
+	if err != nil {
+		return false, nil, "", nil, fmt.Errorf("unable to get scopes: %w", err)
+	}
+	scopesFile, err := flags.GetString("scopes-file")
+	if err != nil {
+		return false, nil, "", nil, fmt.Errorf("unable to get scopes-file: %w", err)
+	}
+	allowedScopeRemovals, err := flags.GetStringArray("allow-scope-removal")
+	if err != nil {
+		return false, nil, "", nil, fmt.Errorf("unable to get allow-scope-removal: %w", err)
+	}
+
+	if !scopeMode {
+		if strings.TrimSpace(scopesFile) != "" {
+			return false, nil, "", nil, fmt.Errorf("--scopes-file requires --scopes=true")
+		}
+		if flags.Changed("allow-scope-removal") {
+			return false, nil, "", nil, fmt.Errorf("--allow-scope-removal requires --scopes=true")
+		}
+		return false, nil, "", nil, nil
+	}
+	if strings.TrimSpace(scopesFile) == "" {
+		return false, nil, "", nil, fmt.Errorf("--scopes-file is required with --scopes=true")
+	}
+	if flags.Changed("tf-var") {
+		return false, nil, "", nil, fmt.Errorf("--tf-var cannot be used with --scopes=true; scope mode accepts only validated scope YAML and explicit account-level flags")
+	}
+
+	legacyScopeFlags := []string{
+		"aws-region",
+		"aws-vpc-name",
+		"aws-vpc-cidr",
+		"create-vpc",
+		"enable-eks",
+		"customer-managed-vpc",
+		"vpc-id",
+		"cluster-name",
+	}
+	for _, flagName := range legacyScopeFlags {
+		if flags.Changed(flagName) {
+			return false, nil, "", nil, fmt.Errorf("--%s cannot be used with --scopes=true; configure it in the scopes YAML", flagName)
+		}
+	}
+
+	scopes, err := loadAWSDeploymentScopes(scopesFile)
+	if err != nil {
+		return false, nil, "", nil, err
+	}
+	encodedScopes, err := marshalAWSDeploymentScopes(scopes)
+	if err != nil {
+		return false, nil, "", nil, err
+	}
+	return true, scopes, encodedScopes, allowedScopeRemovals, nil
+}
+
+func writeAWSScopesSummary(writer io.Writer, scopes AWSDeploymentScopes) error {
+	scopeRefs := sortedAWSDeploymentScopeRefs(scopes)
+
+	if _, err := fmt.Fprintf(writer, "AWS deployment scopes (%d):\n", len(scopeRefs)); err != nil {
+		return err
+	}
+	for _, scopeRef := range scopeRefs {
+		scope := scopes[scopeRef]
+		defaultMarker := ""
+		if scope.Default {
+			defaultMarker = " [default]"
+		}
+		natGatewayName := ""
+		if scope.VPC.NATGatewayName != "" {
+			natGatewayName = " natGatewayName=" + scope.VPC.NATGatewayName
+		}
+		clusterName := ""
+		if scope.ClusterName != "" {
+			clusterName = " clusterName=" + scope.ClusterName
+		}
+		if _, err := fmt.Fprintf(
+			writer,
+			"  - %s%s: region=%s clusterType=%s vpcMode=%s%s scopeTagPolicyVersion=%d%s\n",
+			scopeRef,
+			defaultMarker,
+			scope.Region,
+			scope.ClusterType,
+			scope.VPC.Mode,
+			clusterName,
+			scope.ScopeTagPolicyVersion,
+			natGatewayName,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func sortedAWSDeploymentScopeRefs(scopes AWSDeploymentScopes) []string {
+	scopeRefs := make([]string, 0, len(scopes))
+	for scopeRef := range scopes {
+		scopeRefs = append(scopeRefs, scopeRef)
+	}
+	sort.Strings(scopeRefs)
+	return scopeRefs
+}
+
+// awsScopeTerraformVariables returns the complete account-level input shared by
+// every deployment scope. Scope-owned values are carried only in the validated
+// deployment_scopes object.
+func awsScopeTerraformVariables(
+	flags *pflag.FlagSet,
+	encodedScopes string,
+	authorizedPolicyRefs []string,
+	legacyVersionZeroClusterPolicyRefs []string,
+) ([]string, error) {
+	values := []string{"deployment_scopes=" + encodedScopes}
+	if len(authorizedPolicyRefs) > 0 {
+		encodedRefs, err := json.Marshal(authorizedPolicyRefs)
+		if err != nil {
+			return nil, fmt.Errorf("unable to marshal verified scope tag-policy references: %w", err)
+		}
+		values = append(values, "scope_tag_policy_cli_authorized_refs="+string(encodedRefs))
+	}
+	if len(legacyVersionZeroClusterPolicyRefs) > 0 {
+		encodedRefs, err := json.Marshal(legacyVersionZeroClusterPolicyRefs)
+		if err != nil {
+			return nil, fmt.Errorf("unable to marshal preserved legacy version-0 cluster-policy references: %w", err)
+		}
+		values = append(values, "scope_tag_policy_v0_legacy_cluster_refs="+string(encodedRefs))
+	}
+
+	if flags.Changed("aws-profile") {
+		profile, err := flags.GetString("aws-profile")
+		if err != nil {
+			return nil, fmt.Errorf("unable to get aws-profile: %w", err)
+		}
+		values = append(values, "profile="+profile)
+	}
+
+	sharedARNFlags := []struct {
+		flagName     string
+		variableName string
+	}{
+		{flagName: "controller-trusted-role-arns", variableName: "controller_trusted_role_arns"},
+		{flagName: "iam-trusted-role-arns", variableName: "iam_trusted_role_arns"},
+	}
+	for _, sharedFlag := range sharedARNFlags {
+		if !flags.Changed(sharedFlag.flagName) {
+			continue
+		}
+		arns, err := flags.GetStringArray(sharedFlag.flagName)
+		if err != nil {
+			return nil, fmt.Errorf("unable to get %s: %w", sharedFlag.flagName, err)
+		}
+		encodedARNs, err := json.Marshal(arns)
+		if err != nil {
+			return nil, fmt.Errorf("unable to marshal %s: %w", sharedFlag.flagName, err)
+		}
+		values = append(values, sharedFlag.variableName+"="+string(encodedARNs))
+	}
+
+	return values, nil
 }
 
 func promptAWSValues(flags *pflag.FlagSet) ([]*tfexec.VarOption, error) {

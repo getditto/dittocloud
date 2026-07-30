@@ -4,6 +4,60 @@ variable "enable_eks" {
   default     = false
 }
 
+variable "scope_ref" {
+  type        = string
+  description = "Immutable generated deployment-scope reference. Null preserves all legacy IAM names and paths."
+  default     = null
+  nullable    = true
+
+  validation {
+    condition = (
+      var.scope_ref == null ||
+      (length(var.scope_ref) == 30 && can(regex("^dsc-[0-7][0-9a-hjkmnp-tv-z]{25}$", var.scope_ref)))
+    )
+    error_message = "scope_ref must be null or exactly 30 characters in generated dsc-<lowercase-crockford-ulid> form."
+  }
+}
+
+variable "scope_identity_ref" {
+  type        = string
+  description = "Immutable deployment-scope identity used for tags and tag-policy enforcement. It may be set while scope_ref stays null so the default scope preserves legacy names."
+  default     = null
+  nullable    = true
+
+  validation {
+    condition = (
+      var.scope_identity_ref == null ||
+      (length(var.scope_identity_ref) == 30 && can(regex("^dsc-[0-7][0-9a-hjkmnp-tv-z]{25}$", var.scope_identity_ref)))
+    )
+    error_message = "scope_identity_ref must be null or exactly 30 characters in generated dsc-<lowercase-crockford-ulid> form."
+  }
+}
+
+variable "region" {
+  type        = string
+  description = "AWS Region owned by this deployment scope. Null preserves the provider Region used by legacy callers."
+  default     = null
+  nullable    = true
+
+  validation {
+    condition     = var.region == null || can(regex("^[a-z]{2}(?:-[a-z0-9]+)+-[0-9]+$", var.region))
+    error_message = "region must be null or a valid AWS Region name."
+  }
+}
+
+variable "create_admin_view_role" {
+  type        = bool
+  description = "Whether to create the shared account-wide IAM admin view role. Scoped module instances must disable it."
+  default     = true
+}
+
+variable "tags" {
+  type        = map(string)
+  description = "Additional tags for scope-owned IAM resources. The reserved scope identity tag cannot be overridden."
+  default     = {}
+}
+
 variable "controller_trusted_role_arns" {
   type = list(string)
 

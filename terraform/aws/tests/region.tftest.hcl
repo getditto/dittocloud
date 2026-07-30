@@ -1,0 +1,63 @@
+mock_provider "aws" {
+  mock_data "aws_availability_zones" {
+    defaults = {
+      names = [
+        "ap-southeast-2a",
+        "ap-southeast-2b",
+        "ap-southeast-2c",
+      ]
+    }
+  }
+
+  mock_data "aws_region" {
+    defaults = {
+      region = "us-east-1"
+    }
+  }
+
+  mock_data "aws_partition" {
+    defaults = {
+      reverse_dns_prefix = "com.amazonaws"
+    }
+  }
+
+  mock_data "aws_iam_policy_document" {
+    defaults = {
+      json          = jsonencode({ Version = "2012-10-17", Statement = [] })
+      minified_json = jsonencode({ Version = "2012-10-17", Statement = [] })
+    }
+  }
+
+}
+
+run "uses_the_explicit_scope_region" {
+  command = plan
+
+  module {
+    source = "./vpc"
+  }
+
+  variables {
+    region                        = "ap-southeast-2"
+    vpc_name                      = "scope-vpc"
+    vpc_cidr                      = "10.210.0.0/16"
+    kubernetes_cluster_name       = "scope-cluster"
+    manage_kubernetes_cluster_tag = false
+    nat_gateway_name              = "founding-cluster-nat"
+    tags = {
+      "ditto.live/scope-ref" = "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"
+    }
+  }
+
+  assert {
+    condition = (
+      local.region == "ap-southeast-2" &&
+      data.aws_availability_zones.available.region == "ap-southeast-2" &&
+      output.valet_web_config.id == "ap-southeast-2" &&
+      local.tags["ditto.live/scope-ref"] == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" &&
+      length(local.kubernetes_cluster_tags) == 0 &&
+      local.nat_gateway_tags.Name == "founding-cluster-nat"
+    )
+    error_message = "A scoped VPC must use its explicit Region, retain its NAT Name, and leave cluster membership tags to Cluster API."
+  }
+}

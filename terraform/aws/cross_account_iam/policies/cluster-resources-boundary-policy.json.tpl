@@ -156,14 +156,14 @@
         "sqs:GetQueueUrl",
         "sqs:ReceiveMessage"
       ],
-      "Resource": "arn:aws:sqs:*:*:karpenter-*"
+      "Resource": ${jsonencode(karpenter_queue_arn)}
     },
     {
       "Effect": "Allow",
       "Action": [
         "iam:PassRole"
       ],
-      "Resource": "arn:aws:iam::*:role/*.cluster-api-provider-aws.sigs.k8s.io"
+      "Resource": ${capa_pass_role_resource}
     },
     {
       "Effect": "Allow",
@@ -186,7 +186,7 @@
         "secretsmanager:DescribeSecret"
       ],
       "Resource": [
-        "arn:aws:secretsmanager:*:*:secret:dittocluster/*"
+        ${jsonencode(cluster_secret_arn)}
       ]
     },
     {

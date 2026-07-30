@@ -5,6 +5,7 @@ terraform.tfstate.backup
 *.tfvars
 *.tfstate
 *.tfstate.*
+*.dittocloud.lock
 # Added by goreleaser init:
 dist/
 .vscode/

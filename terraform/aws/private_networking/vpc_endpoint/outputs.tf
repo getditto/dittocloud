@@ -1,11 +1,11 @@
 output "endpoint" {
   description = "VPC Endpoint details"
   value = {
-    id               = aws_vpc_endpoint.main.id
-    state            = aws_vpc_endpoint.main.state
-    service_name     = aws_vpc_endpoint.main.service_name
-    vpc_id           = aws_vpc_endpoint.main.vpc_id
-    subnet_ids       = aws_vpc_endpoint.main.subnet_ids
+    id                    = aws_vpc_endpoint.main.id
+    state                 = aws_vpc_endpoint.main.state
+    service_name          = aws_vpc_endpoint.main.service_name
+    vpc_id                = aws_vpc_endpoint.main.vpc_id
+    subnet_ids            = aws_vpc_endpoint.main.subnet_ids
     network_interface_ids = aws_vpc_endpoint.main.network_interface_ids
   }
 }

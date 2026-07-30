@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,6 +16,7 @@ import (
 	"github.com/getditto/dittocloud/cmd/internal/log"
 	"github.com/getditto/dittocloud/terraform"
 	"github.com/hashicorp/terraform-exec/tfexec"
+	tfjson "github.com/hashicorp/terraform-json"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -24,6 +26,7 @@ type TerraformExecutor interface {
 	Init(context.Context, ...tfexec.InitOption) error
 	Import(context.Context, string, string, ...tfexec.ImportOption) error
 	Plan(context.Context, ...tfexec.PlanOption) (bool, error)
+	ShowPlanFile(context.Context, string, ...tfexec.ShowOption) (*tfjson.Plan, error)
 	Apply(context.Context, ...tfexec.ApplyOption) error
 	Output(context.Context, ...tfexec.OutputOption) (map[string]tfexec.OutputMeta, error)
 	SetStdout(io.Writer)
@@ -41,6 +44,8 @@ var defaultTerraformFactory TerraformFactory = func(workingDir string, execPath 
 // terraformFactory is the factory used by the code (can be replaced in tests)
 var terraformFactory = defaultTerraformFactory
 
+var terraformApplyPrompt = StringPrompt
+
 type resourceImport struct {
 	address string
 	id      string
@@ -55,7 +60,6 @@ func BootstrapCmd() *cobra.Command {
 
 	header := color.New(color.FgCyan, color.Bold)
 	progress := color.New(color.FgMagenta)
-	failure := color.New(color.FgRed, color.Bold)
 	cmd := &cobra.Command{
 		Use:   "bootstrap",
 		Short: "Bootstrap a cloud provider",
@@ -70,15 +74,42 @@ func BootstrapCmd() *cobra.Command {
 			ctx := log.WithLogger(cmd.Context(), logger)
 			cmd.SetContext(ctx)
 
+			operation := "bootstrap " + cmd.Name()
+			if flag := cmd.Flags().Lookup("generate-scopes-file"); flag != nil && flag.Value.String() == "true" {
+				operation += " generate legacy scopes file"
+			} else if len(resourceImports) > 0 {
+				operation += " import"
+			} else if cmd.Flag("dry-run").Value.String() == "true" {
+				operation += " dry-run"
+			}
+			operationLock, err := acquireStateOperationLock(cmd.Flag("state").Value.String(), operation)
+			if err != nil {
+				return err
+			}
+			setCommandOperationLock(cmd, operationLock)
+
 			// Log the start of bootstrap
-			logger.Debug("Starting Ditto Cloud Bootstrap", "command", cmd.Name())
+			logger.Debug(
+				"Starting Ditto Cloud Bootstrap",
+				"command", cmd.Name(),
+				"state", operationLock.canonicalStatePath,
+			)
 
 			_, _ = header.Println("══════════════════════════════════════════════════")
 			_, _ = header.Println("               Ditto Cloud Bootstrap              ")
 			_, _ = header.Println("══════════════════════════════════════════════════")
 			return nil
 		},
-		PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
+		PersistentPostRunE: func(cmd *cobra.Command, args []string) (postRunErr error) {
+			defer func() {
+				if err := releaseCommandOperationLock(cmd); err != nil {
+					postRunErr = errors.Join(postRunErr, fmt.Errorf("unable to release Dittocloud operation lock: %w", err))
+				}
+			}()
+			if commandSkipsTerraformLifecycle(cmd) {
+				return nil
+			}
+
 			logger := log.FromContext(cmd.Context())
 			color.NoColor = cmd.Flag("no-color").Value.String() == "true"
 
@@ -86,15 +117,38 @@ func BootstrapCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			scopedImportConfiguration, scopedImport := commandAWSScopedImportConfiguration(cmd.Context())
+			if scopedImport {
+				imports = slices.Clone(scopedImportConfiguration.Imports)
+			}
 			importOnly := len(imports) > 0
+			tagPolicyTransition, hasTagPolicyTransition := commandAWSScopeTagPolicyTransitionConfiguration(cmd.Context())
+			if hasTagPolicyTransition {
+				reports, err := verifyAWSScopeTagPolicyTransitions(cmd.Context(), tagPolicyTransition)
+				if err != nil {
+					return fmt.Errorf("version-1 tag verification before Terraform plan failed: %w", err)
+				}
+				for _, report := range reports {
+					_, _ = progress.Printf(
+						"Verified scope %q for cluster %q before Terraform plan.\n",
+						report.ScopeRef,
+						report.ClusterName,
+					)
+				}
+			}
 
 			// Copy the packaged terrafrom files into a temporary directory
 			tmpDir, err := os.MkdirTemp(os.TempDir(), "dittocloud")
 			if err != nil {
 				return fmt.Errorf("unable to create temporary directory: %w", err)
 			}
+			retainTmpDir := false
 			if cmd.Flag("remove-tmpdir").Value.String() == "true" {
-				defer func() { _ = os.Remove(tmpDir) }()
+				defer func() {
+					if !retainTmpDir {
+						_ = os.RemoveAll(tmpDir)
+					}
+				}()
 			}
 
 			_, _ = progress.Printf("Copying terraform files to temporary directory %q\n", tmpDir)
@@ -111,7 +165,7 @@ func BootstrapCmd() *cobra.Command {
 			workingDir := filepath.Join(tmpDir, provider)
 			_, _ = progress.Printf("Using %q provider\n", provider)
 
-			localStateFilePath := cmd.Flag("state").Value.String()
+			localStateFilePath := commandCanonicalStatePath(cmd)
 			tmpStateFilePath := filepath.Join(workingDir, "terraform.tfstate")
 
 			if _, err := os.Stat(localStateFilePath); err == nil {
@@ -123,11 +177,13 @@ func BootstrapCmd() *cobra.Command {
 				if err := os.WriteFile(tmpStateFilePath, input, 0600); err != nil {
 					return fmt.Errorf("unable to write state file to temporary directory: %w", err)
 				}
-			} else {
+			} else if errors.Is(err, os.ErrNotExist) {
 				_, _ = progress.Printf(
 					"No local state file found, new state file will be created at %q\n",
 					localStateFilePath,
 				)
+			} else {
+				return fmt.Errorf("unable to inspect local state file %q: %w", localStateFilePath, err)
 			}
 
 			var execPath string
@@ -148,6 +204,29 @@ func BootstrapCmd() *cobra.Command {
 				return fmt.Errorf("unable to initialize terraform: %w", err)
 			}
 
+			var scopedImportBackup terraformMigrationBackup
+			if scopedImport {
+				importAddresses := make([]string, 0, len(imports))
+				for _, resource := range imports {
+					importAddresses = append(importAddresses, resource.address)
+				}
+				scopedImportBackup, err = createTerraformImportBackup(
+					localStateFilePath,
+					scopedImportConfiguration.OriginalState,
+					scopedImportConfiguration.TerraformState,
+					importAddresses,
+					[]byte(scopedImportConfiguration.EncodedScopes),
+				)
+				if err != nil {
+					return fmt.Errorf("unable to create scope-mode import backup: %w", err)
+				}
+				_, _ = progress.Printf(
+					"Created pre-import state backup %q and manifest %q.\n",
+					scopedImportBackup.StatePath,
+					scopedImportBackup.ManifestPath,
+				)
+			}
+
 			// Parse and append any --tf-var flags to the vars slice
 			for _, tfVar := range tfVars {
 				if !strings.Contains(tfVar, "=") {
@@ -159,9 +238,38 @@ func BootstrapCmd() *cobra.Command {
 			for _, resource := range imports {
 				_, _ = progress.Printf("Importing Terraform resource %q...\n", resource.address)
 				if err := tf.Import(cmd.Context(), resource.address, resource.id, toImportOptions(vars)...); err != nil {
+					if scopedImport {
+						return fmt.Errorf(
+							"unable to import Terraform resource %q: %w; pre-import state backup remains at %q",
+							resource.address,
+							err,
+							scopedImportBackup.StatePath,
+						)
+					}
 					return fmt.Errorf("unable to import Terraform resource %q: %w", resource.address, err)
 				}
+				if scopedImport {
+					if err := validateAWSScopedImportRegistry(tmpStateFilePath, scopedImportConfiguration.Scopes); err != nil {
+						retainTmpDir = true
+						return fmt.Errorf(
+							"imported Terraform resource %q produced invalid scope registry state: %w; temporary state retained at %q and pre-import backup remains at %q",
+							resource.address,
+							err,
+							tmpStateFilePath,
+							scopedImportBackup.StatePath,
+						)
+					}
+				}
 				if err := persistTerraformState(tmpStateFilePath, localStateFilePath); err != nil {
+					retainTmpDir = true
+					if scopedImport {
+						return fmt.Errorf(
+							"unable to save state after importing Terraform resource %q: %w; pre-import state backup remains at %q",
+							resource.address,
+							err,
+							scopedImportBackup.StatePath,
+						)
+					}
 					return fmt.Errorf("unable to save state after importing Terraform resource %q: %w", resource.address, err)
 				}
 			}
@@ -170,6 +278,13 @@ func BootstrapCmd() *cobra.Command {
 			}
 
 			_, _ = progress.Println("Running terraform plan...")
+			initialMigrationConfiguration, initialMigration := commandAWSInitialScopeMigrationPlanConfiguration(cmd.Context())
+			planOptions := toPlanOptions(vars)
+			initialMigrationPlanPath := ""
+			if initialMigration {
+				initialMigrationPlanPath = filepath.Join(workingDir, "initial-default-scope-migration.tfplan")
+				planOptions = append(planOptions, tfexec.Out(initialMigrationPlanPath))
+			}
 
 			// Import workflows always show the post-import plan. Other workflows show
 			// detailed plan output only when debug logging is enabled.
@@ -184,42 +299,51 @@ func BootstrapCmd() *cobra.Command {
 				}
 				tf.SetStdout(os.Stdout)
 				tf.SetStderr(os.Stderr)
+			} else {
+				// For normal operation, suppress terraform output and just check if changes exist
+				tf.SetStdout(io.Discard)
+				tf.SetStderr(io.Discard)
+			}
 
-				// Show the human-readable plan
-				planChanged, err := tf.Plan(cmd.Context(), toPlanOptions(vars)...)
-				if err != nil {
-					return fmt.Errorf("unable to run terraform plan: %w", err)
+			planChanged, err := tf.Plan(cmd.Context(), planOptions...)
+			if err != nil {
+				return fmt.Errorf("unable to run terraform plan: %w", err)
+			}
+			if hasTagPolicyTransition && !planChanged {
+				return fmt.Errorf("refusing version-1 transition because Terraform reported no changes while state still records applied tag-policy version 0")
+			}
+			if initialMigration {
+				tf.SetStdout(io.Discard)
+				plan, showErr := tf.ShowPlanFile(cmd.Context(), initialMigrationPlanPath)
+				if showDetailedPlan {
+					tf.SetStdout(os.Stdout)
 				}
+				if showErr != nil {
+					return fmt.Errorf("unable to inspect saved initial AWS scope migration plan: %w", showErr)
+				}
+				if err := validateAWSInitialScopeMigrationPlan(plan, initialMigrationConfiguration); err != nil {
+					return fmt.Errorf("refusing unsafe initial AWS scope migration plan: %w", err)
+				}
+				_, _ = progress.Printf(
+					"Validated initial scope migration for %q: one policy marker, one applied configuration snapshot, additive scope tags and outputs, retained Cluster API tag namespaces, and stable NAT names only.\n",
+					initialMigrationConfiguration.ScopeRef,
+				)
+			}
 
-				if !planChanged {
-					color.Green("\n✅ No changes detected. Infrastructure is up to date.\n")
-					if err := showOutputs(cmd.Context(), tf); err != nil {
-						return err
-					}
-					return nil
+			if !planChanged {
+				color.Green("\n✅ No changes detected. Infrastructure is up to date.\n")
+				if err := showOutputs(cmd.Context(), tf); err != nil {
+					return err
 				}
+				return nil
+			}
+			if showDetailedPlan {
 				if importOnly {
 					color.Yellow("\n📋 Changes detected. The import workflow will not apply them.\n")
 				} else {
 					color.Yellow("\n📋 Changes detected and will be applied.\n")
 				}
 			} else {
-				// For normal operation, suppress terraform output and just check if changes exist
-				tf.SetStdout(io.Discard)
-				tf.SetStderr(io.Discard)
-
-				planChanged, err := tf.Plan(cmd.Context(), toPlanOptions(vars)...)
-				if err != nil {
-					return fmt.Errorf("unable to run terraform plan: %w", err)
-				}
-
-				if !planChanged {
-					color.Green("\n✅ No changes detected. Infrastructure is up to date.\n")
-					if err := showOutputs(cmd.Context(), tf); err != nil {
-						return err
-					}
-					return nil
-				}
 				color.Yellow("\n📋 Terraform Plan Summary:")
 				color.Yellow("Changes have been detected and will be applied.")
 				color.Yellow("Use --log-level debug to see detailed plan output.\n")
@@ -239,7 +363,7 @@ func BootstrapCmd() *cobra.Command {
 			// to prevent errant ENTER smashes as an approval.
 			color.White("%s", color.New(color.Bold).Sprint("Are you sure you want to apply these changes?"))
 			for {
-				v := StringPrompt("(y/n)", "")
+				v := terraformApplyPrompt("(y/n)", "")
 				if v == "n" || v == "no" {
 					_, _ = progress.Println("Aborting...")
 					return nil
@@ -250,24 +374,49 @@ func BootstrapCmd() *cobra.Command {
 				_, _ = progress.Println("Only \"y\" or \"n\" inputs are accepted.")
 			}
 
-			defer func() {
-				// Copy the state file back to the original location
-				_, _ = progress.Printf("Copying state file back to %q\n", localStateFilePath)
-				if err := persistTerraformState(tmpStateFilePath, localStateFilePath); err != nil {
-					_, _ = failure.Printf("unable to save Terraform state: %v", err)
+			if hasTagPolicyTransition {
+				reports, err := verifyAWSScopeTagPolicyTransitions(cmd.Context(), tagPolicyTransition)
+				if err != nil {
+					return fmt.Errorf("version-1 tag verification immediately before Terraform apply failed: %w", err)
 				}
-			}()
-
+				for _, report := range reports {
+					_, _ = progress.Printf(
+						"Reverified scope %q for cluster %q immediately before Terraform apply.\n",
+						report.ScopeRef,
+						report.ClusterName,
+					)
+				}
+			}
 			_, _ = progress.Println("Running terraform apply...")
-			if err := tf.Apply(cmd.Context(), toApplyOptions(vars)...); err != nil {
-				return fmt.Errorf("unable to run terraform apply: %w", err)
+			applyOptions := toApplyOptions(vars)
+			if initialMigration {
+				applyOptions = []tfexec.ApplyOption{tfexec.DirOrPlan(initialMigrationPlanPath)}
+			}
+			applyErr := tf.Apply(cmd.Context(), applyOptions...)
+
+			var outputErr error
+			if applyErr == nil {
+				outputErr = showOutputs(cmd.Context(), tf)
 			}
 
-			if err := showOutputs(cmd.Context(), tf); err != nil {
-				return err
+			_, _ = progress.Printf("Persisting Terraform state to %q\n", localStateFilePath)
+			persistenceErr := persistTerraformState(tmpStateFilePath, localStateFilePath)
+			if persistenceErr != nil {
+				retainTmpDir = true
 			}
 
-			return nil
+			if applyErr != nil {
+				wrappedApplyErr := fmt.Errorf(
+					"unable to run terraform apply: %w; partial Terraform state was saved to %q",
+					applyErr,
+					localStateFilePath,
+				)
+				if persistenceErr != nil {
+					wrappedApplyErr = fmt.Errorf("unable to run terraform apply: %w", applyErr)
+				}
+				return errors.Join(wrappedApplyErr, persistenceErr)
+			}
+			return errors.Join(outputErr, persistenceErr)
 		},
 	}
 	cmd.PersistentFlags().Bool("dry-run", false, "Run terraform plan instead of terraform apply")
@@ -311,17 +460,6 @@ func parseResourceImports(values []string) ([]resourceImport, error) {
 	}
 
 	return imports, nil
-}
-
-func persistTerraformState(tmpStateFilePath, localStateFilePath string) error {
-	stateFileData, err := os.ReadFile(tmpStateFilePath)
-	if err != nil {
-		return fmt.Errorf("unable to read state file from temporary directory: %w", err)
-	}
-	if err := os.WriteFile(localStateFilePath, stateFileData, 0600); err != nil {
-		return fmt.Errorf("unable to write state file to %q: %w", localStateFilePath, err)
-	}
-	return nil
 }
 
 func toPlanOptions(vars []*tfexec.VarOption) []tfexec.PlanOption {

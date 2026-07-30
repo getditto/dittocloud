@@ -32,7 +32,15 @@ All destructive and mutating operations are conditioned on resource tags to prev
 - Direct EC2 tag updates: existing `sigs.k8s.io/cluster-api-provider-aws/cluster/<name> = owned` plus the CAPA role bootstrap tag
 - ELBv2: `elbv2.k8s.aws/cluster = <name>`
 
-Phase 2 requires an existing deployment. Pass `--cluster-name` on a re-run after the cluster has been provisioned.
+In legacy single-scope mode, phase 2 requires an existing deployment and is
+selected by passing `--cluster-name` on a re-run. In multi-scope mode,
+`clusterName` may be recorded while the scope remains at policy version `0`;
+the root module deliberately passes `null` here until the verified
+`scopeTagPolicyVersion: 1` transition succeeds. Use `bootstrap aws scopes tags
+verify --enable` followed by normal scope mode for that transition. The only
+version-0 exception is an internal migration bridge for a default legacy
+deployment whose state proves these cluster conditions are already applied;
+the bridge preserves, rather than introduces, its existing restriction.
 
 ### IAM Trust Editor Role (`trust-editor.ditto.live`)
 
@@ -80,7 +88,12 @@ dittocloud bootstrap aws \
   --iam-trusted-role-arns <trust-editor-role-arn>
 ```
 
-**Step 2 — Cluster-scoped IAM.** After the cluster is provisioned, re-run with `--cluster-name` to switch from broad phase-1 to cluster-specific conditions. Requires the state file from Step 1. VPC confinement continues to use the Terraform-created VPC ID automatically.
+**Step 2 — Cluster-scoped IAM (legacy mode).** After the cluster is
+provisioned, re-run with `--cluster-name` to switch from broad phase 1 to
+cluster-specific conditions. This requires the state file from Step 1. Scope
+mode instead uses the verified policy-version workflow documented in
+`docs/aws-multi-scope.md`. VPC confinement continues to use the
+Terraform-created VPC ID automatically.
 
 ```sh
 dittocloud bootstrap aws \
