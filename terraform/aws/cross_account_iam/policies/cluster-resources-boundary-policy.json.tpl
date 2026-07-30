@@ -46,14 +46,10 @@
       "Action": [
         "ec2:CreateSecurityGroup"
       ],
-      "Resource": "arn:aws:ec2:*:*:security-group/*"
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "ec2:CreateSecurityGroup"
-      ],
-      "Resource": "%{~ if vpc_arn != null ~}${vpc_arn}%{~ else ~}arn:aws:ec2:*:*:vpc/*%{~ endif ~}"
+      "Resource": [
+        "arn:aws:ec2:*:*:security-group/*",
+        "%{~ if vpc_arn != null ~}${vpc_arn}%{~ else ~}arn:aws:ec2:*:*:vpc/*%{~ endif ~}"
+      ]
     },
     {
       "Effect": "Allow",
@@ -108,6 +104,23 @@
           "ec2:ResourceTag/ditto:project": "${ec2_project_tag}"
         }
       }
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateVolume",
+        "ec2:CreateSnapshot",
+        "ec2:AttachVolume",
+        "ec2:DetachVolume",
+        "ec2:DeleteVolume",
+        "ec2:ModifyVolume",
+        "ec2:DeleteSnapshot"
+      ],
+      "Resource": [
+        "arn:aws:ec2:*:*:volume/*",
+        "arn:aws:ec2:*:*:snapshot/*",
+        "arn:aws:ec2:*:*:instance/*"
+      ]
     },
 %{~ if vpc_arn != null ~}
     {
@@ -235,17 +248,24 @@
     {
       "Effect": "Allow",
       "Action": [
-        "elasticloadbalancing:CreateTargetGroup"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
+        "elasticloadbalancing:CreateTargetGroup",
         "elasticloadbalancing:CreateListener",
         "elasticloadbalancing:CreateRule",
         "elasticloadbalancing:DeleteListener",
-        "elasticloadbalancing:DeleteRule"
+        "elasticloadbalancing:DeleteRule",
+        "elasticloadbalancing:DeleteLoadBalancer",
+        "elasticloadbalancing:DeleteTargetGroup",
+        "elasticloadbalancing:ModifyCapacityReservation",
+        "elasticloadbalancing:ModifyLoadBalancerAttributes",
+        "elasticloadbalancing:ModifyTargetGroup",
+        "elasticloadbalancing:ModifyTargetGroupAttributes",
+        "elasticloadbalancing:SetIpAddressType",
+        "elasticloadbalancing:SetSecurityGroups",
+        "elasticloadbalancing:AddListenerCertificates",
+        "elasticloadbalancing:ModifyListener",
+        "elasticloadbalancing:ModifyRule",
+        "elasticloadbalancing:RemoveListenerCertificates",
+        "elasticloadbalancing:SetWebAcl"
       ],
       "Resource": "*"
     },
@@ -274,20 +294,6 @@
         "elasticloadbalancing:RemoveTags"
       ],
       "Resource": "arn:aws:elasticloadbalancing:*:*:listener*/*/*/*"
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "elasticloadbalancing:DeleteLoadBalancer",
-        "elasticloadbalancing:DeleteTargetGroup",
-        "elasticloadbalancing:ModifyCapacityReservation",
-        "elasticloadbalancing:ModifyLoadBalancerAttributes",
-        "elasticloadbalancing:ModifyTargetGroup",
-        "elasticloadbalancing:ModifyTargetGroupAttributes",
-        "elasticloadbalancing:SetIpAddressType",
-        "elasticloadbalancing:SetSecurityGroups"
-      ],
-      "Resource": "*"
     },
     {
       "Effect": "Allow",
@@ -330,18 +336,6 @@
         "elasticloadbalancing:RegisterTargets"
       ],
       "Resource": "arn:aws:elasticloadbalancing:*:*:targetgroup/*/*"
-    },
-
-    {
-      "Effect": "Allow",
-      "Action": [
-        "elasticloadbalancing:AddListenerCertificates",
-        "elasticloadbalancing:ModifyListener",
-        "elasticloadbalancing:ModifyRule",
-        "elasticloadbalancing:RemoveListenerCertificates",
-        "elasticloadbalancing:SetWebAcl"
-      ],
-      "Resource": "*"
     }
   ]
 }
