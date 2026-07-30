@@ -46,6 +46,8 @@ locals {
       trustEditorRoleName = local.scope_iam_outputs[scope_ref].trust_editor_role.name
       trustEditorRoleArn  = local.scope_iam_outputs[scope_ref].trust_editor_role.arn
 
+      managedClusterRolePath = local.scope_iam_outputs[scope_ref].managed_cluster_role_path
+
       nodesRoleName            = local.scope_iam_outputs[scope_ref].nodes.role_name
       nodesRoleArn             = local.scope_iam_outputs[scope_ref].nodes.role_arn
       nodesInstanceProfileName = local.scope_iam_outputs[scope_ref].nodes.instance_profile_name

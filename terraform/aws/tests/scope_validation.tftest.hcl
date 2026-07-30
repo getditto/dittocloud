@@ -243,6 +243,7 @@ run "creates_registry_for_valid_multi_scope_object" {
         "controllerRoleArn",
         "trustEditorRoleName",
         "trustEditorRoleArn",
+        "managedClusterRolePath",
         "nodesRoleName",
         "nodesRoleArn",
         "nodesInstanceProfileName",
@@ -277,6 +278,7 @@ run "creates_registry_for_valid_multi_scope_object" {
       output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].clusterType == "kubeadm" &&
       output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].scopeTagPolicyVersion == 0 &&
       output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].controllerRoleName == "controllers.cluster-api-provider-aws.sigs.k8s.io" &&
+      output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].managedClusterRolePath == "/dittocluster/" &&
       output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].eksControlPlaneRoleName == null &&
       output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].karpenterInterruptionQueueName == null &&
       output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].vpcId == null &&
@@ -290,6 +292,7 @@ run "creates_registry_for_valid_multi_scope_object" {
       !output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].default &&
       output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].clusterType == "eks" &&
       output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].controllerRoleName == "ditto-capa-controller-dsc-01k2m8g7n4p6q9r3t5v8x1y2z4" &&
+      output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].managedClusterRolePath == "/dittocluster/dsc-01k2m8g7n4p6q9r3t5v8x1y2z4/" &&
       output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].eksControlPlaneRoleName == "ditto-capa-eks-control-plane-dsc-01k2m8g7n4p6q9r3t5v8x1y2z4" &&
       output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].karpenterInterruptionQueueName == "karpenter-interruption-dsc-01k2m8g7n4p6q9r3t5v8x1y2z4" &&
       output.aws.scopes["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].vpcId == "vpc-00000000000000001" &&
