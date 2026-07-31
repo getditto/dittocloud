@@ -12,14 +12,16 @@ provider "aws" {
   region  = local.root_region
 
   # Cluster API owns these open-ended tag namespaces on shared VPC resources.
-  # Scope mode must not enumerate or remove membership for other clusters.
+  # Dittocloud never enumerates or removes another cluster's membership tags —
+  # in scope mode or default mode — so a VPC shared with other kubeadm/EKS
+  # clusters does not churn their Cluster API ownership tags on every apply.
   ignore_tags {
-    key_prefixes = local.scope_mode ? [
+    key_prefixes = [
       "kubernetes.io/cluster/",
       "sigs.k8s.io/cluster-api-provider-aws/cluster/",
-    ] : []
-    keys = local.scope_mode ? [
+    ]
+    keys = [
       "sigs.k8s.io/cluster-api-provider-aws/role",
-    ] : []
+    ]
   }
 }

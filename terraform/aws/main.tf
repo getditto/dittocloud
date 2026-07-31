@@ -88,7 +88,7 @@ module "vpc" {
   region                        = local.root_region
   vpc_name                      = local.default_vpc_name
   vpc_cidr                      = local.default_vpc_cidr
-  manage_kubernetes_cluster_tag = !local.scope_mode
+  manage_kubernetes_cluster_tag = false
   nat_gateway_name              = local.default_nat_gateway_name
   tags                          = local.default_scope_tags
 
