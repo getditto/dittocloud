@@ -792,21 +792,30 @@ run "scoped_names_paths_and_policy_arns_are_exact" {
   }
 
   assert {
-    condition = alltrue([
-      for policy in [
-        aws_iam_policy.capa_controller_eks_policy[0].policy,
-        aws_iam_policy.cluster_resources_boundary_policy.policy,
-        ] : length([
-          for statement in jsondecode(policy).Statement : statement
-          if contains(try(statement.Action, []), "iam:PassRole") &&
-          toset(try(statement.Resource, [])) == toset([
-            "arn:aws:iam::520778242457:role/ditto-capa-nodes-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
-            "arn:aws:iam::520778242457:role/ditto-capa-control-plane-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
-            "arn:aws:iam::520778242457:role/ditto-capa-eks-control-plane-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
-          ])
-      ]) == 1
-    ])
-    error_message = "The scoped EKS controller policy and cluster boundary must pass only their scope's exact roles."
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.cluster_resources_boundary_policy.policy).Statement : statement
+      if contains(try(statement.Action, []), "iam:PassRole") &&
+      toset(try(statement.Resource, [])) == toset([
+        "arn:aws:iam::520778242457:role/ditto-capa-nodes-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
+        "arn:aws:iam::520778242457:role/ditto-capa-control-plane-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
+        "arn:aws:iam::520778242457:role/ditto-capa-eks-control-plane-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
+      ])
+    ]) == 1
+    error_message = "The scoped cluster boundary must pass only its scope's exact CAPA roles."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.capa_controller_eks_policy[0].policy).Statement : statement
+      if contains(try(statement.Action, []), "iam:PassRole") &&
+      toset(try(statement.Resource, [])) == toset([
+        "arn:aws:iam::520778242457:role/ditto-capa-nodes-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
+        "arn:aws:iam::520778242457:role/ditto-capa-control-plane-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
+        "arn:aws:iam::520778242457:role/ditto-capa-eks-control-plane-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
+        "arn:aws:iam::520778242457:role/dittocluster/dsc-01k2m8g7n4p6q9r3t5v8x1y2z3/ebs-csi-driver-*",
+      ])
+    ]) == 1
+    error_message = "The scoped EKS controller policy must pass its scope's CAPA roles plus the EBS CSI addon role."
   }
 
   assert {
