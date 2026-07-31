@@ -625,7 +625,7 @@ resource "aws_iam_policy" "capa_controller_eks_policy" {
   count = var.enable_eks ? 1 : 0
   name  = local.iam_names.controller_eks_policy
   policy = templatefile("${path.module}/policies/capa-controller-eks-policy.json.tpl", {
-    pass_role_arns = local.capa_pass_role_arns
+    pass_role_arns = local.capa_eks_pass_role_arns
   })
   tags = local.tags
 }

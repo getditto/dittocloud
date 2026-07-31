@@ -62,6 +62,22 @@ locals {
       local.iam_names.eks_control_plane_role,
     ] : "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${role_name}"
   ] : ["arn:*:iam::*:role/*.cluster-api-provider-aws.sigs.k8s.io"]
+
+  # EKS-only PassRole superset. When CAPA creates EKS managed addons it passes the addon's
+  # service-account (IRSA) role to eks.amazonaws.com — e.g. aws-ebs-csi-driver uses
+  # role/dittocluster/ebs-csi-driver-<cluster>.valet. That role is not in capa_pass_role_arns,
+  # so on a fresh EKS cluster CreateAddon fails with iam:PassRole AccessDenied and the control
+  # plane never reaches Ready. Add the addon role only to the EKS controller policy (which is
+  # already conditioned on iam:PassedToService = eks.amazonaws.com); the base controller policy
+  # stays scoped to the CAPI node/control-plane roles.
+  capa_eks_pass_role_arns = concat(
+    local.capa_pass_role_arns,
+    local.scope_enabled ? [
+      "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role${local.managed_cluster_role_path}ebs-csi-driver-*",
+      ] : [
+      "arn:*:iam::*:role/dittocluster/ebs-csi-driver-*",
+    ],
+  )
   capa_boundary_pass_role_arns = local.scope_enabled ? local.capa_pass_role_arns : [
     "arn:aws:iam::*:role/*.cluster-api-provider-aws.sigs.k8s.io",
   ]
