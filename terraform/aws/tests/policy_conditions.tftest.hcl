@@ -846,3 +846,114 @@ run "scoped_names_paths_and_policy_arns_are_exact" {
     error_message = "Scoped IAM resources must carry the reserved identity tag and validate every generated name."
   }
 }
+
+# CAPA tags the security groups it creates with its own namespaced ownership tag
+# rather than kubernetes.io/cluster/<name>. Gating security group mutations on the
+# kubernetes.io tag silently locks the controller out of the control-plane, node,
+# and API server load balancer groups the moment phase 2 is applied.
+run "phase_two_security_group_mutations_use_capa_ownership_tag" {
+  command = plan
+
+  module {
+    source = "./cross_account_iam"
+  }
+
+  variables {
+    cluster_name = "test-cluster"
+    vpc_id       = "vpc-09e877f9012f52241"
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.capa_controller_base.policy).Statement : statement
+      if toset(try(statement.Action, [])) == toset([
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ec2:RevokeSecurityGroupEgress",
+        "ec2:RevokeSecurityGroupIngress",
+      ]) &&
+      try(statement.Condition.StringEquals["ec2:ResourceTag/sigs.k8s.io/cluster-api-provider-aws/cluster/test-cluster"], null) == "owned" &&
+      try(statement.Condition.StringEquals["ec2:Vpc"], null) == "arn:aws:ec2:us-west-2:520778242457:vpc/vpc-09e877f9012f52241" &&
+      try(statement.Condition.Null["ec2:ResourceTag/sigs.k8s.io/cluster-api-provider-aws/role"], null) == "false"
+    ]) == 1
+    error_message = "Controller security group rule mutations must require CAPA's ownership tag, its bootstrap role marker, and the selected VPC."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.capa_controller_base.policy).Statement : statement
+      if try(statement.Action, []) == ["ec2:DeleteSecurityGroup"] &&
+      try(statement.Condition.StringEquals["ec2:ResourceTag/sigs.k8s.io/cluster-api-provider-aws/cluster/test-cluster"], null) == "owned" &&
+      try(statement.Condition.Null["ec2:ResourceTag/sigs.k8s.io/cluster-api-provider-aws/role"], null) == "false"
+    ]) == 1
+    error_message = "Controller security group deletion must require CAPA's ownership tag and bootstrap role marker."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.capa_control_plane.policy).Statement : statement
+      if toset(try(statement.Action, [])) == toset([
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ec2:DeleteSecurityGroup",
+        "ec2:RevokeSecurityGroupIngress",
+      ]) &&
+      try(statement.Condition.StringEquals["ec2:ResourceTag/sigs.k8s.io/cluster-api-provider-aws/cluster/test-cluster"], null) == "owned" &&
+      try(statement.Condition.Null["ec2:ResourceTag/sigs.k8s.io/cluster-api-provider-aws/role"], null) == "false"
+    ]) == 1
+    error_message = "Control-plane security group mutations must require CAPA's ownership tag and bootstrap role marker."
+  }
+
+  # Regression guard: the kubernetes.io tag must not gate any security-group
+  # mutation, because CAPA never writes it to the groups it owns.
+  assert {
+    condition = length([
+      for statement in concat(
+        jsondecode(aws_iam_policy.capa_controller_base.policy).Statement,
+        jsondecode(aws_iam_policy.capa_control_plane.policy).Statement,
+      ) : statement
+      if contains(try(statement.Resource, []), "arn:aws:ec2:*:*:security-group/*") &&
+      length(setintersection(
+        toset(try(statement.Action, [])),
+        toset([
+          "ec2:AuthorizeSecurityGroupIngress",
+          "ec2:RevokeSecurityGroupEgress",
+          "ec2:RevokeSecurityGroupIngress",
+          "ec2:DeleteSecurityGroup",
+        ])
+      )) > 0 &&
+      try(statement.Condition.StringEquals["ec2:ResourceTag/kubernetes.io/cluster/test-cluster"], null) != null
+    ]) == 0
+    error_message = "No security-group mutation may be gated on kubernetes.io/cluster/<name>; CAPA does not write that tag to its own groups."
+  }
+
+  assert {
+    condition = (
+      length(aws_iam_policy.capa_controller_base.policy) <= 6144 &&
+      length(aws_iam_policy.capa_control_plane.policy) <= 6144
+    )
+    error_message = "Security group condition changes must keep both policies under AWS's 6,144-character limit."
+  }
+}
+
+# Phase 1 must stay condition-free for security groups: a freshly created group's
+# tags are not immediately consistent, and bootstrap authorizes rules right after
+# creating them.
+run "phase_one_security_group_mutations_stay_unconditional" {
+  command = plan
+
+  module {
+    source = "./cross_account_iam"
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.capa_controller_base.policy).Statement : statement
+      if toset(try(statement.Action, [])) == toset([
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ec2:RevokeSecurityGroupEgress",
+        "ec2:RevokeSecurityGroupIngress",
+      ]) &&
+      try(statement.Condition, null) == null
+    ]) == 1
+    error_message = "Without a cluster name or VPC, security group rule mutations must remain unconditional."
+  }
+}
