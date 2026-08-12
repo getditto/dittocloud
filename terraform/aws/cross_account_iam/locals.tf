@@ -131,14 +131,8 @@ locals {
     StringEquals = local.ec2_vpc_resource_cond_entries
   } : null
 
-  # Security groups are the one managed resource type CAPA does not stamp with
-  # kubernetes.io/cluster/<name>. It tags the control-plane, node, and API server
-  # load balancer groups with its own namespaced ownership tag instead, so gating
-  # their mutations on the kubernetes.io tag locks the controller out of the very
-  # groups it created. Use CAPA's ownership tag, paired with the immutable
-  # bootstrap role marker so a customer group cannot be claimed by tagging it.
-  # Phase 1 is deliberately left untouched: a newly created group's tags are not
-  # immediately consistent, and bootstrap authorizes rules right after creation.
+  # CAPA tags its own security groups with the sigs.k8s.io ownership tag, not
+  # kubernetes.io/cluster/<name>, so gate them on that plus the bootstrap marker.
   ec2_sg_resource_cond_entries = merge(
     local.ec2_existing_tag_string_equals,
     local.ec2_vpc_string_equals,

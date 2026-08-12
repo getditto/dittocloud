@@ -847,10 +847,6 @@ run "scoped_names_paths_and_policy_arns_are_exact" {
   }
 }
 
-# CAPA tags the security groups it creates with its own namespaced ownership tag
-# rather than kubernetes.io/cluster/<name>. Gating security group mutations on the
-# kubernetes.io tag silently locks the controller out of the control-plane, node,
-# and API server load balancer groups the moment phase 2 is applied.
 run "phase_two_security_group_mutations_use_capa_ownership_tag" {
   command = plan
 
@@ -902,8 +898,6 @@ run "phase_two_security_group_mutations_use_capa_ownership_tag" {
     error_message = "Control-plane security group mutations must require CAPA's ownership tag and bootstrap role marker."
   }
 
-  # Regression guard: the kubernetes.io tag must not gate any security-group
-  # mutation, because CAPA never writes it to the groups it owns.
   assert {
     condition = length([
       for statement in concat(
@@ -934,9 +928,6 @@ run "phase_two_security_group_mutations_use_capa_ownership_tag" {
   }
 }
 
-# Phase 1 must stay condition-free for security groups: a freshly created group's
-# tags are not immediately consistent, and bootstrap authorizes rules right after
-# creating them.
 run "phase_one_security_group_mutations_stay_unconditional" {
   command = plan
 
