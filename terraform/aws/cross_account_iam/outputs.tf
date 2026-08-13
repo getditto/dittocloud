@@ -33,17 +33,18 @@ output "scope_iam" {
       arn  = aws_iam_role.capa_eks_control_plane[0].arn
     } : null
     policies = {
-      trust_editor               = { name = aws_iam_policy.iam_trust_editor_policy.name, arn = aws_iam_policy.iam_trust_editor_policy.arn }
-      cluster_resources_boundary = { name = aws_iam_policy.cluster_resources_boundary_policy.name, arn = aws_iam_policy.cluster_resources_boundary_policy.arn }
-      cluster_external_boundary  = { name = aws_iam_policy.cluster_external_resources_boundary_policy.name, arn = aws_iam_policy.cluster_external_resources_boundary_policy.arn }
-      nodes                      = { name = aws_iam_policy.capa_nodes.name, arn = aws_iam_policy.capa_nodes.arn }
-      control_plane              = { name = aws_iam_policy.capa_control_plane.name, arn = aws_iam_policy.capa_control_plane.arn }
-      control_plane_tags         = { name = aws_iam_policy.capa_control_plane_tags.name, arn = aws_iam_policy.capa_control_plane_tags.arn }
-      controller_base            = { name = aws_iam_policy.capa_controller_base.name, arn = aws_iam_policy.capa_controller_base.arn }
-      controller_network         = { name = aws_iam_policy.capa_controller_network.name, arn = aws_iam_policy.capa_controller_network.arn }
-      controller_elb             = { name = aws_iam_policy.capa_controller_elb.name, arn = aws_iam_policy.capa_controller_elb.arn }
-      controller_vpc_lifecycle   = var.customer_managed_vpc ? null : { name = aws_iam_policy.capa_controller_vpc_lifecycle[0].name, arn = aws_iam_policy.capa_controller_vpc_lifecycle[0].arn }
-      controller_eks             = var.enable_eks ? { name = aws_iam_policy.capa_controller_eks_policy[0].name, arn = aws_iam_policy.capa_controller_eks_policy[0].arn } : null
+      trust_editor                   = { name = aws_iam_policy.iam_trust_editor_policy.name, arn = aws_iam_policy.iam_trust_editor_policy.arn }
+      cluster_resources_boundary     = { name = aws_iam_policy.cluster_resources_boundary_policy.name, arn = aws_iam_policy.cluster_resources_boundary_policy.arn }
+      cluster_resources_elb_boundary = { name = aws_iam_policy.cluster_resources_elb_boundary_policy.name, arn = aws_iam_policy.cluster_resources_elb_boundary_policy.arn }
+      cluster_external_boundary      = { name = aws_iam_policy.cluster_external_resources_boundary_policy.name, arn = aws_iam_policy.cluster_external_resources_boundary_policy.arn }
+      nodes                          = { name = aws_iam_policy.capa_nodes.name, arn = aws_iam_policy.capa_nodes.arn }
+      control_plane                  = { name = aws_iam_policy.capa_control_plane.name, arn = aws_iam_policy.capa_control_plane.arn }
+      control_plane_tags             = { name = aws_iam_policy.capa_control_plane_tags.name, arn = aws_iam_policy.capa_control_plane_tags.arn }
+      controller_base                = { name = aws_iam_policy.capa_controller_base.name, arn = aws_iam_policy.capa_controller_base.arn }
+      controller_network             = { name = aws_iam_policy.capa_controller_network.name, arn = aws_iam_policy.capa_controller_network.arn }
+      controller_elb                 = { name = aws_iam_policy.capa_controller_elb.name, arn = aws_iam_policy.capa_controller_elb.arn }
+      controller_vpc_lifecycle       = var.customer_managed_vpc ? null : { name = aws_iam_policy.capa_controller_vpc_lifecycle[0].name, arn = aws_iam_policy.capa_controller_vpc_lifecycle[0].arn }
+      controller_eks                 = var.enable_eks ? { name = aws_iam_policy.capa_controller_eks_policy[0].name, arn = aws_iam_policy.capa_controller_eks_policy[0].arn } : null
     }
     managed_cluster_role_path = local.managed_cluster_role_path
     karpenter_queue = var.enable_eks ? {
