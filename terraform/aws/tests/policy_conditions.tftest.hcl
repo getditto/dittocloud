@@ -619,7 +619,7 @@ run "legacy_names_and_policy_paths_remain_unchanged" {
   }
 }
 
-run "rejects_more_than_nine_existing_vpc_subnets" {
+run "rejects_more_than_six_existing_vpc_subnets" {
   command = plan
 
   module {
@@ -844,6 +844,55 @@ run "scoped_names_paths_and_policy_arns_are_exact" {
       length(terraform_data.scoped_name_validation) == length(local.scoped_generated_names)
     )
     error_message = "Scoped IAM resources must carry the reserved identity tag and validate every generated name."
+  }
+}
+
+run "scoped_kubeadm_pass_role_excludes_nonexistent_eks_role" {
+  command = plan
+
+  module {
+    source = "./cross_account_iam"
+  }
+
+  variables {
+    scope_ref              = "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"
+    region                 = "ap-southeast-2"
+    create_admin_view_role = false
+    enable_eks             = false
+    vpc_id                 = "vpc-09e877f9012f52241"
+    vpc_subnet_ids = [
+      "subnet-00000000000000001",
+      "subnet-00000000000000002",
+    ]
+  }
+
+  assert {
+    condition     = length(aws_iam_role.capa_eks_control_plane) == 0
+    error_message = "A kubeadm scope must not create the EKS control-plane role."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.capa_controller_base.policy).Statement : statement
+      if contains(try(statement.Action, []), "iam:PassRole") &&
+      toset(try(statement.Resource, [])) == toset([
+        "arn:aws:iam::520778242457:role/ditto-capa-nodes-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
+        "arn:aws:iam::520778242457:role/ditto-capa-control-plane-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
+      ])
+    ]) == 1
+    error_message = "A kubeadm scope's CAPA controller must not reference the nonexistent EKS control-plane role."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.cluster_resources_boundary_policy.policy).Statement : statement
+      if contains(try(statement.Action, []), "iam:PassRole") &&
+      toset(try(statement.Resource, [])) == toset([
+        "arn:aws:iam::520778242457:role/ditto-capa-nodes-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
+        "arn:aws:iam::520778242457:role/ditto-capa-control-plane-dsc-01k2m8g7n4p6q9r3t5v8x1y2z3",
+      ])
+    ]) == 1
+    error_message = "A kubeadm scope's cluster boundary must not carry the nonexistent EKS control-plane role, keeping the generated policy well clear of IAM's 6,144-character limit."
   }
 }
 
