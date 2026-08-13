@@ -15,6 +15,7 @@ locals {
     eks_control_plane_role          = local.scope_enabled ? "ditto-capa-eks-control-plane-${var.scope_ref}" : "eks-controlplane.cluster-api-provider-aws.sigs.k8s.io"
     trust_editor_policy             = local.scope_enabled ? "ditto-iam-trust-editor-policy-${var.scope_ref}" : "ditto-iam-trust-editor-policy"
     cluster_resources_boundary      = local.scope_enabled ? "ditto-cluster-resources-boundary-${var.scope_ref}" : "ditto-cluster-resources-boundary-policy"
+    cluster_resources_elb_boundary  = local.scope_enabled ? "ditto-cluster-resources-elb-boundary-${var.scope_ref}" : "ditto-cluster-resources-elb-boundary-policy"
     cluster_external_boundary       = local.scope_enabled ? "ditto-cluster-external-boundary-${var.scope_ref}" : "ditto-cluster-external-resources-boundary-policy"
     nodes_policy                    = local.scope_enabled ? "ditto-capa-nodes-policy-${var.scope_ref}" : "nodes.cluster-api-provider-aws.sigs.k8s.io"
     control_plane_policy            = local.scope_enabled ? "ditto-capa-control-plane-policy-${var.scope_ref}" : "control-plane.cluster-api-provider-aws.sigs.k8s.io"
@@ -37,6 +38,7 @@ locals {
     eks_control_plane_role         = { kind = "IAM role", name = local.iam_names.eks_control_plane_role, limit = 64, pattern = "^[A-Za-z0-9_+=,.@-]+$" }
     trust_editor_policy            = { kind = "IAM managed policy", name = local.iam_names.trust_editor_policy, limit = 128, pattern = "^[A-Za-z0-9_+=,.@-]+$" }
     cluster_resources_boundary     = { kind = "IAM managed policy", name = local.iam_names.cluster_resources_boundary, limit = 128, pattern = "^[A-Za-z0-9_+=,.@-]+$" }
+    cluster_resources_elb_boundary = { kind = "IAM managed policy", name = local.iam_names.cluster_resources_elb_boundary, limit = 128, pattern = "^[A-Za-z0-9_+=,.@-]+$" }
     cluster_external_boundary      = { kind = "IAM managed policy", name = local.iam_names.cluster_external_boundary, limit = 128, pattern = "^[A-Za-z0-9_+=,.@-]+$" }
     nodes_policy                   = { kind = "IAM managed policy", name = local.iam_names.nodes_policy, limit = 128, pattern = "^[A-Za-z0-9_+=,.@-]+$" }
     control_plane_policy           = { kind = "IAM managed policy", name = local.iam_names.control_plane_policy, limit = 128, pattern = "^[A-Za-z0-9_+=,.@-]+$" }
@@ -53,13 +55,10 @@ locals {
   managed_cluster_role_arn  = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role${local.managed_cluster_role_path}*"
   boundary_policy_arns = [
     "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${local.iam_names.cluster_resources_boundary}",
+    "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${local.iam_names.cluster_resources_elb_boundary}",
     "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${local.iam_names.cluster_external_boundary}",
   ]
-  # eks_control_plane_role only exists for enable_eks clusters. Including it
-  # unconditionally added a full role ARN to every scoped boundary policy even
-  # for kubeadm clusters that will never have that role, pushing some scopes
-  # (long scope_ref + several ELB subnets) past IAM's 6,144-character managed
-  # policy limit.
+  # eks_control_plane_role only exists when enable_eks is true.
   capa_pass_role_arns = local.scope_enabled ? [
     for role_name in concat(
       [

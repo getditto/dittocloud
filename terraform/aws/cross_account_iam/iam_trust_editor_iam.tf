@@ -58,10 +58,21 @@ resource "aws_iam_policy" "cluster_resources_boundary_policy" {
   policy = templatefile("${path.module}/policies/cluster-resources-boundary-policy.json.tpl", {
     ec2_project_tag         = var.ec2_project_tag
     vpc_arn                 = local.ec2_vpc_arn
-    vpc_subnet_ids          = var.vpc_subnet_ids
     karpenter_queue_arn     = local.karpenter_queue_arn
     capa_pass_role_resource = local.scope_enabled ? jsonencode(local.capa_boundary_pass_role_arns) : jsonencode(one(local.capa_boundary_pass_role_arns))
     cluster_secret_arn      = local.cluster_secret_arn
+  })
+  tags = local.tags
+}
+
+# Split out from cluster_resources_boundary_policy: ELB/ACM/Shield/WAF
+# actions scale with vpc_subnet_ids, not scope_ref, so keeping them separate
+# gives each policy far more headroom under IAM's 6,144-char limit.
+resource "aws_iam_policy" "cluster_resources_elb_boundary_policy" {
+  name = local.iam_names.cluster_resources_elb_boundary
+  policy = templatefile("${path.module}/policies/cluster-resources-elb-boundary-policy.json.tpl", {
+    vpc_arn        = local.ec2_vpc_arn
+    vpc_subnet_ids = var.vpc_subnet_ids
   })
   tags = local.tags
 }
