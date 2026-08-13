@@ -29,6 +29,7 @@ All destructive and mutating operations are conditioned on resource tags to prev
 **Phase 2 (`cluster_name` variable set):** Conditions switch to cluster-specific tags:
 - EC2 creates: `aws:RequestTag/kubernetes.io/cluster/<name> = owned`
 - EC2 mutations: `ec2:ResourceTag/kubernetes.io/cluster/<name> = owned`
+- Security group mutations: `ec2:ResourceTag/sigs.k8s.io/cluster-api-provider-aws/cluster/<name> = owned` plus the CAPA role bootstrap tag — CAPA does not write `kubernetes.io/cluster/<name>` to its own security groups
 - Direct EC2 tag updates: existing `sigs.k8s.io/cluster-api-provider-aws/cluster/<name> = owned` plus the CAPA role bootstrap tag
 - ELBv2: `elbv2.k8s.aws/cluster = <name>`
 

@@ -79,8 +79,8 @@ resource "aws_iam_policy" "capa_controller_base" {
         ]
         Resource = ["*"]
       },
-      # Security group rule mutations — cluster scoped in phase-2 and VPC scoped
-      # when vpc_id is set. Security groups expose the ec2:Vpc condition key.
+      # Security group rule mutations — scoped to CAPA-owned groups in phase-2 and
+      # VPC scoped when vpc_id is set. Security groups expose the ec2:Vpc key.
       merge(
         {
           Effect = "Allow"
@@ -91,7 +91,7 @@ resource "aws_iam_policy" "capa_controller_base" {
           ]
           Resource = ["arn:aws:ec2:*:*:security-group/*"]
         },
-        local.ec2_vpc_resource_cond != null ? { Condition = local.ec2_vpc_resource_cond } : {}
+        local.ec2_sg_resource_cond != null ? { Condition = local.ec2_sg_resource_cond } : {}
       ),
       # Instance attribute mutations — phase-2: scoped to cluster-managed instances
       merge(
@@ -181,14 +181,14 @@ resource "aws_iam_policy" "capa_controller_base" {
         },
         local.ec2_resource_cond != null ? { Condition = local.ec2_resource_cond } : {}
       ),
-      # Security group deletion — phase-2: scoped to cluster-managed SGs
+      # Security group deletion — phase-2: scoped to CAPA-owned SGs
       merge(
         {
           Effect   = "Allow"
           Action   = ["ec2:DeleteSecurityGroup"]
           Resource = ["arn:aws:ec2:*:*:security-group/*"]
         },
-        local.ec2_vpc_resource_cond != null ? { Condition = local.ec2_vpc_resource_cond } : {}
+        local.ec2_sg_resource_cond != null ? { Condition = local.ec2_sg_resource_cond } : {}
       ),
       # Network interface deletion — phase-2: scoped to cluster-managed NICs
       merge(

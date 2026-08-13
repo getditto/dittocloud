@@ -131,6 +131,23 @@ locals {
     StringEquals = local.ec2_vpc_resource_cond_entries
   } : null
 
+  # CAPA tags its own security groups with the sigs.k8s.io ownership tag, not
+  # kubernetes.io/cluster/<name>, so gate them on that plus the bootstrap marker.
+  ec2_sg_resource_cond_entries = merge(
+    local.ec2_existing_tag_string_equals,
+    local.ec2_vpc_string_equals,
+  )
+  ec2_sg_resource_cond = length(local.ec2_sg_resource_cond_entries) > 0 ? merge(
+    var.cluster_name != null ? {
+      Null = {
+        "ec2:ResourceTag/${local.capa_role_tag_key}" = "false"
+      }
+    } : {},
+    {
+      StringEquals = local.ec2_sg_resource_cond_entries
+    },
+  ) : null
+
   # VPC-only condition for RunInstances resource contexts. Cluster request tags
   # are enforced separately on the instance resource because referenced resources
   # such as AMIs and subnets do not expose aws:RequestTag.
