@@ -55,12 +55,19 @@ locals {
     "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${local.iam_names.cluster_resources_boundary}",
     "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${local.iam_names.cluster_external_boundary}",
   ]
+  # eks_control_plane_role only exists for enable_eks clusters. Including it
+  # unconditionally added a full role ARN to every scoped boundary policy even
+  # for kubeadm clusters that will never have that role, pushing some scopes
+  # (long scope_ref + several ELB subnets) past IAM's 6,144-character managed
+  # policy limit.
   capa_pass_role_arns = local.scope_enabled ? [
-    for role_name in [
-      local.iam_names.nodes_role,
-      local.iam_names.control_plane_role,
-      local.iam_names.eks_control_plane_role,
-    ] : "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${role_name}"
+    for role_name in concat(
+      [
+        local.iam_names.nodes_role,
+        local.iam_names.control_plane_role,
+      ],
+      var.enable_eks ? [local.iam_names.eks_control_plane_role] : [],
+    ) : "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${role_name}"
   ] : ["arn:*:iam::*:role/*.cluster-api-provider-aws.sigs.k8s.io"]
 
   # EKS-only PassRole superset. When CAPA creates EKS managed addons it passes the addon's

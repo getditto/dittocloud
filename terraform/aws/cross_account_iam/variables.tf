@@ -142,8 +142,22 @@ variable "vpc_subnet_ids" {
   default     = []
 
   validation {
-    condition     = length(var.vpc_subnet_ids) <= 9
-    error_message = "vpc_subnet_ids may contain at most 9 Kubernetes load-balancer subnets so the generated permissions boundary remains within AWS's 6,144-character limit."
+    # Measured against the actual minified policy (terraform test, not a live
+    # AWS call — the old "<=9" bound was never actually exercised against
+    # IAM's real quota by any test). Only scoped mode (scope_ref set) embeds
+    # the long scope_ref-suffixed PassRole ARNs that eat into this budget; the
+    # legacy shared/default boundary uses a short wildcard PassRole ARN and
+    # keeps the original 9-subnet headroom. In scoped mode: 6 ELB subnets with
+    # no EKS control-plane role comes to 6,103 characters; the same 6 subnets
+    # with enable_eks = true (which adds the EKS control-plane role ARN to the
+    # PassRole list) comes to 6,196 — over the limit. 4 subnets with EKS keeps
+    # a real margin (6,088). Failing here at plan time is much cheaper than
+    # discovering it as an IAM CreatePolicy 409 during apply.
+    condition = length(var.vpc_subnet_ids) <= (
+      var.scope_ref == null ? 9 :
+      var.enable_eks ? 4 : 6
+    )
+    error_message = "vpc_subnet_ids may contain at most 9 Kubernetes load-balancer subnets in legacy/default mode, or 6 in scoped mode (4 when enable_eks is also true, since the EKS control-plane role ARN adds to the generated permissions boundary), so it remains within AWS's 6,144-character managed-policy limit."
   }
 }
 
