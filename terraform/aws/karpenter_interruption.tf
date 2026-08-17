@@ -99,8 +99,6 @@ resource "aws_sqs_queue" "karpenter_interruption" {
   message_retention_seconds = 300
   sqs_managed_sse_enabled   = true
   tags                      = local.default_scope_tags
-
-  depends_on = [terraform_data.scope_registry]
 }
 
 data "aws_iam_policy_document" "karpenter_interruption" {
@@ -149,8 +147,6 @@ resource "aws_cloudwatch_event_rule" "karpenter_interruption" {
     "detail-type" = [each.value.detail_type]
   })
   tags = local.default_scope_tags
-
-  depends_on = [terraform_data.scope_registry]
 }
 
 resource "aws_cloudwatch_event_target" "karpenter_interruption" {
@@ -172,10 +168,7 @@ resource "aws_sqs_queue" "scoped_karpenter_interruption" {
     { "ditto.live/scope-ref" = each.key },
   )
 
-  depends_on = [
-    terraform_data.scope_registry,
-    terraform_data.scoped_karpenter_name_validation,
-  ]
+  depends_on = [terraform_data.scoped_karpenter_name_validation]
 }
 
 data "aws_iam_policy_document" "scoped_karpenter_interruption" {
@@ -231,10 +224,7 @@ resource "aws_cloudwatch_event_rule" "scoped_karpenter_interruption" {
     { "ditto.live/scope-ref" = each.value.scope_ref },
   )
 
-  depends_on = [
-    terraform_data.scope_registry,
-    terraform_data.scoped_karpenter_name_validation,
-  ]
+  depends_on = [terraform_data.scoped_karpenter_name_validation]
 }
 
 resource "aws_cloudwatch_event_target" "scoped_karpenter_interruption" {
