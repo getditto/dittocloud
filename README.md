@@ -25,6 +25,15 @@ For more information, see: https://docs.ditto.live/cloud/public-cloud/overview
 - Optional firewall rules for secure communication
 - Support for CAPG (Cluster API Provider GCP) and Crossplane
 
+## Documentation
+
+| Guide | Use it when |
+| --- | --- |
+| [Bring Your Own VPC](docs/bring-your-own-vpc.md) | Your organization provides the VPC. Requirements, preflight checks, installation verification, and the shared-responsibility boundary. |
+| [AWS Multi-Scope Configuration and Migration](docs/aws-multi-scope.md) | Running more than one deployment in a single AWS account, choosing a tag-policy version, or tightening IAM to one named cluster. |
+| [Migrate a Legacy Cluster to Scopes](docs/migrate-to-scopes.md) | Converting an existing pre-scopes deployment into the default scope. |
+| [Decommissioning](docs/decommissioning.md) | Removing a deployment. There is no `destroy` command; the sequence is manual and ordered. |
+
 ## Installation
 
 ### Download Pre-built Binaries

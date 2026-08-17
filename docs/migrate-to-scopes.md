@@ -24,6 +24,56 @@ version `1` without temporarily broadening IAM.
 For the full scope contract, recovery behavior, and rollback constraints, see
 [AWS Multi-Scope Configuration and Migration](./aws-multi-scope.md).
 
+## Before you start
+
+This runbook migrates an existing deployment. It is not a way to create one, and
+it cannot be exercised against an empty AWS account. Confirm all of the
+following before step 1.
+
+**A legacy deployment exists, with its Terraform state.** Step 2 begins with
+`test -f "$state_path"`. The state must have been produced by a previous
+Dittocloud run using the legacy AWS flags, and must not already contain a scope
+registry.
+
+**That deployment already has cluster-specific IAM.** This runbook is only for a
+legacy deployment created by a previous `--cluster-name` bootstrap, i.e. one that
+has completed phase-2 IAM tightening. If the VPC is shared by several clusters,
+migrate only as far as version `0` and do not perform the version-`1` steps. The
+scope-file generation in step 3 derives `clusterName` from evidence in the IAM
+policies, and will not produce one if that evidence is absent.
+
+**A cluster is running.** Steps 10 through 14 verify live ownership using tags
+that Cluster API and the AWS cloud controllers apply to real resources. With no
+cluster deployed there is nothing to verify, and the scope cannot progress past
+version `0`. You do not need a load-balanced workload — see
+[AWS Multi-Scope Configuration and Migration](./aws-multi-scope.md) for which
+identities are required.
+
+**You know the exact cluster name AWS sees.** It may differ from the name typed
+into the tool that created the cluster; Ditto's control plane composes it as
+`<name>-<organization>`. Take the value from live AWS tags rather than from
+memory:
+
+```bash
+aws --profile "$aws_profile" --region "$region" ec2 describe-tags \
+  --filters 'Name=key,Values=sigs.k8s.io/cluster-api-provider-aws/cluster/*' \
+  --query 'Tags[].Key' --output text | tr '\t' '\n' | sort -u
+```
+
+**You can see Terraform plans.** Several steps below instruct you to review a
+plan before approving it. The normal bootstrap command does not print one by
+default — it reports only that changes were detected. Every `--dry-run` in this
+runbook therefore carries `--log-level debug`, which prints the full plan. Do not
+approve a plan you have not read.
+
+**Nothing else is using this state.** Stop other Dittocloud and Terraform
+operations against the selected state file before starting.
+
+If you are creating a new deployment rather than migrating one, this is the wrong
+document. Start with [Bring Your Own VPC](./bring-your-own-vpc.md), then use
+`scopes add` as described in
+[AWS Multi-Scope Configuration and Migration](./aws-multi-scope.md).
+
 ## Runbook
 
 ### 1. Set the migration inputs
@@ -138,7 +188,7 @@ dittocloud bootstrap aws \
   --scopes-file "$scopes_path" \
   --state "$state_path" \
   --aws-profile "$aws_profile" \
-  --dry-run
+  --dry-run --log-level debug
 ```
 
 The plan may contain only the guarded initial migration changes:
@@ -155,7 +205,9 @@ those conditions.
 
 ### 8. Apply the first normal scope-mode plan
 
-Rerun the same command without `--dry-run`:
+Rerun the same command without `--dry-run --log-level debug`. Note that the
+confirmation prompt summarizes rather than displays the plan, so rely on the
+review you completed in step 7:
 
 ```bash
 dittocloud bootstrap aws \
@@ -243,7 +295,7 @@ dittocloud bootstrap aws \
   --scopes-file "$scopes_path" \
   --state "$state_path" \
   --aws-profile "$aws_profile" \
-  --dry-run
+  --dry-run --log-level debug
 ```
 
 Because state still records applied policy version `0`, Dittocloud repeats the
@@ -276,7 +328,7 @@ dittocloud bootstrap aws \
   --scopes-file "$scopes_path" \
   --state "$state_path" \
   --aws-profile "$aws_profile" \
-  --dry-run
+  --dry-run --log-level debug
 ```
 
 Then repeat the read-only ownership verification against the applied version-1
@@ -324,3 +376,15 @@ Terraform state.
 - If Dittocloud reports that valid partial state was saved after a failed
   apply, reconcile from that state unless a reviewed recovery plan requires an
   older backup.
+- Version `1` currently leaves Cluster API's security groups behind when the
+  cluster is deleted, because its IAM conditions key on a tag Cluster API does
+  not apply to security groups. Read [Decommissioning](./decommissioning.md)
+  before enabling version `1` on a deployment you expect to tear down.
+
+## Related
+
+- [AWS Multi-Scope Configuration and Migration](./aws-multi-scope.md) — the scope
+  contract, adding further scopes, recovery, and rollback constraints.
+- [Bring Your Own VPC](./bring-your-own-vpc.md) — customer-managed VPC
+  requirements and installation verification.
+- [Decommissioning](./decommissioning.md) — removing a deployment.

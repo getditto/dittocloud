@@ -15,6 +15,40 @@ workflow described below. Do not enable version `1` by editing YAML directly.
 > services do not yet consume their scope bindings. Additional scopes are not
 > end-to-end supported until those downstream integrations are available.
 
+## Choosing a tag-policy version
+
+This is the highest-consequence decision in scope mode, and the answer is
+determined by how many clusters share the scope's VPC — not by how locked down
+you would prefer to be.
+
+| Clusters sharing the scope VPC | Version you may use | Why |
+| --- | --- | --- |
+| Zero — IAM prepared, no cluster yet | `0` | There is no cluster identity to verify against. |
+| One | `0` or `1` | `1` is the secure choice. `0` remains valid indefinitely. |
+| Two or more | `0` only | `1` scopes IAM to one exact cluster name. Applying it while a second cluster shares the VPC removes the permissions that cluster's controllers depend on. |
+
+Additional rules that are easy to get wrong:
+
+- **A recorded `clusterName` does not mean you are on version `1`.**
+  `clusterName` is the phase-2 IAM-tightening input. At version `0` it is
+  recorded but does not restrict IAM. The version is the only thing that decides
+  whether cluster-specific conditions are active.
+- **Do not set `scopeTagPolicyVersion: 1` by editing the YAML.** The supported
+  transition is `scopes tags verify --enable`, which checks live AWS ownership
+  first. Direct Terraform enablement is rejected.
+- **Version `1` cannot be downgraded to `0`**, and its applied `clusterName`
+  cannot be changed. Treat enablement as one-way.
+- **Version `1` currently leaves security groups behind on cluster deletion.**
+  The IAM conditions key on `kubernetes.io/cluster/<name>`, which Cluster API
+  does not apply to security groups, so cleanup of those is denied. See
+  [Decommissioning](./decommissioning.md) before enabling version `1` on a
+  deployment you expect to tear down.
+
+If you are unsure how many clusters share the VPC, run the read-only
+verification described in [Verify readiness for single-cluster
+lockdown](#verify-readiness-for-single-cluster-lockdown). It reports conflicting
+owned-cluster identities rather than guessing.
+
 ## Scope file
 
 The YAML map key is the immutable scope reference:
@@ -159,6 +193,106 @@ plan rather than planning again.
 Add non-default scopes only after this default-only plan has been reviewed and
 successfully applied.
 
+## Reading the plan when you add a scope
+
+Adding a non-default scope produces a plan that appears to rewrite the existing
+default scope's live IAM. It does not. Read this section before you approve or
+abort one.
+
+A single added scope typically plans as:
+
+```text
+Plan: 50 to add, 10 to change, 0 to destroy.
+```
+
+The additions are the new scope's own resources, named with the scope reference
+suffix and therefore incapable of colliding with the default scope:
+
+```text
+ditto-capa-controller-dsc-01m00k3nvmkhr6b5a8yh91j7ff
+ditto-capa-nodes-dsc-01m00k3nvmkhr6b5a8yh91j7ff
+ditto-cluster-resources-boundary-dsc-01m00k3nvmkhr6b5a8yh91j7ff
+/dittocluster/dsc-01m00k3nvmkhr6b5a8yh91j7ff/
+```
+
+The changes are the default scope's policies, and each renders as its entire
+policy body being removed and replaced with `(known after apply)`. This is a
+Terraform artifact, not a real change: introducing the new module marks the data
+sources that build those policy documents as "will be read during apply", so
+Terraform cannot render the resulting content at plan time. When applied, the
+documents are recomputed identically and AWS is never called.
+
+> [!IMPORTANT]
+> Every other instruction in this document tells you to stop when a plan touches
+> resources you did not intend to change. This is the documented exception. Do
+> not abort solely because the default scope's policies appear in the change set
+> with unknown content.
+
+Verify rather than trust. Before applying, record the current policy versions:
+
+```bash
+for name in \
+  control-plane.cluster-api-provider-aws.sigs.k8s.io \
+  control-plane-tags.cluster-api-provider-aws.sigs.k8s.io \
+  ditto-capa-controller-policy \
+  ditto-capa-controller-network-policy \
+  nodes.cluster-api-provider-aws.sigs.k8s.io \
+  ditto-cluster-resources-boundary-policy \
+  ditto-iam-trust-editor-policy
+do
+  arn=$(aws --profile "$aws_profile" iam list-policies --scope Local \
+    --query "Policies[?PolicyName=='$name'].Arn" --output text)
+  ver=$(aws --profile "$aws_profile" iam get-policy --policy-arn "$arn" \
+    --query 'Policy.DefaultVersionId' --output text)
+  aws --profile "$aws_profile" iam get-policy-version \
+    --policy-arn "$arn" --version-id "$ver" \
+    --query 'PolicyVersion.Document' --output json > "$name.before.json"
+  printf '%s\t%s\n' "$ver" "$name"
+done
+```
+
+Apply, then repeat with `.after.json` and diff. Unchanged policies keep the same
+default version ID and produce no diff — a new policy version would appear as an
+incremented `v` number. Stop and investigate if any default-scope policy's
+version ID advances, or if a diff is not empty.
+
+Still refuse to continue if the plan contains any deletion, any replacement, or
+additions that are not suffixed with the new scope reference.
+
+### Known limitation: `dittocloud`-mode VPCs in a scope
+
+A scope with `vpc.mode: dittocloud` cannot currently be planned. Terraform fails
+before producing a plan:
+
+```text
+Error: Invalid count argument
+
+The "count" value depends on resource attributes that cannot be determined
+until apply, so Terraform cannot predict how many instances will be created.
+```
+
+The failure repeats for public and private subnets, both route tables, and the
+internet gateway. Because the plan covers every scope in the file, one such
+scope blocks all subsequent operations on that state, including operations on
+healthy scopes.
+
+Until this is fixed, use `vpc.mode: existing` with a VPC you have already
+created — see [Bring Your Own VPC](./bring-your-own-vpc.md) — or `vpc.mode:
+capi`.
+
+If you have already added an unplannable scope, remove it from the scopes file
+and restore the file from state:
+
+```bash
+dittocloud bootstrap aws scopes recover \
+  --state terraform.tfstate \
+  --scopes-file scopes.yaml.recovered
+```
+
+`scopes recover` writes only scopes that were successfully applied, so a scope
+that never applied is simply absent. Review the recovered file, then use it in
+place of the poisoned one.
+
 ## Recover a lost scopes file
 
 Every successful scope-mode apply stores the complete normalized configuration
@@ -221,6 +355,21 @@ kubernetes.io/cluster/<clusterName> = owned
 sigs.k8s.io/cluster-api-provider-aws/cluster/<clusterName> = owned
 elbv2.k8s.aws/cluster = <clusterName>
 ```
+
+These identities are verified where they exist; they are not all prerequisites.
+`elbv2.k8s.aws/cluster` is applied by the AWS Load Balancer Controller, so a
+cluster that has not yet published a load-balanced Service will not carry it.
+Its absence does not block version `1`. The command reports which keys it
+verified:
+
+```text
+Verified native ownership keys: kubernetes.io/cluster/<clusterName>,
+                                sigs.k8s.io/cluster-api-provider-aws/cluster/<clusterName>
+```
+
+You do not need to deploy a workload in order to lock down IAM. You do need a
+cluster: with no cluster in the scope VPC there are no native identities to
+verify, and the scope stays at version `0`.
 
 For an EKS scope it also resolves the exact named EKS cluster. The command
 verifies that the active AWS credentials match the account recorded by the
