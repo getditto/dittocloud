@@ -60,8 +60,6 @@ data "aws_subnets" "scoped_existing_private" {
     name   = "tag:kubernetes.io/role/internal-elb"
     values = ["1"]
   }
-
-  depends_on = [terraform_data.scope_registry]
 }
 
 data "aws_subnets" "scoped_existing_public" {
@@ -77,8 +75,6 @@ data "aws_subnets" "scoped_existing_public" {
     name   = "tag:kubernetes.io/role/elb"
     values = ["1"]
   }
-
-  depends_on = [terraform_data.scope_registry]
 }
 
 module "vpc" {
@@ -91,8 +87,6 @@ module "vpc" {
   manage_kubernetes_cluster_tag = false
   nat_gateway_name              = local.default_nat_gateway_name
   tags                          = local.default_scope_tags
-
-  depends_on = [terraform_data.scope_registry]
 }
 
 module "scoped_vpc" {
@@ -108,8 +102,6 @@ module "scoped_vpc" {
     var.tags,
     { "ditto.live/scope-ref" = each.key },
   )
-
-  depends_on = [terraform_data.scope_registry]
 }
 
 locals {
@@ -149,8 +141,6 @@ module "cross_account_iam" {
   vpc_id                                = local.effective_vpc_id
   vpc_subnet_ids                        = local.effective_vpc_subnet_ids
   tags                                  = local.default_scope_tags
-
-  depends_on = [terraform_data.scope_registry]
 }
 
 module "scoped_cross_account_iam" {
@@ -170,8 +160,6 @@ module "scoped_cross_account_iam" {
   vpc_id                                = local.scoped_effective_vpc_ids[each.key]
   vpc_subnet_ids                        = local.scoped_effective_vpc_subnet_ids[each.key]
   tags                                  = var.tags
-
-  depends_on = [terraform_data.scope_registry]
 }
 
 resource "terraform_data" "validate_vpc_mode" {

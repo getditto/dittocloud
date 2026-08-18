@@ -10,8 +10,6 @@ resource "aws_ec2_instance_metadata_defaults" "imdsv2" {
   count                       = local.default_region_requires_eks ? 1 : 0
   http_tokens                 = "required"
   http_put_response_hop_limit = 2
-
-  depends_on = [terraform_data.scope_registry]
 }
 
 # Additional EKS Regions use one Region-keyed singleton shared by every EKS
@@ -22,6 +20,4 @@ resource "aws_ec2_instance_metadata_defaults" "scoped_imdsv2" {
   region                      = each.key
   http_tokens                 = "required"
   http_put_response_hop_limit = 2
-
-  depends_on = [terraform_data.scope_registry]
 }
