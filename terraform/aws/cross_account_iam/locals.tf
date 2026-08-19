@@ -103,10 +103,11 @@ locals {
   # VPC confinement must only be added to actions and resource types that expose
   # ec2:Vpc. Launch templates, volumes, and instances do not expose that key, while
   # security groups, subnets, and network interfaces do.
-  ec2_vpc_ids = var.vpc_id != null ? concat([var.vpc_id], var.additional_authorized_vpc_ids) : []
-  ec2_vpc_arns = [
-    for id in local.ec2_vpc_ids : "arn:aws:ec2:${local.effective_region}:${data.aws_caller_identity.current.account_id}:vpc/${id}"
-  ]
+  # additional_authorized_vpc_arns are full ARNs (not bare IDs) since they can be in a different region than this scope.
+  ec2_vpc_arns = concat(
+    var.vpc_id != null ? ["arn:aws:ec2:${local.effective_region}:${data.aws_caller_identity.current.account_id}:vpc/${var.vpc_id}"] : [],
+    var.additional_authorized_vpc_arns,
+  )
 
   ec2_vpc_arn = length(local.ec2_vpc_arns) > 0 ? local.ec2_vpc_arns[0] : null
 

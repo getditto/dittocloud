@@ -136,14 +136,14 @@ variable "vpc_id" {
   default     = null
 }
 
-variable "additional_authorized_vpc_ids" {
+variable "additional_authorized_vpc_arns" {
   type        = list(string)
-  description = "Extra VPC IDs, beyond vpc_id, also authorized on this role's ec2:Vpc-scoped conditions."
+  description = "Extra VPC ARNs, beyond vpc_id, also authorized on this role's ec2:Vpc-scoped conditions."
   default     = []
 
   validation {
-    condition     = var.vpc_id != null || length(var.additional_authorized_vpc_ids) == 0
-    error_message = "additional_authorized_vpc_ids requires vpc_id to be set — there is no VPC-scoped policy to extend it onto otherwise."
+    condition     = var.vpc_id != null || length(var.additional_authorized_vpc_arns) == 0
+    error_message = "additional_authorized_vpc_arns requires vpc_id to be set — there is no VPC-scoped policy to extend it onto otherwise."
   }
 }
 

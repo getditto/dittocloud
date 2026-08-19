@@ -1055,7 +1055,7 @@ run "scoped_eks_boundary_stays_within_policy_size_limit" {
   }
 }
 
-run "additional_authorized_vpc_ids_extend_controller_vpc_conditions" {
+run "additional_authorized_vpc_arns_extend_controller_vpc_conditions" {
   command = plan
 
   module {
@@ -1063,8 +1063,10 @@ run "additional_authorized_vpc_ids_extend_controller_vpc_conditions" {
   }
 
   variables {
-    vpc_id                        = "vpc-09e877f9012f52241"
-    additional_authorized_vpc_ids = ["vpc-0f1e2d3c4b5a69788"]
+    vpc_id = "vpc-09e877f9012f52241"
+    additional_authorized_vpc_arns = [
+      "arn:aws:ec2:ap-southeast-2:520778242457:vpc/vpc-0f1e2d3c4b5a69788",
+    ]
   }
 
   assert {
@@ -1074,10 +1076,10 @@ run "additional_authorized_vpc_ids_extend_controller_vpc_conditions" {
       contains(try(statement.Resource, []), "arn:aws:ec2:*:*:subnet/*") &&
       toset(try(statement.Condition.StringEquals["ec2:Vpc"], [])) == toset([
         "arn:aws:ec2:us-west-2:520778242457:vpc/vpc-09e877f9012f52241",
-        "arn:aws:ec2:us-west-2:520778242457:vpc/vpc-0f1e2d3c4b5a69788",
+        "arn:aws:ec2:ap-southeast-2:520778242457:vpc/vpc-0f1e2d3c4b5a69788",
       ])
     ]) == 1
-    error_message = "RunInstances' ec2:Vpc condition must OR-match every VPC in vpc_id plus additional_authorized_vpc_ids."
+    error_message = "RunInstances' ec2:Vpc condition must OR-match every VPC in vpc_id plus additional_authorized_vpc_arns, in its own region."
   }
 
   assert {
@@ -1086,10 +1088,10 @@ run "additional_authorized_vpc_ids_extend_controller_vpc_conditions" {
       if contains(try(statement.Action, []), "ec2:CreateSecurityGroup") &&
       toset(try(statement.Resource, [])) == toset([
         "arn:aws:ec2:us-west-2:520778242457:vpc/vpc-09e877f9012f52241",
-        "arn:aws:ec2:us-west-2:520778242457:vpc/vpc-0f1e2d3c4b5a69788",
+        "arn:aws:ec2:ap-southeast-2:520778242457:vpc/vpc-0f1e2d3c4b5a69788",
       ])
     ]) == 1
-    error_message = "CreateSecurityGroup's direct VPC-resource authorization must list every VPC in vpc_id plus additional_authorized_vpc_ids."
+    error_message = "CreateSecurityGroup's direct VPC-resource authorization must list every VPC in vpc_id plus additional_authorized_vpc_arns."
   }
 
   assert {
@@ -1097,13 +1099,13 @@ run "additional_authorized_vpc_ids_extend_controller_vpc_conditions" {
       for statement in jsondecode(aws_iam_policy.capa_control_plane.policy).Statement : statement
       if contains(try(statement.Action, []), "ec2:CreateSecurityGroup") &&
       contains(try(statement.Resource, []), "arn:aws:ec2:us-west-2:520778242457:vpc/vpc-09e877f9012f52241") &&
-      !contains(try(statement.Resource, []), "arn:aws:ec2:us-west-2:520778242457:vpc/vpc-0f1e2d3c4b5a69788")
+      !contains(try(statement.Resource, []), "arn:aws:ec2:ap-southeast-2:520778242457:vpc/vpc-0f1e2d3c4b5a69788")
     ]) == 1
-    error_message = "Single-VPC callers like control-plane IAM must keep seeing only the scope's own vpc_id, not additional_authorized_vpc_ids."
+    error_message = "Single-VPC callers like control-plane IAM must keep seeing only the scope's own vpc_id, not additional_authorized_vpc_arns."
   }
 }
 
-run "single_vpc_condition_stays_scalar_without_additional_authorized_vpc_ids" {
+run "single_vpc_condition_stays_scalar_without_additional_authorized_vpc_arns" {
   command = plan
 
   module {
@@ -1121,6 +1123,6 @@ run "single_vpc_condition_stays_scalar_without_additional_authorized_vpc_ids" {
       contains(try(statement.Resource, []), "arn:aws:ec2:*:*:subnet/*") &&
       try(statement.Condition.StringEquals["ec2:Vpc"], null) == "arn:aws:ec2:us-west-2:520778242457:vpc/vpc-09e877f9012f52241"
     ]) == 1
-    error_message = "Without additional_authorized_vpc_ids, ec2:Vpc must stay a plain string, not a single-element list, to keep the generated policy unchanged."
+    error_message = "Without additional_authorized_vpc_arns, ec2:Vpc must stay a plain string, not a single-element list, to keep the generated policy unchanged."
   }
 }

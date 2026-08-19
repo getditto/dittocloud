@@ -270,8 +270,8 @@ variable "vpc_id" {
   default     = null
 }
 
-variable "additional_authorized_vpc_ids" {
+variable "additional_authorized_vpc_arns" {
   type        = list(string)
-  description = "Extra VPC IDs also authorized on the default scope's controller role. Ignored for non-default scopes."
+  description = "Extra VPC ARNs also authorized on the default scope's controller role. Ignored for non-default scopes."
   default     = []
 }
