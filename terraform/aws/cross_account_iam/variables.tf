@@ -136,14 +136,14 @@ variable "vpc_id" {
   default     = null
 }
 
-variable "additional_vpc_ids" {
+variable "additional_authorized_vpc_ids" {
   type        = list(string)
   description = "Extra VPC IDs, beyond vpc_id, whose resources should also satisfy this role's ec2:Vpc-scoped conditions. For a shared role assumed by clusters in more than one VPC."
   default     = []
 
   validation {
-    condition     = var.vpc_id != null || length(var.additional_vpc_ids) == 0
-    error_message = "additional_vpc_ids requires vpc_id to be set — there is no VPC-scoped policy to extend it onto otherwise."
+    condition     = var.vpc_id != null || length(var.additional_authorized_vpc_ids) == 0
+    error_message = "additional_authorized_vpc_ids requires vpc_id to be set — there is no VPC-scoped policy to extend it onto otherwise."
   }
 }
 

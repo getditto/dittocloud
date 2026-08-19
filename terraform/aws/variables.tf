@@ -270,7 +270,7 @@ variable "vpc_id" {
   default     = null
 }
 
-variable "additional_vpc_ids" {
+variable "additional_authorized_vpc_ids" {
   type        = list(string)
   description = "Extra VPC IDs, beyond the default scope's own VPC, whose resources should also satisfy the default scope's controller role ec2:Vpc conditions. Not applied to non-default scopes."
   default     = []
