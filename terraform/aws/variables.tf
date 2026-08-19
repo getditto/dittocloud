@@ -269,3 +269,9 @@ variable "vpc_id" {
   description = "ID of an existing customer-managed VPC. Required when customer_managed_vpc is true. Terraform automatically uses the created VPC ID when create_vpc is true."
   default     = null
 }
+
+variable "additional_vpc_ids" {
+  type        = list(string)
+  description = "Extra pre-existing VPC IDs, beyond the default scope's own VPC (vpc_id in legacy mode, or the default deployment scope's vpc.id in scope mode), whose resources should also satisfy this account's default/unsuffixed controller role's ec2:Vpc-scoped conditions. For a shared controller role still assumed by clusters in other VPCs that predate this module managing the account's IAM. Only applies to the default scope's controller role — non-default scopes are always freshly provisioned and never need it."
+  default     = []
+}
