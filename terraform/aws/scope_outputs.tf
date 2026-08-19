@@ -91,6 +91,33 @@ locals {
     ])
   }
 
+  # The workload tiers are published separately from aws_scope_outputs, which
+  # carries the IAM and load-balancer surface. Only a Dittocloud-managed VPC has
+  # workload subnets to report, and every value here comes from the same module,
+  # so each element of this map keeps one consistent type.
+  aws_workload_networking_output = {
+    for scope_ref, scope in var.deployment_scopes : scope_ref => {
+      scopeRef      = scope_ref
+      secondaryCidr = scope.vpc.secondary_cidr
+      podSubnetIds = sort(
+        scope.default ? module.vpc[0].vpc.pod_subnets : module.scoped_vpc[scope_ref].vpc.pod_subnets
+      )
+      nodeSubnetIds = sort(
+        scope.default ? module.vpc[0].vpc.node_subnets : module.scoped_vpc[scope_ref].vpc.node_subnets
+      )
+      # One ENIConfig per availability zone is what VPC CNI custom networking
+      # needs to place pods in the pod subnet instead of the node subnet.
+      podSubnetsByAz = [
+        for entry in(scope.default ? module.vpc[0].pod_subnets_by_az : module.scoped_vpc[scope_ref].pod_subnets_by_az) : {
+          availabilityZone = entry.availability_zone
+          subnetId         = entry.subnet_id
+        }
+      ]
+      natPublicIps = scope.default ? module.vpc[0].nat_public_ips : module.scoped_vpc[scope_ref].nat_public_ips
+    }
+    if local.scope_outputs_enabled && scope.vpc.mode == "dittocloud"
+  }
+
   aws_regional_resources_output = {
     for region, scope_refs in local.scope_refs_by_region : region => {
       region    = region

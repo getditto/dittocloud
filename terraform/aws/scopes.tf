@@ -62,8 +62,24 @@ locals {
       scope.scope_tag_policy_version == 1 ? scope.cluster_name : null
     )
   }
-  default_nat_gateway_name = local.default_scope != null ? local.default_scope.vpc.nat_gateway_name : null
-  default_enable_eks       = local.scope_mode ? try(local.default_scope.cluster_type == "eks", false) : var.enable_eks
+  default_nat_gateway_name   = local.default_scope != null ? local.default_scope.vpc.nat_gateway_name : null
+  default_vpc_secondary_cidr = local.default_scope != null ? local.default_scope.vpc.secondary_cidr : var.vpc_secondary_cidr
+  default_public_subnet_netmask = (
+    local.default_scope != null ? local.default_scope.vpc.public_subnet_netmask : var.public_subnet_netmask
+  )
+  default_private_subnet_netmask = (
+    local.default_scope != null ? local.default_scope.vpc.private_subnet_netmask : var.private_subnet_netmask
+  )
+  # The node subnets carry karpenter.sh/discovery. In scope mode the scope's own
+  # cluster name is the value; the legacy path takes an explicit variable and
+  # falls back to the IAM cluster name when one is configured.
+  default_karpenter_discovery_tag_value = local.default_scope != null ? local.default_scope.cluster_name : try(
+    coalesce(var.karpenter_discovery_tag_value, var.cluster_name), null
+  )
+  default_nat_gateway_eip_allocation_ids = (
+    local.default_scope != null ? local.default_scope.vpc.nat_gateway_eip_allocation_ids : var.nat_gateway_eip_allocation_ids
+  )
+  default_enable_eks = local.scope_mode ? try(local.default_scope.cluster_type == "eks", false) : var.enable_eks
   default_scope_tags = local.scope_mode && local.default_scope_ref != null ? merge(
     var.tags,
     { "ditto.live/scope-ref" = local.default_scope_ref },
@@ -134,11 +150,15 @@ resource "terraform_data" "scope_configuration" {
       region                   = each.value.region
       scope_tag_policy_version = each.value.scope_tag_policy_version
       vpc = {
-        mode             = each.value.vpc.mode
-        name             = each.value.vpc.name
-        cidr             = each.value.vpc.cidr
-        id               = each.value.vpc.id
-        nat_gateway_name = each.value.vpc.nat_gateway_name
+        mode                           = each.value.vpc.mode
+        name                           = each.value.vpc.name
+        cidr                           = each.value.vpc.cidr
+        secondary_cidr                 = each.value.vpc.secondary_cidr
+        public_subnet_netmask          = each.value.vpc.public_subnet_netmask
+        private_subnet_netmask         = each.value.vpc.private_subnet_netmask
+        id                             = each.value.vpc.id
+        nat_gateway_name               = each.value.vpc.nat_gateway_name
+        nat_gateway_eip_allocation_ids = each.value.vpc.nat_gateway_eip_allocation_ids
       }
     }
   }

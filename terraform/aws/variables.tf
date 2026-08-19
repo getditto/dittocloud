@@ -22,11 +22,15 @@ variable "deployment_scopes" {
     region                   = string
     scope_tag_policy_version = optional(number, 0)
     vpc = object({
-      mode             = string
-      name             = optional(string)
-      cidr             = optional(string)
-      id               = optional(string)
-      nat_gateway_name = optional(string)
+      mode                           = string
+      name                           = optional(string)
+      cidr                           = optional(string)
+      secondary_cidr                 = optional(string)
+      public_subnet_netmask          = optional(number, 24)
+      private_subnet_netmask         = optional(number, 23)
+      id                             = optional(string)
+      nat_gateway_name               = optional(string)
+      nat_gateway_eip_allocation_ids = optional(list(string), [])
     })
   }))
   default = {}
@@ -115,6 +119,70 @@ variable "deployment_scopes" {
       )
     ])
     error_message = "nat_gateway_name can only be set for a Dittocloud-managed VPC and must contain 1 to 256 non-whitespace-bounded characters."
+  }
+
+  # A scope is one VPC, so each scope owns its own workload block and its own
+  # subnet sizing. Two scopes sharing a secondary CIDR could never be peered.
+  validation {
+    condition = alltrue([
+      for scope in values(var.deployment_scopes) :
+      scope.vpc.secondary_cidr == null ? true : (
+        scope.vpc.mode == "dittocloud" &&
+        contains([for index in range(64) : cidrsubnet("100.64.0.0/10", 6, index)], scope.vpc.secondary_cidr) &&
+        scope.vpc.secondary_cidr != "100.66.0.0/16"
+      )
+    ])
+    error_message = "A scope secondary_cidr can only be set for a Dittocloud-managed VPC and must be one of the 64 /16 blocks inside 100.64.0.0/10, excluding the reserved 100.66.0.0/16."
+  }
+
+  validation {
+    condition = length(distinct([
+      for scope in values(var.deployment_scopes) : scope.vpc.secondary_cidr
+      if scope.vpc.secondary_cidr != null
+      ])) == length([
+      for scope in values(var.deployment_scopes) : scope.vpc.secondary_cidr
+      if scope.vpc.secondary_cidr != null
+    ])
+    error_message = "Each scope secondary_cidr must be unique: AWS rejects a peering connection when any associated CIDR overlaps, secondary blocks included, regardless of routing intent."
+  }
+
+  validation {
+    condition = alltrue([
+      for scope in values(var.deployment_scopes) :
+      scope.vpc.mode == "dittocloud" || (
+        scope.vpc.public_subnet_netmask == 24 &&
+        scope.vpc.private_subnet_netmask == 23 &&
+        length(scope.vpc.nat_gateway_eip_allocation_ids) == 0
+      )
+    ])
+    error_message = "Subnet netmasks and NAT Elastic IP allocations can only be set for a Dittocloud-managed VPC."
+  }
+
+  validation {
+    condition = alltrue([
+      for scope in values(var.deployment_scopes) :
+      scope.vpc.mode != "dittocloud" || (
+        scope.vpc.public_subnet_netmask <= 24 &&
+        scope.vpc.private_subnet_netmask <= 24 &&
+        scope.vpc.public_subnet_netmask >= tonumber(split("/", scope.vpc.cidr)[1]) + 4 &&
+        scope.vpc.private_subnet_netmask >= tonumber(split("/", scope.vpc.cidr)[1]) + 2
+      )
+    ])
+    error_message = "A Dittocloud-managed VPC needs load-balancer subnets of at least a /24 that fit inside its primary CIDR: public_subnet_netmask at least 4 bits and private_subnet_netmask at least 2 bits longer than the VPC prefix."
+  }
+
+  validation {
+    condition = alltrue([
+      for scope in values(var.deployment_scopes) :
+      length(scope.vpc.nat_gateway_eip_allocation_ids) == 0 || (
+        length(scope.vpc.nat_gateway_eip_allocation_ids) == 3 &&
+        alltrue([
+          for allocation_id in scope.vpc.nat_gateway_eip_allocation_ids :
+          can(regex("^eipalloc-(?:[0-9a-f]{8}|[0-9a-f]{17})$", allocation_id))
+        ])
+      )
+    ])
+    error_message = "nat_gateway_eip_allocation_ids must be empty or contain one eipalloc- identifier for each of the three availability zones."
   }
 }
 
@@ -243,8 +311,40 @@ variable "vpc_name" {
 }
 
 variable "vpc_cidr" {
-  description = "The IPv4 CIDR block for the VPC."
+  description = "The primary IPv4 CIDR block for the VPC. This block is a DMZ carrying load balancers, NAT gateways, and explicitly placed EC2 only."
   default     = "10.210.0.0/16"
+}
+
+variable "vpc_secondary_cidr" {
+  description = "Optional secondary IPv4 CIDR block carrying every workload tier (pod, node, database). Must be one of the 64 /16 blocks inside 100.64.0.0/10 and unique per VPC, because AWS rejects a peering connection when any associated CIDR overlaps."
+  type        = string
+  default     = null
+  nullable    = true
+}
+
+variable "public_subnet_netmask" {
+  description = "Netmask for each per-AZ public DMZ subnet. Pin this to the value an existing deployment already uses; changing it renumbers live subnets."
+  type        = number
+  default     = 24
+}
+
+variable "private_subnet_netmask" {
+  description = "Netmask for each per-AZ private DMZ subnet. Pin this to the value an existing deployment already uses; changing it renumbers live subnets."
+  type        = number
+  default     = 23
+}
+
+variable "karpenter_discovery_tag_value" {
+  description = "Value for the karpenter.sh/discovery tag on the node subnets, which is how Karpenter finds where to launch nodes. Defaults to cluster_name when set; the tag is omitted when neither is set. Terraform has to own this tag because the CAPA controller boundary does not permit the karpenter.sh namespace."
+  type        = string
+  default     = null
+  nullable    = true
+}
+
+variable "nat_gateway_eip_allocation_ids" {
+  description = "Optional pre-allocated Elastic IP allocation IDs for the NAT gateways, one per availability zone in order. When empty the module allocates and owns the addresses itself."
+  type        = list(string)
+  default     = []
 }
 
 variable "tags" {
