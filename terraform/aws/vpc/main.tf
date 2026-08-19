@@ -243,16 +243,6 @@ output "pod_subnets_by_az" {
   ]
 }
 
-output "node_subnets_by_az" {
-  description = "Node subnet for each availability zone."
-  value = [
-    for az in local.azs : {
-      availability_zone = az
-      subnet_id         = aws_subnet.node[az].id
-    } if local.secondary_enabled
-  ]
-}
-
 output "nat_eip_allocation_ids" {
   description = "Elastic IP allocation IDs backing the NAT gateways, in availability zone order."
   value       = local.nat_eip_allocation_ids

@@ -42,6 +42,17 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 				); err != nil {
 					return err
 				}
+				allowRenumbering, err := cmd.Flags().GetBool(awsAllowSubnetRenumberingFlag)
+				if err != nil {
+					return fmt.Errorf("unable to get %s: %w", awsAllowSubnetRenumberingFlag, err)
+				}
+				if err := validateAWSScopeSubnetRenumbering(
+					commandCanonicalStatePath(cmd),
+					scopes,
+					allowRenumbering,
+				); err != nil {
+					return err
+				}
 				profile, err := cmd.Flags().GetString("aws-profile")
 				if err != nil {
 					return fmt.Errorf("unable to get aws-profile: %w", err)
@@ -118,6 +129,9 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 			if err := validateAWSLegacyModeState(commandCanonicalStatePath(cmd)); err != nil {
 				return err
 			}
+			if err := validateAWSLegacySubnetRenumbering(commandCanonicalStatePath(cmd), cmd.Flags()); err != nil {
+				return err
+			}
 
 			customerManagedVPC, err := cmd.Flags().GetBool("customer-managed-vpc")
 			if err != nil {
@@ -185,6 +199,11 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 		"aws-vpc-nat-eip-allocation-ids",
 		[]string{},
 		"Pre-allocated Elastic IP allocation IDs for the NAT gateways, one per availability zone in order (repeatable)",
+	)
+	cmd.Flags().Bool(
+		awsAllowSubnetRenumberingFlag,
+		false,
+		"Authorize a subnet netmask change that replaces existing subnets, and the NAT gateways, nodes, and load balancers attached to them",
 	)
 	cmd.Flags().String(
 		"karpenter-discovery-tag-value",
@@ -382,6 +401,8 @@ func awsScopeTerraformVariables(
 
 	return values, nil
 }
+
+const awsAllowSubnetRenumberingFlag = "allow-subnet-renumbering"
 
 // awsManagedVPCFlags configure a VPC that Dittocloud creates, so none of them
 // mean anything without --create-vpc.

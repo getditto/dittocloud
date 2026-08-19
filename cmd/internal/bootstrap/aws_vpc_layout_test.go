@@ -274,3 +274,156 @@ func TestAWSLegacyVPCFlagsForwardWorkloadConfiguration(t *testing.T) {
 		}
 	})
 }
+
+func writeAWSLegacySubnetStateFile(t *testing.T, publicCIDR, privateCIDR string) string {
+	t.Helper()
+	return writeTerraformStateTestFile(t, rawTerraformStateWithResources([]any{
+		rawAWSLegacyManagedSubnetResource("public", publicCIDR),
+		rawAWSLegacyManagedSubnetResource("private", privateCIDR),
+	}))
+}
+
+func TestAWSLegacySubnetRenumberingPreflight(t *testing.T) {
+	t.Run("refuses to renumber the subnets already in state", func(t *testing.T) {
+		statePath := writeAWSLegacySubnetStateFile(t, "10.214.0.0/22", "10.214.64.0/18")
+		cmd, mock := setupBootstrapTest(t, []string{
+			"aws",
+			"--aws-profile=test-profile",
+			"--state=" + statePath,
+			"--dry-run",
+		})
+
+		err := cmd.Execute()
+		if err == nil {
+			t.Fatal("expected a renumbering refusal")
+		}
+		for _, want := range []string{
+			"would renumber the private and public subnets",
+			"public subnets: /22 applied, /24 requested",
+			"private subnets: /18 applied, /23 requested",
+			"--aws-vpc-public-subnet-netmask 22",
+			"--aws-vpc-private-subnet-netmask 18",
+			"--allow-subnet-renumbering",
+		} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q does not contain %q", err.Error(), want)
+			}
+		}
+		assertCallCounts(t, mock, 0, 0, 0)
+	})
+
+	t.Run("accepts the sizing that state already has", func(t *testing.T) {
+		statePath := writeAWSLegacySubnetStateFile(t, "10.214.0.0/22", "10.214.64.0/18")
+		cmd, _ := setupBootstrapTest(t, []string{
+			"aws",
+			"--aws-profile=test-profile",
+			"--state=" + statePath,
+			"--aws-vpc-public-subnet-netmask=22",
+			"--aws-vpc-private-subnet-netmask=18",
+			"--dry-run",
+		})
+
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error for pinned sizing: %v", err)
+		}
+	})
+
+	t.Run("allows a deliberate renumbering", func(t *testing.T) {
+		statePath := writeAWSLegacySubnetStateFile(t, "10.214.0.0/22", "10.214.64.0/18")
+		cmd, _ := setupBootstrapTest(t, []string{
+			"aws",
+			"--aws-profile=test-profile",
+			"--state=" + statePath,
+			"--allow-subnet-renumbering",
+			"--dry-run",
+		})
+
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error for authorized renumbering: %v", err)
+		}
+	})
+
+	t.Run("stays quiet when Dittocloud does not manage the VPC", func(t *testing.T) {
+		statePath := writeAWSLegacySubnetStateFile(t, "10.214.0.0/22", "10.214.64.0/18")
+		cmd, _ := setupBootstrapTest(t, []string{
+			"aws",
+			"--aws-profile=test-profile",
+			"--state=" + statePath,
+			"--create-vpc=false",
+			"--dry-run",
+		})
+
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error when Cluster API owns the VPC: %v", err)
+		}
+	})
+}
+
+func TestAWSScopeSubnetRenumberingPreflight(t *testing.T) {
+	appliedScope := AWSDeploymentScope{
+		Default:     true,
+		ClusterType: awsClusterTypeKubeadm,
+		Region:      "ap-southeast-2",
+		VPC: AWSScopeVPC{
+			Mode:                 awsVPCModeDittocloud,
+			Name:                 "valet",
+			CIDR:                 "10.214.0.0/16",
+			PublicSubnetNetmask:  awsLegacyPublicSubnetNetmask,
+			PrivateSubnetNetmask: awsLegacyPrivateSubnetNetmask,
+		},
+	}
+	state := rawScopeRegistryState(
+		rawScopeRegistryInstance(testDefaultScopeRef, testDefaultScopeRef, true),
+	)
+	appendRawTerraformStateResource(state, rawScopeConfigurationResource(
+		rawScopeConfigurationInstance(testDefaultScopeRef, testDefaultScopeRef, appliedScope),
+	))
+	statePath := writeTerraformStateTestFile(t, state)
+
+	t.Run("refuses sizing that differs from the applied configuration", func(t *testing.T) {
+		desired := appliedScope
+		desired.VPC.PublicSubnetNetmask = awsDefaultPublicSubnetNetmask
+		desired.VPC.PrivateSubnetNetmask = awsDefaultPrivateSubnetNetmask
+
+		err := validateAWSScopeSubnetRenumbering(
+			statePath,
+			AWSDeploymentScopes{testDefaultScopeRef: desired},
+			false,
+		)
+		if err == nil {
+			t.Fatal("expected a renumbering refusal")
+		}
+		for _, want := range []string{
+			"would renumber its private and public subnets",
+			"vpc.publicSubnetNetmask: 22",
+			"vpc.privateSubnetNetmask: 18",
+		} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q does not contain %q", err.Error(), want)
+			}
+		}
+	})
+
+	t.Run("accepts the applied sizing", func(t *testing.T) {
+		if err := validateAWSScopeSubnetRenumbering(
+			statePath,
+			AWSDeploymentScopes{testDefaultScopeRef: appliedScope},
+			false,
+		); err != nil {
+			t.Fatalf("unexpected error for unchanged sizing: %v", err)
+		}
+	})
+
+	t.Run("allows a deliberate renumbering", func(t *testing.T) {
+		desired := appliedScope
+		desired.VPC.PublicSubnetNetmask = awsDefaultPublicSubnetNetmask
+
+		if err := validateAWSScopeSubnetRenumbering(
+			statePath,
+			AWSDeploymentScopes{testDefaultScopeRef: desired},
+			true,
+		); err != nil {
+			t.Fatalf("unexpected error for authorized renumbering: %v", err)
+		}
+	})
+}

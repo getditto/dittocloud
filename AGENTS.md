@@ -89,7 +89,7 @@ go test ./...
 
 **DMZ + Workload Split**: The primary CIDR (`vpc_cidr`) is a DMZ carrying only load balancers, NAT gateways, and explicitly placed EC2 — it is the only surface a peered VPC ever sees. Public subnets default to `/24` and private to `/23`, each allocated from its own aligned block so resizing one tier never renumbers another (`terraform/aws/vpc/layout.tf`). Setting `vpc_secondary_cidr` adds a second CIDR out of `100.64.0.0/10` carrying every workload tier: pod `/18`, node `/22`, and database `/22` per AZ, plus one spare block per tier and a reserved `/19`. `100.66.0.0/16` is rejected because Valet clusters use it for in-cluster pod and Service addressing.
 
-**Subnet Renumbering**: Subnet CIDRs are derived from `public_subnet_netmask` and `private_subnet_netmask`, so changing either renumbers live subnets and recreates the NAT gateways, nodes, and load balancers with them. A deployment created before the DMZ split must pin `public_subnet_netmask = 22` and `private_subnet_netmask = 18`; against a `/16` primary that reproduces the previous allocation exactly. `bootstrap aws scopes generate` reads the sizing back from the subnets already in state, and a schema 1 configuration snapshot recovers with those legacy values pinned.
+**Subnet Renumbering**: Subnet CIDRs are derived from `public_subnet_netmask` and `private_subnet_netmask`, so changing either renumbers live subnets and recreates the NAT gateways, nodes, and load balancers with them. A deployment created before the DMZ split must pin `public_subnet_netmask = 22` and `private_subnet_netmask = 18`; against a `/16` primary that reproduces the previous allocation exactly. `bootstrap aws scopes generate` reads the sizing back from the subnets already in state, and a schema 1 configuration snapshot recovers with those legacy values pinned. The CLI refuses the run before invoking Terraform when the requested sizing differs from what exists — single-scope mode compares the subnets in state, scope mode compares each scope's applied configuration snapshot, and `--allow-subnet-renumbering` authorizes it deliberately (`aws_subnet_renumbering.go`).
 
 **Workload Routing**: Pod and node subnets share one route table per AZ (`<vpc>-workload-<az>`) carrying `local` plus a default route to that AZ's NAT gateway. Database subnets get their own per-AZ tables. None of them carry peering routes — peering attaches to the private DMZ only, and a workload initiating a connection to a peered VPC from a `100.64` address fails on the return path. That case needs a terminating proxy in the DMZ and is unsupported.
 
@@ -117,6 +117,7 @@ go test ./...
 - `--iam-trusted-role-arns` — override trust editor trusted ARNs
 - `--customer-managed-vpc` — omit VPC creation and VPC lifecycle IAM permissions
 - `--vpc-id` — restrict CAPA EC2 create/mutate operations to a specific VPC via `ec2:Vpc` condition; can be combined with either phase; mutually exclusive with `--aws-vpc-name`/`--aws-vpc-cidr`
+- `--allow-subnet-renumbering` — authorize a netmask change that replaces existing subnets
 - `--cluster-name` — phase-2 lock-down; requires existing state file
 
 ## Testing

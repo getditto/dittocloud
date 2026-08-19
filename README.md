@@ -122,7 +122,10 @@ in its own availability zone and never crosses a peering connection.
 > dittocloud bootstrap aws >   --aws-vpc-cidr 10.214.0.0/16 >   --aws-vpc-public-subnet-netmask 22 >   --aws-vpc-private-subnet-netmask 18
 > ```
 >
-> Review the plan before applying and confirm no subnet is being replaced.
+> Dittocloud refuses the run before invoking Terraform when the requested
+> sizing differs from the subnets that already exist, and names the flags to
+> pin. Pass `--allow-subnet-renumbering` only when replacing those subnets is
+> what you actually intend.
 
 AWS multi-scope configuration, legacy conversion, registry seeding, and
 backup-based rollback are documented in
