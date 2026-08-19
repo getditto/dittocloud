@@ -1055,11 +1055,8 @@ run "scoped_eks_boundary_stays_within_policy_size_limit" {
   }
 }
 
-# A shared/unsuffixed controller role can predate this module's one-VPC-per-
-# scope model and still be assumed by clusters in other, older VPCs.
-# additional_vpc_ids must extend ec2:Vpc-scoped controller conditions to
-# those VPCs too, as an OR-match, without touching the single-VPC shape used
-# by control-plane IAM or the trust-editor boundary template.
+# additional_vpc_ids must OR-match its VPCs on the controller role only,
+# leaving control-plane IAM seeing just vpc_id.
 run "additional_vpc_ids_extend_controller_vpc_conditions" {
   command = plan
 
@@ -1108,9 +1105,7 @@ run "additional_vpc_ids_extend_controller_vpc_conditions" {
   }
 }
 
-# The common case — no additional_vpc_ids — must render byte-for-byte the
-# same as before additional_vpc_ids existed: a scalar ec2:Vpc, not a
-# single-element list.
+# Without additional_vpc_ids, ec2:Vpc must stay a scalar, not a list.
 run "single_vpc_condition_stays_scalar_without_additional_vpc_ids" {
   command = plan
 

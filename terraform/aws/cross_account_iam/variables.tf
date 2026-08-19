@@ -138,7 +138,7 @@ variable "vpc_id" {
 
 variable "additional_vpc_ids" {
   type        = list(string)
-  description = "Extra pre-existing VPC IDs, beyond vpc_id, that this scope's CAPA controller role must also satisfy ec2:Vpc-scoped conditions and VPC resource ARNs for. For a shared/unsuffixed controller role (scope_ref == null) still assumed by clusters in VPCs other than vpc_id — a role predating this module's one-VPC-per-scope model. Ignored when vpc_id is null, since there is then no VPC-scoped controller policy to extend."
+  description = "Extra VPC IDs, beyond vpc_id, whose resources should also satisfy this role's ec2:Vpc-scoped conditions. For a shared role assumed by clusters in more than one VPC."
   default     = []
 
   validation {
