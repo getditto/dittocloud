@@ -103,12 +103,35 @@ locals {
   # VPC confinement must only be added to actions and resource types that expose
   # ec2:Vpc. Launch templates, volumes, and instances do not expose that key, while
   # security groups, subnets, and network interfaces do.
-  ec2_vpc_arn = var.vpc_id != null ? "arn:aws:ec2:${local.effective_region}:${data.aws_caller_identity.current.account_id}:vpc/${var.vpc_id}" : null
+  # All VPCs this scope's controller role must be authorized against: the
+  # scope's own vpc_id plus any additional_vpc_ids for pre-existing clusters
+  # still sharing a role that predates this module's one-VPC-per-scope model.
+  ec2_vpc_ids = var.vpc_id != null ? concat([var.vpc_id], var.additional_vpc_ids) : []
+  ec2_vpc_arns = [
+    for id in local.ec2_vpc_ids : "arn:aws:ec2:${local.effective_region}:${data.aws_caller_identity.current.account_id}:vpc/${id}"
+  ]
 
-  # ec2:Vpc StringEquals entries — empty map when vpc_id is not set.
-  ec2_vpc_string_equals = var.vpc_id != null ? {
-    "ec2:Vpc" = local.ec2_vpc_arn
-  } : {}
+  # Single-VPC callers (control-plane IAM, the trust-editor boundary template)
+  # only ever had one VPC to reason about — keep giving them just the scope's
+  # own vpc_id, not the additional ones a shared controller role also covers.
+  ec2_vpc_arn = length(local.ec2_vpc_arns) > 0 ? local.ec2_vpc_arns[0] : null
+
+  # ec2:Vpc StringEquals entries — empty map when vpc_id is not set. A list
+  # value is an OR-match against the single-valued ec2:Vpc context key, so
+  # multiple VPCs authorize as any-of. Kept scalar in the (default, and by far
+  # most common) single-VPC case so existing generated policies are unchanged
+  # byte-for-byte when additional_vpc_ids is not used.
+  #
+  # A direct `cond ? {"ec2:Vpc" = string} : {"ec2:Vpc" = list(string)}` fails
+  # Terraform's static type unification (string and list(string) don't
+  # unify). Routing the choice through jsonencode/jsondecode makes both
+  # ternary branches plain strings, which do unify, then restores the right
+  # runtime shape.
+  ec2_vpc_string_equals = length(local.ec2_vpc_arns) == 0 ? {} : jsondecode(
+    length(local.ec2_vpc_arns) == 1
+    ? jsonencode({ "ec2:Vpc" = local.ec2_vpc_arns[0] })
+    : jsonencode({ "ec2:Vpc" = local.ec2_vpc_arns })
+  )
 
   # Creation-time cluster ownership. Only use this with actions that support
   # aws:RequestTag; CreateLaunchTemplateVersion is an existing-resource mutation.

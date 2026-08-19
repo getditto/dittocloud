@@ -134,7 +134,7 @@ resource "aws_iam_policy" "capa_controller_base" {
       {
         Effect   = "Allow"
         Action   = ["ec2:CreateSecurityGroup"]
-        Resource = [local.ec2_vpc_arn != null ? local.ec2_vpc_arn : "arn:aws:ec2:*:*:vpc/*"]
+        Resource = length(local.ec2_vpc_arns) > 0 ? local.ec2_vpc_arns : ["arn:aws:ec2:*:*:vpc/*"]
       },
       # RunInstances authorizes several resource types. Require the ownership tag
       # only on the instance created by the request.
@@ -344,7 +344,7 @@ resource "aws_iam_policy" "capa_controller_network" {
       {
         Effect    = "Allow"
         Action    = ["ec2:CreateTags", "ec2:DeleteTags"]
-        Resource  = [local.ec2_vpc_arn != null ? local.ec2_vpc_arn : "arn:aws:ec2:*:*:vpc/*"]
+        Resource  = length(local.ec2_vpc_arns) > 0 ? local.ec2_vpc_arns : ["arn:aws:ec2:*:*:vpc/*"]
         Condition = local.ec2_existing_tag_cond
       },
       {

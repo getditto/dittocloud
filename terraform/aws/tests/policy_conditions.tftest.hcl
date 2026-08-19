@@ -1054,3 +1054,81 @@ run "scoped_eks_boundary_stays_within_policy_size_limit" {
     error_message = "Both CreateLoadBalancer and SetSubnets must stay confined to the configured VPC's load-balancer subnets."
   }
 }
+
+# A shared/unsuffixed controller role can predate this module's one-VPC-per-
+# scope model and still be assumed by clusters in other, older VPCs.
+# additional_vpc_ids must extend ec2:Vpc-scoped controller conditions to
+# those VPCs too, as an OR-match, without touching the single-VPC shape used
+# by control-plane IAM or the trust-editor boundary template.
+run "additional_vpc_ids_extend_controller_vpc_conditions" {
+  command = plan
+
+  module {
+    source = "./cross_account_iam"
+  }
+
+  variables {
+    vpc_id             = "vpc-09e877f9012f52241"
+    additional_vpc_ids = ["vpc-06663b5b9e216f77b"]
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.capa_controller_base.policy).Statement : statement
+      if contains(try(statement.Action, []), "ec2:RunInstances") &&
+      contains(try(statement.Resource, []), "arn:aws:ec2:*:*:subnet/*") &&
+      toset(try(statement.Condition.StringEquals["ec2:Vpc"], [])) == toset([
+        "arn:aws:ec2:us-west-2:520778242457:vpc/vpc-09e877f9012f52241",
+        "arn:aws:ec2:us-west-2:520778242457:vpc/vpc-06663b5b9e216f77b",
+      ])
+    ]) == 1
+    error_message = "RunInstances' ec2:Vpc condition must OR-match every VPC in vpc_id plus additional_vpc_ids."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.capa_controller_base.policy).Statement : statement
+      if contains(try(statement.Action, []), "ec2:CreateSecurityGroup") &&
+      toset(try(statement.Resource, [])) == toset([
+        "arn:aws:ec2:us-west-2:520778242457:vpc/vpc-09e877f9012f52241",
+        "arn:aws:ec2:us-west-2:520778242457:vpc/vpc-06663b5b9e216f77b",
+      ])
+    ]) == 1
+    error_message = "CreateSecurityGroup's direct VPC-resource authorization must list every VPC in vpc_id plus additional_vpc_ids."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.capa_control_plane.policy).Statement : statement
+      if contains(try(statement.Action, []), "ec2:CreateSecurityGroup") &&
+      contains(try(statement.Resource, []), "arn:aws:ec2:us-west-2:520778242457:vpc/vpc-09e877f9012f52241") &&
+      !contains(try(statement.Resource, []), "arn:aws:ec2:us-west-2:520778242457:vpc/vpc-06663b5b9e216f77b")
+    ]) == 1
+    error_message = "Single-VPC callers like control-plane IAM must keep seeing only the scope's own vpc_id, not additional_vpc_ids."
+  }
+}
+
+# The common case — no additional_vpc_ids — must render byte-for-byte the
+# same as before additional_vpc_ids existed: a scalar ec2:Vpc, not a
+# single-element list.
+run "single_vpc_condition_stays_scalar_without_additional_vpc_ids" {
+  command = plan
+
+  module {
+    source = "./cross_account_iam"
+  }
+
+  variables {
+    vpc_id = "vpc-09e877f9012f52241"
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.capa_controller_base.policy).Statement : statement
+      if contains(try(statement.Action, []), "ec2:RunInstances") &&
+      contains(try(statement.Resource, []), "arn:aws:ec2:*:*:subnet/*") &&
+      try(statement.Condition.StringEquals["ec2:Vpc"], null) == "arn:aws:ec2:us-west-2:520778242457:vpc/vpc-09e877f9012f52241"
+    ]) == 1
+    error_message = "Without additional_vpc_ids, ec2:Vpc must stay a plain string, not a single-element list, to keep the generated policy unchanged."
+  }
+}

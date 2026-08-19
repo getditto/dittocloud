@@ -136,6 +136,17 @@ variable "vpc_id" {
   default     = null
 }
 
+variable "additional_vpc_ids" {
+  type        = list(string)
+  description = "Extra pre-existing VPC IDs, beyond vpc_id, that this scope's CAPA controller role must also satisfy ec2:Vpc-scoped conditions and VPC resource ARNs for. For a shared/unsuffixed controller role (scope_ref == null) still assumed by clusters in VPCs other than vpc_id — a role predating this module's one-VPC-per-scope model. Ignored when vpc_id is null, since there is then no VPC-scoped controller policy to extend."
+  default     = []
+
+  validation {
+    condition     = var.vpc_id != null || length(var.additional_vpc_ids) == 0
+    error_message = "additional_vpc_ids requires vpc_id to be set — there is no VPC-scoped policy to extend it onto otherwise."
+  }
+}
+
 variable "vpc_subnet_ids" {
   type        = list(string)
   description = "Subnet IDs in vpc_id that ELB load balancers may use. When vpc_id is set, an empty list intentionally denies ELB subnet selection."
