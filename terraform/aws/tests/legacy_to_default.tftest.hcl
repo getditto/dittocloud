@@ -217,7 +217,7 @@ run "plan_equivalent_default_scope" {
 
   assert {
     condition = (
-      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].input.schema_version == 1 &&
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].input.schema_version == 2 &&
       terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].input.scope_ref == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" &&
       terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].input.configuration.default &&
       terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].input.configuration.cluster_name == "migration-eks" &&

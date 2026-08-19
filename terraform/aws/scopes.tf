@@ -141,7 +141,9 @@ resource "terraform_data" "scope_configuration" {
   for_each = var.deployment_scopes
 
   input = {
-    schema_version = 1
+    # Schema 2 added the secondary workload block, the DMZ subnet netmasks, and
+    # the NAT Elastic IP allocations. Recovery still reads schema 1 snapshots.
+    schema_version = 2
     scope_ref      = each.key
     configuration = {
       default                  = each.value.default
