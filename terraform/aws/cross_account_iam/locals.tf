@@ -103,18 +103,14 @@ locals {
   # VPC confinement must only be added to actions and resource types that expose
   # ec2:Vpc. Launch templates, volumes, and instances do not expose that key, while
   # security groups, subnets, and network interfaces do.
-  # vpc_id plus any additional_authorized_vpc_ids, as full VPC ARNs.
   ec2_vpc_ids = var.vpc_id != null ? concat([var.vpc_id], var.additional_authorized_vpc_ids) : []
   ec2_vpc_arns = [
     for id in local.ec2_vpc_ids : "arn:aws:ec2:${local.effective_region}:${data.aws_caller_identity.current.account_id}:vpc/${id}"
   ]
 
-  # Single-VPC callers (control-plane IAM, trust-editor template) only ever see vpc_id.
   ec2_vpc_arn = length(local.ec2_vpc_arns) > 0 ? local.ec2_vpc_arns[0] : null
 
-  # List value = OR-match on ec2:Vpc. Kept scalar for a single VPC so the
-  # common case renders unchanged. jsonencode/jsondecode works around
-  # Terraform rejecting a string/list(string) ternary directly.
+  # jsonencode/jsondecode works around a string/list(string) ternary type error.
   ec2_vpc_string_equals = length(local.ec2_vpc_arns) == 0 ? {} : jsondecode(
     length(local.ec2_vpc_arns) == 1
     ? jsonencode({ "ec2:Vpc" = local.ec2_vpc_arns[0] })

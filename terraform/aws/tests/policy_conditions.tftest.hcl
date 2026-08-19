@@ -1055,8 +1055,6 @@ run "scoped_eks_boundary_stays_within_policy_size_limit" {
   }
 }
 
-# additional_authorized_vpc_ids must OR-match its VPCs on the controller role only,
-# leaving control-plane IAM seeing just vpc_id.
 run "additional_authorized_vpc_ids_extend_controller_vpc_conditions" {
   command = plan
 
@@ -1105,7 +1103,6 @@ run "additional_authorized_vpc_ids_extend_controller_vpc_conditions" {
   }
 }
 
-# Without additional_authorized_vpc_ids, ec2:Vpc must stay a scalar, not a list.
 run "single_vpc_condition_stays_scalar_without_additional_authorized_vpc_ids" {
   command = plan
 

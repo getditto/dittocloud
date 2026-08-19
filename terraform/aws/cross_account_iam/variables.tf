@@ -138,7 +138,7 @@ variable "vpc_id" {
 
 variable "additional_authorized_vpc_ids" {
   type        = list(string)
-  description = "Extra VPC IDs, beyond vpc_id, whose resources should also satisfy this role's ec2:Vpc-scoped conditions. For a shared role assumed by clusters in more than one VPC."
+  description = "Extra VPC IDs, beyond vpc_id, also authorized on this role's ec2:Vpc-scoped conditions."
   default     = []
 
   validation {
