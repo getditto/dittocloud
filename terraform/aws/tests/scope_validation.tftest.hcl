@@ -426,6 +426,78 @@ run "retains_existing_vpc_discovery_at_policy_size_limit" {
   }
 }
 
+run "builds_scoped_eks_boundary_with_six_load_balancer_subnets" {
+  # plan, not apply: like every other EKS scope test here, applying would create
+  # the Karpenter SQS queue, whose mocked ARN fails the EventBridge target's ARN
+  # validation. The bound under test is a variable validation, so plan exercises it.
+  command = plan
+
+  # Regression: a Dittocloud-managed VPC always yields 3 AZs x (1 private +
+  # 1 public) = 6 load-balancer subnets, but the boundary previously capped an
+  # enable_eks scope at 4, so a scoped EKS scope on a Dittocloud VPC could not
+  # be built at all. It also could not fail at plan time, because a
+  # Dittocloud-mode VPC's subnet IDs are unknown until the VPC is created — so
+  # it surfaced as a mid-apply variable-validation error after the VPC, NAT
+  # gateways and part of the scoped IAM already existed.
+  #
+  # This exercises the same 6-subnet shape with enable_eks via an existing VPC,
+  # where the IDs are known at plan time and the bound is actually assertable.
+  override_data {
+    target          = data.aws_subnets.scoped_existing_private["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"]
+    override_during = plan
+    values = {
+      ids = [
+        "subnet-00000000000000001",
+        "subnet-00000000000000002",
+        "subnet-00000000000000003",
+      ]
+    }
+  }
+
+  override_data {
+    target          = data.aws_subnets.scoped_existing_public["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"]
+    override_during = plan
+    values = {
+      ids = [
+        "subnet-00000000000000004",
+        "subnet-00000000000000005",
+        "subnet-00000000000000006",
+      ]
+    }
+  }
+
+  variables {
+    deployment_scopes = {
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" = {
+        default = true
+        region  = "ap-southeast-2"
+        vpc = {
+          mode = "capi"
+        }
+      }
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z4" = {
+        region       = "us-west-2"
+        cluster_type = "eks"
+        vpc = {
+          mode = "existing"
+          id   = "vpc-09e877f9012f52241"
+        }
+      }
+    }
+  }
+
+  # The generated boundary's size is asserted directly in
+  # policy_conditions.tftest.hcl ("scoped_eks_boundary_stays_within_policy_size_limit"),
+  # where the cross_account_iam resources are reachable.
+  assert {
+    condition = (
+      length(module.scoped_cross_account_iam["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].scope_iam.confinement.subnet_ids) == 6 &&
+      module.scoped_cross_account_iam["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].scope_iam.eks_control_plane_role != null
+    )
+    error_message = "A scoped EKS deployment must accept all six load-balancer subnets of a three-AZ VPC and provision its EKS control-plane role."
+  }
+}
+
 run "rejects_missing_default_scope" {
   command = plan
 
