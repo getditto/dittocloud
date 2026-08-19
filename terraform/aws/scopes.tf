@@ -154,8 +154,8 @@ resource "terraform_data" "scope_configuration" {
         name                           = each.value.vpc.name
         cidr                           = each.value.vpc.cidr
         secondary_cidr                 = each.value.vpc.secondary_cidr
-        public_subnet_netmask          = each.value.vpc.public_subnet_netmask
-        private_subnet_netmask         = each.value.vpc.private_subnet_netmask
+        public_subnet_netmask          = each.value.vpc.mode == "dittocloud" ? each.value.vpc.public_subnet_netmask : null
+        private_subnet_netmask         = each.value.vpc.mode == "dittocloud" ? each.value.vpc.private_subnet_netmask : null
         id                             = each.value.vpc.id
         nat_gateway_name               = each.value.vpc.nat_gateway_name
         nat_gateway_eip_allocation_ids = each.value.vpc.nat_gateway_eip_allocation_ids

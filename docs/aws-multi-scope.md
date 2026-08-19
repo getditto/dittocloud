@@ -30,6 +30,40 @@ dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
     id: vpc-0123456789abcdef0
 ```
 
+A Dittocloud-managed VPC carries its own subnet sizing and, optionally, the
+secondary block that holds every workload tier:
+
+```yaml
+dsc-01k2m8g7n4p6q9r3t5v8x1y2z4:
+  region: us-west-2
+  clusterType: eks
+  clusterName: valet-dev
+  scopeTagPolicyVersion: 0
+  vpc:
+    mode: dittocloud
+    name: valet
+    cidr: 10.214.0.0/20
+    secondaryCidr: 100.64.0.0/16
+    publicSubnetNetmask: 24
+    privateSubnetNetmask: 23
+```
+
+`cidr` is a DMZ: it carries load balancers, NAT gateways, and explicitly placed
+EC2, and it is the only surface a peered VPC sees. `secondaryCidr` carries pod,
+node, and database capacity and must be unique per VPC — AWS rejects a peering
+connection when any associated CIDR overlaps, secondary blocks included,
+regardless of routing intent. It must be one of the 64 `/16` blocks inside
+`100.64.0.0/10`, and `100.66.0.0/16` is not allocatable because Valet clusters
+already use it for in-cluster pod and Service addressing.
+
+`publicSubnetNetmask` and `privateSubnetNetmask` default to `24` and `23`.
+**Every subnet CIDR is derived from them, so changing either renumbers live
+subnets** and recreates the NAT gateways, nodes, and load balancers with them. A
+VPC created before the DMZ split must pin `publicSubnetNetmask: 22` and
+`privateSubnetNetmask: 18`; `scopes generate` reads those values back from the
+subnets already in state, and `scopes recover` pins them when it reads a
+configuration snapshot written before the split.
+
 Do not create or edit a `scopeRef` manually. Use `scopes add` for a greenfield
 configuration or an additional non-default scope:
 

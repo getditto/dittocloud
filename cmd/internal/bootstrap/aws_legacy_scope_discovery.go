@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/netip"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -16,6 +18,11 @@ const (
 	legacyScopeFieldVPCCIDR     = "vpc.cidr"
 	legacyScopeFieldClusterType = "clusterType"
 	legacyScopeFieldClusterName = "clusterName"
+	// Subnet sizing is read back from the subnets that already exist rather than
+	// defaulted, so a generated scopes file pins the layout this VPC was built
+	// with and the next apply cannot renumber live subnets.
+	legacyScopeFieldVPCPublicSubnetNetmask  = "vpc.publicSubnetNetmask"
+	legacyScopeFieldVPCPrivateSubnetNetmask = "vpc.privateSubnetNetmask"
 )
 
 type awsLegacyScopeFieldEvidence struct {
@@ -62,6 +69,12 @@ func discoverAWSLegacyScope(state rawTerraformState) (awsLegacyScopeDiscovery, e
 				return awsLegacyScopeDiscovery{}, err
 			}
 			managedVPCPresent = managedVPCPresent || present
+		}
+
+		if isAWSLegacyManagedSubnetResource(resource) {
+			if err := collectAWSLegacyManagedSubnetEvidence(resource, collector); err != nil {
+				return awsLegacyScopeDiscovery{}, err
+			}
 		}
 
 		if isAWSLegacyVPCValidationResource(resource) {
@@ -127,11 +140,41 @@ func discoverAWSLegacyScope(state rawTerraformState) (awsLegacyScopeDiscovery, e
 		Name: evidence[legacyScopeFieldVPCName].Value,
 		CIDR: evidence[legacyScopeFieldVPCCIDR].Value,
 	}
+	if discovery.Scope.VPC.Mode == awsVPCModeDittocloud {
+		publicNetmask, err := awsLegacyNetmaskEvidence(evidence, legacyScopeFieldVPCPublicSubnetNetmask)
+		if err != nil {
+			return awsLegacyScopeDiscovery{}, err
+		}
+		privateNetmask, err := awsLegacyNetmaskEvidence(evidence, legacyScopeFieldVPCPrivateSubnetNetmask)
+		if err != nil {
+			return awsLegacyScopeDiscovery{}, err
+		}
+		if publicNetmask == 0 {
+			publicNetmask = awsLegacyPublicSubnetNetmask
+		}
+		if privateNetmask == 0 {
+			privateNetmask = awsLegacyPrivateSubnetNetmask
+		}
+		discovery.Scope.VPC.PublicSubnetNetmask = publicNetmask
+		discovery.Scope.VPC.PrivateSubnetNetmask = privateNetmask
+	}
 	if discovery.Scope.VPC.Mode != awsVPCModeDittocloud {
 		discovery.Scope.VPC.ID = evidence[legacyScopeFieldVPCID].Value
 	}
 	discovery.Missing = missingAWSLegacyScopeFields(discovery.Scope)
 	return discovery, nil
+}
+
+func awsLegacyNetmaskEvidence(evidence map[string]awsLegacyScopeFieldEvidence, field string) (int, error) {
+	value := evidence[field].Value
+	if value == "" {
+		return 0, nil
+	}
+	netmask, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("legacy state %s evidence %q is not a netmask", field, value)
+	}
+	return netmask, nil
 }
 
 func (collector awsLegacyEvidenceCollector) add(field, value, source string) {
@@ -308,6 +351,47 @@ func collectAWSLegacyManagedVPCEvidence(resource rawTerraformResource, collector
 		collector.add(legacyScopeFieldVPCMode, awsVPCModeDittocloud, awsLegacyResourceAddress(resource))
 	}
 	return len(readyInstances) > 0, nil
+}
+
+func isAWSLegacyManagedSubnetResource(resource rawTerraformResource) bool {
+	if resource.Mode != "managed" || resource.Type != "aws_subnet" {
+		return false
+	}
+	if resource.Name != "public" && resource.Name != "private" {
+		return false
+	}
+	return resource.Module == "module.vpc[0].module.vpc" || resource.Module == "module.vpc.module.vpc"
+}
+
+func collectAWSLegacyManagedSubnetEvidence(resource rawTerraformResource, collector awsLegacyEvidenceCollector) error {
+	field := legacyScopeFieldVPCPrivateSubnetNetmask
+	if resource.Name == "public" {
+		field = legacyScopeFieldVPCPublicSubnetNetmask
+	}
+	readyInstances, err := awsLegacyReadyInstances(resource)
+	if err != nil {
+		return err
+	}
+	for _, instance := range readyInstances {
+		var attributes map[string]json.RawMessage
+		if err := json.Unmarshal(instance.Attributes, &attributes); err != nil {
+			return fmt.Errorf("legacy state %s attributes are malformed: %w", awsLegacyResourceAddress(resource), err)
+		}
+		source := awsLegacyResourceAddress(resource) + " cidr_block"
+		cidr, present, err := decodeAWSLegacyOptionalString(attributes["cidr_block"], source)
+		if err != nil {
+			return err
+		}
+		if !present {
+			continue
+		}
+		prefix, err := netip.ParsePrefix(cidr)
+		if err != nil || !prefix.Addr().Is4() {
+			return fmt.Errorf("legacy state %s must be an IPv4 CIDR", source)
+		}
+		collector.add(field, strconv.Itoa(prefix.Bits()), source)
+	}
+	return nil
 }
 
 func isAWSLegacyVPCValidationResource(resource rawTerraformResource) bool {

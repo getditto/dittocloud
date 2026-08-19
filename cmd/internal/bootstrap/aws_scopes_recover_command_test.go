@@ -35,10 +35,12 @@ func testRecoverableScopes() AWSDeploymentScopes {
 			Region:                "ap-southeast-2",
 			ScopeTagPolicyVersion: 0,
 			VPC: AWSScopeVPC{
-				Mode:           awsVPCModeDittocloud,
-				Name:           "default-vpc",
-				CIDR:           "10.210.0.0/16",
-				NATGatewayName: "default-kubeadm-nat",
+				Mode:                 awsVPCModeDittocloud,
+				Name:                 "default-vpc",
+				CIDR:                 "10.210.0.0/16",
+				PublicSubnetNetmask:  awsLegacyPublicSubnetNetmask,
+				PrivateSubnetNetmask: awsLegacyPrivateSubnetNetmask,
+				NATGatewayName:       "default-kubeadm-nat",
 			},
 		},
 		testSecondaryScopeRef: {
@@ -215,7 +217,7 @@ func TestAWSScopesRecoverRejectsUnsafeOrIncompleteEvidence(t *testing.T) {
 				configurationResource := resources[len(resources)-1].(map[string]any)
 				instance := configurationResource["instances"].([]any)[0].(map[string]any)
 				input := instance["attributes"].(map[string]any)["input"].(map[string]any)
-				input["value"].(map[string]any)["schema_version"] = 2
+				input["value"].(map[string]any)["schema_version"] = awsScopeConfigurationSchemaVersion + 1
 				return state
 			}(),
 			wantError: "unsupported schema_version",

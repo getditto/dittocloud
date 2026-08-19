@@ -93,6 +93,37 @@ dittocloud bootstrap aws \
 Kubeadm is the default. Add `--enable-eks` only when provisioning an EKS
 cluster and its supporting IAM resources.
 
+#### VPC address layout
+
+`--aws-vpc-cidr` is a DMZ. It carries internet-facing load balancers, NAT
+gateways, internal load balancers, and explicitly placed EC2 — nothing else —
+and it is the only surface a peered VPC ever sees. Public subnets default to a
+`/24` per availability zone and private subnets to a `/23`.
+
+Pod, node, and database capacity comes from a separate block:
+
+```bash
+dittocloud bootstrap aws   --aws-profile my-profile   --aws-region us-west-2   --create-vpc=true   --aws-vpc-name ditto-vpc   --aws-vpc-cidr 10.214.0.0/20   --aws-vpc-secondary-cidr 100.64.0.0/16
+```
+
+The secondary CIDR must be one of the 64 `/16` blocks inside `100.64.0.0/10`
+and must be unique per VPC: AWS rejects a peering connection when any
+associated CIDR overlaps, secondary blocks included, regardless of routing
+intent. Traffic from these subnets reaches the internet through the NAT gateway
+in its own availability zone and never crosses a peering connection.
+
+> **Upgrading an existing deployment:** every subnet CIDR is derived from
+> `--aws-vpc-public-subnet-netmask` and `--aws-vpc-private-subnet-netmask`, so
+> changing either renumbers live subnets and recreates the NAT gateways, nodes,
+> and load balancers with them. A VPC created before this layout used a `/22`
+> public and `/18` private tier. Pin those values to keep the subnets you have:
+>
+> ```bash
+> dittocloud bootstrap aws >   --aws-vpc-cidr 10.214.0.0/16 >   --aws-vpc-public-subnet-netmask 22 >   --aws-vpc-private-subnet-netmask 18
+> ```
+>
+> Review the plan before applying and confirm no subnet is being replaced.
+
 AWS multi-scope configuration, legacy conversion, registry seeding, and
 backup-based rollback are documented in
 [AWS Multi-Scope Configuration and Migration](docs/aws-multi-scope.md).

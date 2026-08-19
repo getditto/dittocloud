@@ -21,13 +21,18 @@ const (
 	awsClusterTypeKubeadm   = "kubeadm"
 	awsClusterTypeEKS       = "eks"
 	awsScopeReferenceLength = 30
+	// The managed VPC module always spans the first three availability zones of
+	// its Region, so a supplied Elastic IP set has to match that exactly.
+	awsManagedVPCAvailabilityZones  = 3
+	awsReservedClusterSecondaryCIDR = "100.66.0.0/16"
 )
 
 var (
-	awsScopeReferencePattern = regexp.MustCompile(`^dsc-[0-7][0-9a-hjkmnp-tv-z]{25}$`)
-	awsClusterNamePattern    = regexp.MustCompile(`^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$`)
-	awsRegionPattern         = regexp.MustCompile(`^[a-z]{2}(?:-[a-z0-9]+)+-[0-9]+$`)
-	awsVPCIDPattern          = regexp.MustCompile(`^vpc-(?:[0-9a-f]{8}|[0-9a-f]{17})$`)
+	awsScopeReferencePattern  = regexp.MustCompile(`^dsc-[0-7][0-9a-hjkmnp-tv-z]{25}$`)
+	awsClusterNamePattern     = regexp.MustCompile(`^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$`)
+	awsRegionPattern          = regexp.MustCompile(`^[a-z]{2}(?:-[a-z0-9]+)+-[0-9]+$`)
+	awsVPCIDPattern           = regexp.MustCompile(`^vpc-(?:[0-9a-f]{8}|[0-9a-f]{17})$`)
+	awsEIPAllocationIDPattern = regexp.MustCompile(`^eipalloc-(?:[0-9a-f]{8}|[0-9a-f]{17})$`)
 )
 
 // AWSDeploymentScopes is the desired set of Dittocloud deployments in one AWS
@@ -45,12 +50,32 @@ type AWSDeploymentScope struct {
 }
 
 type AWSScopeVPC struct {
-	Mode           string `yaml:"mode" json:"mode"`
-	Name           string `yaml:"name,omitempty" json:"name,omitempty"`
-	CIDR           string `yaml:"cidr,omitempty" json:"cidr,omitempty"`
-	ID             string `yaml:"id,omitempty" json:"id,omitempty"`
-	NATGatewayName string `yaml:"natGatewayName,omitempty" json:"nat_gateway_name,omitempty"`
+	Mode string `yaml:"mode" json:"mode"`
+	Name string `yaml:"name,omitempty" json:"name,omitempty"`
+	// CIDR is the DMZ block: load balancers, NAT gateways, and explicitly placed
+	// EC2 only. SecondaryCIDR carries every workload tier and must be unique per
+	// VPC, because AWS rejects a peering connection when any associated CIDR
+	// overlaps, secondary blocks included.
+	CIDR                       string   `yaml:"cidr,omitempty" json:"cidr,omitempty"`
+	SecondaryCIDR              string   `yaml:"secondaryCidr,omitempty" json:"secondary_cidr,omitempty"`
+	PublicSubnetNetmask        int      `yaml:"publicSubnetNetmask,omitempty" json:"public_subnet_netmask,omitempty"`
+	PrivateSubnetNetmask       int      `yaml:"privateSubnetNetmask,omitempty" json:"private_subnet_netmask,omitempty"`
+	ID                         string   `yaml:"id,omitempty" json:"id,omitempty"`
+	NATGatewayName             string   `yaml:"natGatewayName,omitempty" json:"nat_gateway_name,omitempty"`
+	NATGatewayEIPAllocationIDs []string `yaml:"natGatewayEipAllocationIds,omitempty" json:"nat_gateway_eip_allocation_ids,omitempty"`
 }
+
+// Terraform applies these defaults when the scopes file leaves the sizing out.
+// The CLI has to agree with them so a recovered file round-trips unchanged.
+const (
+	awsDefaultPublicSubnetNetmask  = 24
+	awsDefaultPrivateSubnetNetmask = 23
+
+	// Sizing of a VPC provisioned before the DMZ split. A recovered scopes file
+	// has to pin these, or the next apply renumbers live subnets.
+	awsLegacyPublicSubnetNetmask  = 22
+	awsLegacyPrivateSubnetNetmask = 18
+)
 
 func loadAWSDeploymentScopes(path string) (AWSDeploymentScopes, error) {
 	content, err := os.ReadFile(path)
@@ -82,8 +107,8 @@ func decodeAWSDeploymentScopes(content []byte, path string) (AWSDeploymentScopes
 	for scopeRef, scope := range scopes {
 		if scope.ClusterType == "" {
 			scope.ClusterType = awsClusterTypeKubeadm
-			scopes[scopeRef] = scope
 		}
+		scopes[scopeRef] = scope.withManagedVPCDefaults()
 	}
 
 	if err := scopes.Validate(); err != nil {
@@ -160,9 +185,18 @@ func validateAWSScopeVPC(scopeRef string, vpc AWSScopeVPC) error {
 		if vpc.NATGatewayName != "" && (strings.TrimSpace(vpc.NATGatewayName) != vpc.NATGatewayName || len(vpc.NATGatewayName) > 256) {
 			return fmt.Errorf("scope %q vpc.natGatewayName must contain 1 to 256 non-whitespace-bounded characters", scopeRef)
 		}
+		if err := validateAWSScopeSecondaryCIDR(scopeRef, vpc.SecondaryCIDR); err != nil {
+			return err
+		}
+		if err := validateAWSScopeSubnetNetmasks(scopeRef, vpc, prefix.Bits()); err != nil {
+			return err
+		}
+		if err := validateAWSScopeNATEIPAllocationIDs(scopeRef, vpc.NATGatewayEIPAllocationIDs); err != nil {
+			return err
+		}
 	case awsVPCModeCAPI:
-		if vpc.Name != "" || vpc.CIDR != "" || vpc.NATGatewayName != "" {
-			return fmt.Errorf("scope %q cannot set vpc.name, vpc.cidr, or vpc.natGatewayName when vpc.mode is %q", scopeRef, awsVPCModeCAPI)
+		if err := rejectAWSManagedVPCFields(scopeRef, vpc, awsVPCModeCAPI); err != nil {
+			return err
 		}
 		if vpc.ID != "" && !awsVPCIDPattern.MatchString(vpc.ID) {
 			return fmt.Errorf("scope %q vpc.id %q must be a valid VPC ID", scopeRef, vpc.ID)
@@ -171,11 +205,121 @@ func validateAWSScopeVPC(scopeRef string, vpc AWSScopeVPC) error {
 		if !awsVPCIDPattern.MatchString(vpc.ID) {
 			return fmt.Errorf("scope %q requires a valid vpc.id when vpc.mode is %q", scopeRef, awsVPCModeExisting)
 		}
-		if vpc.Name != "" || vpc.CIDR != "" || vpc.NATGatewayName != "" {
-			return fmt.Errorf("scope %q cannot set vpc.name, vpc.cidr, or vpc.natGatewayName when vpc.mode is %q", scopeRef, awsVPCModeExisting)
+		if err := rejectAWSManagedVPCFields(scopeRef, vpc, awsVPCModeExisting); err != nil {
+			return err
 		}
 	default:
 		return fmt.Errorf("scope %q vpc.mode must be one of %q, %q, or %q", scopeRef, awsVPCModeDittocloud, awsVPCModeCAPI, awsVPCModeExisting)
+	}
+	return nil
+}
+
+// withManagedVPCDefaults fills in the subnet sizing Terraform would apply to a
+// Dittocloud-managed VPC. The CLI has to hold the effective values, not the
+// written ones, because it compares its own view of a scope against the
+// configuration snapshot Terraform plans.
+func (scope AWSDeploymentScope) withManagedVPCDefaults() AWSDeploymentScope {
+	if scope.VPC.Mode != awsVPCModeDittocloud {
+		return scope
+	}
+	if scope.VPC.PublicSubnetNetmask == 0 {
+		scope.VPC.PublicSubnetNetmask = awsDefaultPublicSubnetNetmask
+	}
+	if scope.VPC.PrivateSubnetNetmask == 0 {
+		scope.VPC.PrivateSubnetNetmask = awsDefaultPrivateSubnetNetmask
+	}
+	return scope
+}
+
+func rejectAWSManagedVPCFields(scopeRef string, vpc AWSScopeVPC, mode string) error {
+	if vpc.Name != "" || vpc.CIDR != "" || vpc.NATGatewayName != "" {
+		return fmt.Errorf("scope %q cannot set vpc.name, vpc.cidr, or vpc.natGatewayName when vpc.mode is %q", scopeRef, mode)
+	}
+	if vpc.SecondaryCIDR != "" || vpc.PublicSubnetNetmask != 0 || vpc.PrivateSubnetNetmask != 0 {
+		return fmt.Errorf(
+			"scope %q cannot set vpc.secondaryCidr, vpc.publicSubnetNetmask, or vpc.privateSubnetNetmask when vpc.mode is %q",
+			scopeRef,
+			mode,
+		)
+	}
+	if len(vpc.NATGatewayEIPAllocationIDs) > 0 {
+		return fmt.Errorf("scope %q cannot set vpc.natGatewayEipAllocationIds when vpc.mode is %q", scopeRef, mode)
+	}
+	return nil
+}
+
+// The workload block comes out of the shared 100.64.0.0/10 pool. 100.66.0.0/16
+// is excluded because Valet clusters already use it for in-cluster pod and
+// Service addressing.
+func validateAWSScopeSecondaryCIDR(scopeRef string, secondaryCIDR string) error {
+	if secondaryCIDR == "" {
+		return nil
+	}
+	prefix, err := netip.ParsePrefix(secondaryCIDR)
+	if err != nil || !prefix.Addr().Is4() || prefix.Bits() != 16 || prefix != prefix.Masked() {
+		return fmt.Errorf("scope %q vpc.secondaryCidr %q must be a /16 IPv4 CIDR", scopeRef, secondaryCIDR)
+	}
+	if !netip.MustParsePrefix("100.64.0.0/10").Contains(prefix.Addr()) {
+		return fmt.Errorf("scope %q vpc.secondaryCidr %q must fall inside 100.64.0.0/10", scopeRef, secondaryCIDR)
+	}
+	if secondaryCIDR == awsReservedClusterSecondaryCIDR {
+		return fmt.Errorf(
+			"scope %q vpc.secondaryCidr %q is reserved for in-cluster pod and Service addressing",
+			scopeRef,
+			secondaryCIDR,
+		)
+	}
+	return nil
+}
+
+// A load-balancer subnet needs at least 8 free addresses per AZ and scales its
+// ENI count under load, and each tier has to fit inside the primary block: the
+// public tier owns its first quarter and the private tier starts after that.
+func validateAWSScopeSubnetNetmasks(scopeRef string, vpc AWSScopeVPC, primaryPrefix int) error {
+	tiers := []struct {
+		field      string
+		netmask    int
+		minimumGap int
+	}{
+		{field: "publicSubnetNetmask", netmask: vpc.PublicSubnetNetmask, minimumGap: 4},
+		{field: "privateSubnetNetmask", netmask: vpc.PrivateSubnetNetmask, minimumGap: 2},
+	}
+	for _, tier := range tiers {
+		if tier.netmask > 24 {
+			return fmt.Errorf(
+				"scope %q vpc.%s must be 24 or lower so each load-balancer subnet is at least a /24",
+				scopeRef,
+				tier.field,
+			)
+		}
+		if tier.netmask < primaryPrefix+tier.minimumGap {
+			return fmt.Errorf(
+				"scope %q vpc.%s must be at least %d bits longer than the vpc.cidr prefix /%d so three subnets fit",
+				scopeRef,
+				tier.field,
+				tier.minimumGap,
+				primaryPrefix,
+			)
+		}
+	}
+	return nil
+}
+
+func validateAWSScopeNATEIPAllocationIDs(scopeRef string, allocationIDs []string) error {
+	if len(allocationIDs) == 0 {
+		return nil
+	}
+	if len(allocationIDs) != awsManagedVPCAvailabilityZones {
+		return fmt.Errorf(
+			"scope %q vpc.natGatewayEipAllocationIds must contain exactly %d entries, one per availability zone",
+			scopeRef,
+			awsManagedVPCAvailabilityZones,
+		)
+	}
+	for _, allocationID := range allocationIDs {
+		if !awsEIPAllocationIDPattern.MatchString(allocationID) {
+			return fmt.Errorf("scope %q vpc.natGatewayEipAllocationIds entry %q is not a valid Elastic IP allocation ID", scopeRef, allocationID)
+		}
 	}
 	return nil
 }

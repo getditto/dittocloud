@@ -230,7 +230,7 @@ func collectAWSScopesAddInput(flags *pflag.FlagSet) (AWSDeploymentScope, error) 
 		Region:                region,
 		ScopeTagPolicyVersion: 0,
 		VPC:                   vpc,
-	}
+	}.withManagedVPCDefaults()
 	if err := validateAWSDeploymentScopeFields("new scope", scope); err != nil {
 		return AWSDeploymentScope{}, err
 	}

@@ -140,11 +140,10 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 				}
 			}
 			if customerManagedVPC || !createVPC {
-				if cmd.Flags().Changed("aws-vpc-name") {
-					return fmt.Errorf("--aws-vpc-name can only be used when --create-vpc=true")
-				}
-				if cmd.Flags().Changed("aws-vpc-cidr") {
-					return fmt.Errorf("--aws-vpc-cidr can only be used when --create-vpc=true")
+				for _, flagName := range awsManagedVPCFlags {
+					if cmd.Flags().Changed(flagName) {
+						return fmt.Errorf("--%s can only be used when --create-vpc=true", flagName)
+					}
 				}
 			}
 			if cmd.Flags().Changed("cluster-name") {
@@ -166,7 +165,32 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 	cmd.Flags().String("aws-profile", "", "AWS profile to use")
 	cmd.Flags().String("aws-region", "us-east-1", "AWS region to use")
 	cmd.Flags().String("aws-vpc-name", "ditto", "AWS VPC name to use")
-	cmd.Flags().String("aws-vpc-cidr", "10.210.0.0/16", "AWS VPC CIDR block to use")
+	cmd.Flags().String("aws-vpc-cidr", "10.210.0.0/16", "Primary AWS VPC CIDR block, carrying load balancers, NAT gateways, and explicitly placed EC2 only")
+	cmd.Flags().String(
+		"aws-vpc-secondary-cidr",
+		"",
+		"Secondary VPC CIDR block carrying pod, node, and database capacity; must be a /16 inside 100.64.0.0/10 and unique per VPC",
+	)
+	cmd.Flags().Int(
+		"aws-vpc-public-subnet-netmask",
+		24,
+		"Netmask for each per-AZ public subnet; pin this to the value an existing deployment already uses, because changing it renumbers live subnets",
+	)
+	cmd.Flags().Int(
+		"aws-vpc-private-subnet-netmask",
+		23,
+		"Netmask for each per-AZ private subnet; pin this to the value an existing deployment already uses, because changing it renumbers live subnets",
+	)
+	cmd.Flags().StringArray(
+		"aws-vpc-nat-eip-allocation-ids",
+		[]string{},
+		"Pre-allocated Elastic IP allocation IDs for the NAT gateways, one per availability zone in order (repeatable)",
+	)
+	cmd.Flags().String(
+		"karpenter-discovery-tag-value",
+		"",
+		"Value for the karpenter.sh/discovery tag on the node subnets; defaults to --cluster-name when set",
+	)
 	cmd.Flags().Bool("create-vpc", true, "Create the VPC with Dittocloud; set false to retain VPC lifecycle permissions for Cluster API to create it")
 	cmd.Flags().Bool("enable-eks", false, "Provision EKS IAM permissions and enforce the EKS account-level IMDSv2 default")
 	cmd.Flags().StringArray("controller-trusted-role-arns", []string{}, "AWS IAM role ARNs that can assume the CAPA controller role (can be specified multiple times)")
@@ -221,6 +245,11 @@ func validateAWSScopesFlags(flags *pflag.FlagSet) (bool, AWSDeploymentScopes, st
 		"aws-region",
 		"aws-vpc-name",
 		"aws-vpc-cidr",
+		"aws-vpc-secondary-cidr",
+		"aws-vpc-public-subnet-netmask",
+		"aws-vpc-private-subnet-netmask",
+		"aws-vpc-nat-eip-allocation-ids",
+		"karpenter-discovery-tag-value",
 		"create-vpc",
 		"enable-eks",
 		"customer-managed-vpc",
@@ -260,13 +289,17 @@ func writeAWSScopesSummary(writer io.Writer, scopes AWSDeploymentScopes) error {
 		if scope.VPC.NATGatewayName != "" {
 			natGatewayName = " natGatewayName=" + scope.VPC.NATGatewayName
 		}
+		secondaryCIDR := ""
+		if scope.VPC.SecondaryCIDR != "" {
+			secondaryCIDR = " secondaryCidr=" + scope.VPC.SecondaryCIDR
+		}
 		clusterName := ""
 		if scope.ClusterName != "" {
 			clusterName = " clusterName=" + scope.ClusterName
 		}
 		if _, err := fmt.Fprintf(
 			writer,
-			"  - %s%s: region=%s clusterType=%s vpcMode=%s%s scopeTagPolicyVersion=%d%s\n",
+			"  - %s%s: region=%s clusterType=%s vpcMode=%s%s scopeTagPolicyVersion=%d%s%s\n",
 			scopeRef,
 			defaultMarker,
 			scope.Region,
@@ -275,6 +308,7 @@ func writeAWSScopesSummary(writer io.Writer, scopes AWSDeploymentScopes) error {
 			clusterName,
 			scope.ScopeTagPolicyVersion,
 			natGatewayName,
+			secondaryCIDR,
 		); err != nil {
 			return err
 		}
@@ -349,6 +383,77 @@ func awsScopeTerraformVariables(
 	return values, nil
 }
 
+// awsManagedVPCFlags configure a VPC that Dittocloud creates, so none of them
+// mean anything without --create-vpc.
+var awsManagedVPCFlags = []string{
+	"aws-vpc-name",
+	"aws-vpc-cidr",
+	"aws-vpc-secondary-cidr",
+	"aws-vpc-public-subnet-netmask",
+	"aws-vpc-private-subnet-netmask",
+	"aws-vpc-nat-eip-allocation-ids",
+	"karpenter-discovery-tag-value",
+}
+
+// awsManagedVPCTerraformVariables forwards only the subnet and NAT settings an
+// operator actually set. Anything left alone keeps the module default, which
+// matters most for the subnet netmasks: sending a value an existing deployment
+// was not built with renumbers its subnets.
+func awsManagedVPCTerraformVariables(flags *pflag.FlagSet) ([]*tfexec.VarOption, error) {
+	vars := []*tfexec.VarOption{}
+	stringFlags := []struct {
+		flagName     string
+		variableName string
+	}{
+		{flagName: "aws-vpc-secondary-cidr", variableName: "vpc_secondary_cidr"},
+		{flagName: "karpenter-discovery-tag-value", variableName: "karpenter_discovery_tag_value"},
+	}
+	for _, stringFlag := range stringFlags {
+		if !flags.Changed(stringFlag.flagName) {
+			continue
+		}
+		value, err := flags.GetString(stringFlag.flagName)
+		if err != nil {
+			return nil, fmt.Errorf("unable to get %s: %w", stringFlag.flagName, err)
+		}
+		vars = append(vars, tfexec.Var(stringFlag.variableName+"="+value))
+	}
+
+	netmaskFlags := []struct {
+		flagName     string
+		variableName string
+	}{
+		{flagName: "aws-vpc-public-subnet-netmask", variableName: "public_subnet_netmask"},
+		{flagName: "aws-vpc-private-subnet-netmask", variableName: "private_subnet_netmask"},
+	}
+	for _, netmaskFlag := range netmaskFlags {
+		if !flags.Changed(netmaskFlag.flagName) {
+			continue
+		}
+		value, err := flags.GetInt(netmaskFlag.flagName)
+		if err != nil {
+			return nil, fmt.Errorf("unable to get %s: %w", netmaskFlag.flagName, err)
+		}
+		vars = append(vars, tfexec.Var(fmt.Sprintf("%s=%d", netmaskFlag.variableName, value)))
+	}
+
+	if flags.Changed("aws-vpc-nat-eip-allocation-ids") {
+		allocationIDs, err := flags.GetStringArray("aws-vpc-nat-eip-allocation-ids")
+		if err != nil {
+			return nil, fmt.Errorf("unable to get aws-vpc-nat-eip-allocation-ids: %w", err)
+		}
+		if err := validateAWSScopeNATEIPAllocationIDs("legacy deployment", allocationIDs); err != nil {
+			return nil, err
+		}
+		encoded, err := json.Marshal(allocationIDs)
+		if err != nil {
+			return nil, fmt.Errorf("unable to marshal aws-vpc-nat-eip-allocation-ids: %w", err)
+		}
+		vars = append(vars, tfexec.Var("nat_gateway_eip_allocation_ids="+string(encoded)))
+	}
+	return vars, nil
+}
+
 func promptAWSValues(flags *pflag.FlagSet) ([]*tfexec.VarOption, error) {
 	vars := []*tfexec.VarOption{}
 	customerManagedVPC, err := flags.GetBool("customer-managed-vpc")
@@ -394,6 +499,11 @@ func promptAWSValues(flags *pflag.FlagSet) ([]*tfexec.VarOption, error) {
 				tfexec.Var("vpc_cidr="+cidr),
 			)
 		}
+		managedVPCVars, err := awsManagedVPCTerraformVariables(flags)
+		if err != nil {
+			return nil, err
+		}
+		vars = append(vars, managedVPCVars...)
 	}
 
 	if flags.Changed("controller-trusted-role-arns") {
