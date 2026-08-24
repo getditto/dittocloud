@@ -111,6 +111,17 @@ module "vpc" {
 # VPC Endpoints
 ################################################################################
 
+locals {
+  # Everything that reaches S3 over the gateway endpoint rather than through NAT.
+  # database_route_table_ids falls back to the private tables when no dedicated
+  # database tables exist, hence the distinct().
+  s3_endpoint_route_table_ids = distinct(concat(
+    module.vpc.private_route_table_ids,
+    module.vpc.database_route_table_ids,
+    [for az in local.azs : aws_route_table.workload[az].id if local.secondary_enabled],
+  ))
+}
+
 module "vpc_endpoints" {
   source  = "terraform-aws-modules/vpc/aws//modules/vpc-endpoints"
   version = "6.6.0"
@@ -198,17 +209,6 @@ data "aws_iam_policy_document" "generic_endpoint_policy" {
       values = [module.vpc.vpc_id]
     }
   }
-}
-
-locals {
-  # Everything that reaches S3 over the gateway endpoint rather than through NAT.
-  # database_route_table_ids falls back to the private tables when no dedicated
-  # database tables exist, hence the distinct().
-  s3_endpoint_route_table_ids = distinct(concat(
-    module.vpc.private_route_table_ids,
-    module.vpc.database_route_table_ids,
-    [for az in local.azs : aws_route_table.workload[az].id if local.secondary_enabled],
-  ))
 }
 
 output "vpc" {
