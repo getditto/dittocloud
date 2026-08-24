@@ -155,13 +155,13 @@ variable "deployment_scopes" {
         length(scope.vpc.nat_gateway_eip_allocation_ids) == 0
       )
     ])
-    error_message = "Subnet netmasks and NAT Elastic IP allocations can only be set for a Dittocloud-managed VPC."
+    error_message = "Only a Dittocloud-managed VPC has subnet sizing or NAT Elastic IP allocations. Leave public_subnet_netmask and private_subnet_netmask at their defaults of 24 and 23, and nat_gateway_eip_allocation_ids empty, for capi and existing scopes."
   }
 
   validation {
     condition = alltrue([
       for scope in values(var.deployment_scopes) :
-      scope.vpc.mode != "dittocloud" || (
+      scope.vpc.mode != "dittocloud" || scope.vpc.cidr == null || (
         scope.vpc.public_subnet_netmask <= 24 &&
         scope.vpc.private_subnet_netmask <= 24 &&
         scope.vpc.public_subnet_netmask >= tonumber(split("/", scope.vpc.cidr)[1]) + 4 &&
