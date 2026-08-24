@@ -136,6 +136,17 @@ variable "vpc_id" {
   default     = null
 }
 
+variable "additional_authorized_vpc_arns" {
+  type        = list(string)
+  description = "Extra VPC ARNs, beyond vpc_id, also authorized on this role's ec2:Vpc-scoped conditions."
+  default     = []
+
+  validation {
+    condition     = var.vpc_id != null || length(var.additional_authorized_vpc_arns) == 0
+    error_message = "additional_authorized_vpc_arns requires vpc_id to be set — there is no VPC-scoped policy to extend it onto otherwise."
+  }
+}
+
 variable "vpc_subnet_ids" {
   type        = list(string)
   description = "Subnet IDs in vpc_id that ELB load balancers may use. When vpc_id is set, an empty list intentionally denies ELB subnet selection."
@@ -147,17 +158,25 @@ variable "vpc_subnet_ids" {
     # IAM's real quota by any test). Only scoped mode (scope_ref set) embeds
     # the long scope_ref-suffixed PassRole ARNs that eat into this budget; the
     # legacy shared/default boundary uses a short wildcard PassRole ARN and
-    # keeps the original 9-subnet headroom. In scoped mode: 6 ELB subnets with
-    # no EKS control-plane role comes to 6,103 characters; the same 6 subnets
-    # with enable_eks = true (which adds the EKS control-plane role ARN to the
-    # PassRole list) comes to 6,196 — over the limit. 4 subnets with EKS keeps
-    # a real margin (6,088). Failing here at plan time is much cheaper than
-    # discovering it as an IAM CreatePolicy 409 during apply.
+    # keeps the original 9-subnet headroom.
+    #
+    # The boundary used to spend the subnet list twice: CreateLoadBalancer and
+    # SetSubnets were separate statements with byte-identical Resource and
+    # Condition blocks. They are now one statement, which removed a whole
+    # duplicate of the list and its condition scaffolding. Current minified
+    # sizes in scoped mode: 6 subnets without EKS is 5,769; 6 subnets with
+    # enable_eks = true (which adds the EKS control-plane role ARN to the
+    # PassRole list) is 5,862, comfortably inside the 6,144 limit where it
+    # previously came to 6,196 and blew the quota.
+    #
+    # 6 is the meaningful bound because a Dittocloud-managed VPC always yields
+    # 3 AZs x (1 private + 1 public) = 6 load-balancer subnets. The old
+    # enable_eks bound of 4 made a scoped EKS scope with a Dittocloud VPC
+    # impossible to build at all.
     condition = length(var.vpc_subnet_ids) <= (
-      var.scope_ref == null ? 9 :
-      var.enable_eks ? 4 : 6
+      var.scope_ref == null ? 9 : 6
     )
-    error_message = "vpc_subnet_ids may contain at most 9 Kubernetes load-balancer subnets in legacy/default mode, or 6 in scoped mode (4 when enable_eks is also true, since the EKS control-plane role ARN adds to the generated permissions boundary), so it remains within AWS's 6,144-character managed-policy limit."
+    error_message = "vpc_subnet_ids may contain at most 9 Kubernetes load-balancer subnets in legacy/default mode, or 6 in scoped mode, so the generated permissions boundary remains within AWS's 6,144-character managed-policy limit."
   }
 }
 

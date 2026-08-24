@@ -139,6 +139,7 @@ module "cross_account_iam" {
   cluster_name                          = local.default_iam_cluster_name
   scope_identity_ref                    = local.scope_mode ? local.default_scope_ref : null
   vpc_id                                = local.effective_vpc_id
+  additional_authorized_vpc_arns        = var.additional_authorized_vpc_arns
   vpc_subnet_ids                        = local.effective_vpc_subnet_ids
   tags                                  = local.default_scope_tags
 }

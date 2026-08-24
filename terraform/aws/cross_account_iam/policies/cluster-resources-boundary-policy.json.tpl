@@ -233,7 +233,8 @@
     {
       "Effect": "Allow",
       "Action": [
-        "elasticloadbalancing:CreateLoadBalancer"
+        "elasticloadbalancing:CreateLoadBalancer",
+        "elasticloadbalancing:SetSubnets"
       ],
       "Resource": "*"%{~ if vpc_arn != null ~},
       "Condition": {
@@ -289,21 +290,6 @@
         "elasticloadbalancing:RemoveTags"
       ],
       "Resource": "arn:aws:elasticloadbalancing:*:*:listener*/*/*/*"
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "elasticloadbalancing:SetSubnets"
-      ],
-      "Resource": "*"%{~ if vpc_arn != null ~},
-      "Condition": {
-        "ForAllValues:StringEquals": {
-          "elasticloadbalancing:Subnet": ${jsonencode(vpc_subnet_ids)}
-        },
-        "Null": {
-          "elasticloadbalancing:Subnet": "false"
-        }
-      }%{~ endif ~}
     },
     {
       "Effect": "Allow",

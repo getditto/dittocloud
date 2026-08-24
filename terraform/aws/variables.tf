@@ -269,3 +269,9 @@ variable "vpc_id" {
   description = "ID of an existing customer-managed VPC. Required when customer_managed_vpc is true. Terraform automatically uses the created VPC ID when create_vpc is true."
   default     = null
 }
+
+variable "additional_authorized_vpc_arns" {
+  type        = list(string)
+  description = "Extra VPC ARNs also authorized on the default scope's controller role. Ignored for non-default scopes."
+  default     = []
+}

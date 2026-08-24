@@ -997,3 +997,132 @@ run "phase_one_security_group_mutations_stay_unconditional" {
     error_message = "Without a cluster name or VPC, security group rule mutations must remain unconditional."
   }
 }
+
+# Regression for the scoped-EKS boundary budget. A Dittocloud-managed VPC always
+# produces 3 AZs x (1 private + 1 public) = 6 load-balancer subnets, and a scoped
+# EKS deployment additionally embeds the EKS control-plane role ARN in the
+# boundary's PassRole list. That combination used to render at 6,196 characters —
+# past IAM's 6,144 quota — which is why enable_eks scopes were capped at 4
+# subnets and a scoped EKS scope on a Dittocloud VPC could not be built at all.
+run "scoped_eks_boundary_stays_within_policy_size_limit" {
+  command = plan
+
+  module {
+    source = "./cross_account_iam"
+  }
+
+  variables {
+    scope_ref  = "dsc-01kzsm9k00hc2fmax9g20tsgg2"
+    region     = "us-east-1"
+    enable_eks = true
+    vpc_id     = "vpc-098fee1defefc1bf1"
+    vpc_subnet_ids = [
+      "subnet-00000000000000001",
+      "subnet-00000000000000002",
+      "subnet-00000000000000003",
+      "subnet-00000000000000004",
+      "subnet-00000000000000005",
+      "subnet-00000000000000006",
+    ]
+    create_admin_view_role = false
+  }
+
+  assert {
+    condition     = length(jsonencode(jsondecode(aws_iam_policy.cluster_resources_boundary_policy.policy))) <= 6144
+    error_message = "The scoped EKS cluster-resources boundary must stay within AWS's 6,144-character managed-policy limit."
+  }
+
+  # Both subnet-conditioned ELB actions must survive being merged into one
+  # statement — that merge is what freed the characters.
+  assert {
+    condition = alltrue([
+      for action in ["elasticloadbalancing:CreateLoadBalancer", "elasticloadbalancing:SetSubnets"] :
+      length([
+        for statement in jsondecode(aws_iam_policy.cluster_resources_boundary_policy.policy).Statement : statement
+        if contains(try(statement.Action, []), action) &&
+        toset(try(statement.Condition["ForAllValues:StringEquals"]["elasticloadbalancing:Subnet"], [])) == toset([
+          "subnet-00000000000000001",
+          "subnet-00000000000000002",
+          "subnet-00000000000000003",
+          "subnet-00000000000000004",
+          "subnet-00000000000000005",
+          "subnet-00000000000000006",
+        ]) &&
+        try(statement.Condition.Null["elasticloadbalancing:Subnet"], null) == "false"
+      ]) == 1
+    ])
+    error_message = "Both CreateLoadBalancer and SetSubnets must stay confined to the configured VPC's load-balancer subnets."
+  }
+}
+
+run "additional_authorized_vpc_arns_extend_controller_vpc_conditions" {
+  command = plan
+
+  module {
+    source = "./cross_account_iam"
+  }
+
+  variables {
+    vpc_id = "vpc-09e877f9012f52241"
+    additional_authorized_vpc_arns = [
+      "arn:aws:ec2:ap-southeast-2:520778242457:vpc/vpc-0f1e2d3c4b5a69788",
+    ]
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.capa_controller_base.policy).Statement : statement
+      if contains(try(statement.Action, []), "ec2:RunInstances") &&
+      contains(try(statement.Resource, []), "arn:aws:ec2:*:*:subnet/*") &&
+      toset(try(statement.Condition.StringEquals["ec2:Vpc"], [])) == toset([
+        "arn:aws:ec2:us-west-2:520778242457:vpc/vpc-09e877f9012f52241",
+        "arn:aws:ec2:ap-southeast-2:520778242457:vpc/vpc-0f1e2d3c4b5a69788",
+      ])
+    ]) == 1
+    error_message = "RunInstances' ec2:Vpc condition must OR-match every VPC in vpc_id plus additional_authorized_vpc_arns, in its own region."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.capa_controller_base.policy).Statement : statement
+      if contains(try(statement.Action, []), "ec2:CreateSecurityGroup") &&
+      toset(try(statement.Resource, [])) == toset([
+        "arn:aws:ec2:us-west-2:520778242457:vpc/vpc-09e877f9012f52241",
+        "arn:aws:ec2:ap-southeast-2:520778242457:vpc/vpc-0f1e2d3c4b5a69788",
+      ])
+    ]) == 1
+    error_message = "CreateSecurityGroup's direct VPC-resource authorization must list every VPC in vpc_id plus additional_authorized_vpc_arns."
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.capa_control_plane.policy).Statement : statement
+      if contains(try(statement.Action, []), "ec2:CreateSecurityGroup") &&
+      contains(try(statement.Resource, []), "arn:aws:ec2:us-west-2:520778242457:vpc/vpc-09e877f9012f52241") &&
+      !contains(try(statement.Resource, []), "arn:aws:ec2:ap-southeast-2:520778242457:vpc/vpc-0f1e2d3c4b5a69788")
+    ]) == 1
+    error_message = "Single-VPC callers like control-plane IAM must keep seeing only the scope's own vpc_id, not additional_authorized_vpc_arns."
+  }
+}
+
+run "single_vpc_condition_stays_scalar_without_additional_authorized_vpc_arns" {
+  command = plan
+
+  module {
+    source = "./cross_account_iam"
+  }
+
+  variables {
+    vpc_id = "vpc-09e877f9012f52241"
+  }
+
+  assert {
+    condition = length([
+      for statement in jsondecode(aws_iam_policy.capa_controller_base.policy).Statement : statement
+      if contains(try(statement.Action, []), "ec2:RunInstances") &&
+      contains(try(statement.Resource, []), "arn:aws:ec2:*:*:subnet/*") &&
+      try(statement.Condition.StringEquals["ec2:Vpc"], null) == "arn:aws:ec2:us-west-2:520778242457:vpc/vpc-09e877f9012f52241"
+    ]) == 1
+    error_message = "Without additional_authorized_vpc_arns, ec2:Vpc must stay a plain string, not a single-element list, to keep the generated policy unchanged."
+  }
+}
