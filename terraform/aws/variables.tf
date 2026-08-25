@@ -129,10 +129,10 @@ variable "deployment_scopes" {
       scope.vpc.secondary_cidr == null ? true : (
         scope.vpc.mode == "dittocloud" &&
         contains([for index in range(64) : cidrsubnet("100.64.0.0/10", 6, index)], scope.vpc.secondary_cidr) &&
-        scope.vpc.secondary_cidr != "100.66.0.0/16"
+        !contains(["100.66.0.0/16", "100.80.0.0/16", "100.81.0.0/16"], scope.vpc.secondary_cidr)
       )
     ])
-    error_message = "A scope secondary_cidr can only be set for a Dittocloud-managed VPC and must be one of the 64 /16 blocks inside 100.64.0.0/10, excluding the reserved 100.66.0.0/16."
+    error_message = "A scope secondary_cidr can only be set for a Dittocloud-managed VPC and must be one of the 64 /16 blocks inside 100.64.0.0/10, excluding 100.66.0.0/16, 100.80.0.0/16 and 100.81.0.0/16, which Valet clusters use for in-cluster pod and Service addressing."
   }
 
   validation {

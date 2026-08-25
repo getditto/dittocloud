@@ -207,6 +207,36 @@ run "rejects_the_reserved_cluster_block" {
   expect_failures = [var.secondary_cidr]
 }
 
+# 100.80 and 100.81 are the pod and Service CIDRs every self-managed AWS cluster
+# is built with, so a VPC secondary there overlaps its own clusters.
+run "rejects_the_self_managed_pod_block" {
+  command = plan
+
+  module {
+    source = "./vpc"
+  }
+
+  variables {
+    secondary_cidr = "100.80.0.0/16"
+  }
+
+  expect_failures = [var.secondary_cidr]
+}
+
+run "rejects_the_self_managed_service_block" {
+  command = plan
+
+  module {
+    source = "./vpc"
+  }
+
+  variables {
+    secondary_cidr = "100.81.0.0/16"
+  }
+
+  expect_failures = [var.secondary_cidr]
+}
+
 run "rejects_load_balancer_subnets_smaller_than_a_24" {
   command = plan
 

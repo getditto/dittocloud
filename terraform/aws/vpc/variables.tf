@@ -72,9 +72,16 @@ variable "secondary_cidr" {
     error_message = "secondary_cidr must be one of the 64 /16 blocks inside 100.64.0.0/10, for example 100.64.0.0/16."
   }
 
+  # 100.66.0.0/16 is the kubeadm cluster pod and Service range. 100.80.0.0/16 and
+  # 100.81.0.0/16 are the pod and Service CIDRs every self-managed AWS cluster is
+  # built with, in cloud-infra-apps apps/valet-cluster-k8s-aws. A VPC secondary on
+  # any of them would overlap the in-cluster addressing of its own clusters.
   validation {
-    condition     = var.secondary_cidr == null ? true : var.secondary_cidr != "100.66.0.0/16"
-    error_message = "100.66.0.0/16 is not allocatable: Valet clusters already use it for in-cluster pod and Service addressing, so a VPC secondary there collides with cluster-internal traffic."
+    condition = var.secondary_cidr == null ? true : !contains(
+      ["100.66.0.0/16", "100.80.0.0/16", "100.81.0.0/16"],
+      var.secondary_cidr,
+    )
+    error_message = "100.66.0.0/16, 100.80.0.0/16 and 100.81.0.0/16 are not allocatable: Valet clusters already use them for in-cluster pod and Service addressing, so a VPC secondary there collides with cluster-internal traffic."
   }
 }
 

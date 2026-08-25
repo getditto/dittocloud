@@ -84,6 +84,24 @@ func TestAWSScopeWorkloadBlockRejectsUnusableConfiguration(t *testing.T) {
 			wantError: "reserved for in-cluster pod and Service addressing",
 		},
 		{
+			name: "secondary CIDR reserved for self-managed cluster pods",
+			vpc: `
+    mode: dittocloud
+    name: valet
+    cidr: 10.214.0.0/20
+    secondaryCidr: 100.80.0.0/16`,
+			wantError: "reserved for in-cluster pod and Service addressing",
+		},
+		{
+			name: "secondary CIDR reserved for self-managed cluster services",
+			vpc: `
+    mode: dittocloud
+    name: valet
+    cidr: 10.214.0.0/20
+    secondaryCidr: 100.81.0.0/16`,
+			wantError: "reserved for in-cluster pod and Service addressing",
+		},
+		{
 			name: "secondary CIDR that is not a /16",
 			vpc: `
     mode: dittocloud

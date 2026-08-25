@@ -53,8 +53,10 @@ EC2, and it is the only surface a peered VPC sees. `secondaryCidr` carries pod,
 node, and database capacity and must be unique per VPC — AWS rejects a peering
 connection when any associated CIDR overlaps, secondary blocks included,
 regardless of routing intent. It must be one of the 64 `/16` blocks inside
-`100.64.0.0/10`, and `100.66.0.0/16` is not allocatable because Valet clusters
-already use it for in-cluster pod and Service addressing.
+`100.64.0.0/10`. Three of those blocks are not allocatable because Valet clusters
+already use them for in-cluster pod and Service addressing: `100.66.0.0/16` is the
+kubeadm cluster range, and `100.80.0.0/16` and `100.81.0.0/16` are the pod and
+Service CIDRs every self-managed AWS cluster is built with.
 
 `publicSubnetNetmask` and `privateSubnetNetmask` default to `24` and `23`.
 **Every subnet CIDR is derived from them, so changing either renumbers live

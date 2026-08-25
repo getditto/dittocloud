@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -23,9 +24,19 @@ const (
 	awsScopeReferenceLength = 30
 	// The managed VPC module always spans the first three availability zones of
 	// its Region, so a supplied Elastic IP set has to match that exactly.
-	awsManagedVPCAvailabilityZones  = 3
-	awsReservedClusterSecondaryCIDR = "100.66.0.0/16"
+	awsManagedVPCAvailabilityZones = 3
 )
+
+// Blocks inside 100.64.0.0/10 that Valet clusters already use for in-cluster
+// addressing, so a VPC secondary CIDR there would overlap cluster-internal
+// traffic. 100.66.0.0/16 is the kubeadm cluster pod and Service range; the
+// 100.80 and 100.81 blocks are the pod and Service CIDRs every self-managed AWS
+// cluster is built with (cloud-infra-apps apps/valet-cluster-k8s-aws).
+var awsReservedClusterSecondaryCIDRs = []string{
+	"100.66.0.0/16",
+	"100.80.0.0/16",
+	"100.81.0.0/16",
+}
 
 var (
 	awsScopeReferencePattern  = regexp.MustCompile(`^dsc-[0-7][0-9a-hjkmnp-tv-z]{25}$`)
@@ -262,7 +273,7 @@ func validateAWSScopeSecondaryCIDR(scopeRef string, secondaryCIDR string) error 
 	if !netip.MustParsePrefix("100.64.0.0/10").Contains(prefix.Addr()) {
 		return fmt.Errorf("scope %q vpc.secondaryCidr %q must fall inside 100.64.0.0/10", scopeRef, secondaryCIDR)
 	}
-	if secondaryCIDR == awsReservedClusterSecondaryCIDR {
+	if slices.Contains(awsReservedClusterSecondaryCIDRs, secondaryCIDR) {
 		return fmt.Errorf(
 			"scope %q vpc.secondaryCidr %q is reserved for in-cluster pod and Service addressing",
 			scopeRef,
