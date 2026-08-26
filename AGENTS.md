@@ -108,7 +108,7 @@ go test ./...
 - `--aws-region` — AWS region (default `us-east-1`)
 - `--aws-vpc-name` — VPC name (default `ditto`)
 - `--aws-vpc-cidr` — primary (DMZ) VPC CIDR block (default `10.210.0.0/16`)
-- `--aws-vpc-secondary-cidr` — secondary CIDR carrying pod, node, and database capacity; a `/16` inside `100.64.0.0/10`, unique per VPC
+- `--aws-vpc-secondary-cidr` — secondary CIDR carrying pod, node, and database capacity; a `/16` inside `100.64.0.0/10`, the same on every VPC because it is never routed outside its own
 - `--aws-vpc-public-subnet-netmask` — per-AZ public subnet netmask (default `24`); pin to the existing value or subnets renumber
 - `--aws-vpc-private-subnet-netmask` — per-AZ private subnet netmask (default `23`); pin to the existing value or subnets renumber
 - `--aws-vpc-nat-eip-allocation-ids` — pre-allocated Elastic IP allocation IDs for the NAT gateways, one per AZ (repeatable)

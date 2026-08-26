@@ -59,7 +59,7 @@ variable "private_subnet_netmask" {
 ####################################################################################################
 
 variable "secondary_cidr" {
-  description = "Optional secondary IPv4 CIDR block carrying every workload tier (pod, node, database). Must be unique per VPC: AWS rejects a peering connection when any associated CIDR overlaps, secondary blocks included, regardless of routing intent."
+  description = "Optional secondary IPv4 CIDR block carrying every workload tier (pod, node, database). The same block is used on every VPC, because it is never routed or advertised outside its own VPC and so identical blocks never meet. Note the consequence: AWS rejects a peering connection when any associated CIDR overlaps, secondary blocks included, and checks the whole set at creation time, so two VPCs sharing this block cannot be peered at all. Cross-VPC connectivity is PrivateLink or VPC Lattice, or a transit gateway propagating only the primaries."
   type        = string
   default     = null
   nullable    = true

@@ -50,10 +50,13 @@ dsc-01k2m8g7n4p6q9r3t5v8x1y2z4:
 
 `cidr` is a DMZ: it carries load balancers, NAT gateways, and explicitly placed
 EC2, and it is the only surface a peered VPC sees. `secondaryCidr` carries pod,
-node, and database capacity and must be unique per VPC — AWS rejects a peering
-connection when any associated CIDR overlaps, secondary blocks included,
-regardless of routing intent. It must be one of the 64 `/16` blocks inside
-`100.64.0.0/10`. Three of those blocks are not allocatable because Valet clusters
+node, and database capacity and is the same block on every VPC, because it is
+never routed or advertised outside its own VPC so identical blocks never meet.
+Two VPCs that share it cannot be peered at all — AWS rejects a peering connection
+on any overlapping CIDR, secondary blocks included, and checks the whole set at
+creation time — so cross-VPC connectivity is PrivateLink or VPC Lattice, or a
+transit gateway propagating only the primaries. It must be one of the 64 `/16`
+blocks inside `100.64.0.0/10`. Three of those blocks are not allocatable because Valet clusters
 already use them for in-cluster pod and Service addressing: `100.66.0.0/16` is the
 kubeadm cluster range, and `100.80.0.0/16` and `100.81.0.0/16` are the pod and
 Service CIDRs every self-managed AWS cluster is built with.

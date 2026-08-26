@@ -64,9 +64,11 @@ type AWSScopeVPC struct {
 	Mode string `yaml:"mode" json:"mode"`
 	Name string `yaml:"name,omitempty" json:"name,omitempty"`
 	// CIDR is the DMZ block: load balancers, NAT gateways, and explicitly placed
-	// EC2 only. SecondaryCIDR carries every workload tier and must be unique per
-	// VPC, because AWS rejects a peering connection when any associated CIDR
-	// overlaps, secondary blocks included.
+	// EC2 only. SecondaryCIDR carries every workload tier and is the same block on
+	// every VPC, because it is never routed or advertised outside its own VPC, so
+	// identical blocks never meet. Two VPCs sharing it cannot be peered, since AWS
+	// rejects a peering connection on any overlapping CIDR, but that is accepted:
+	// cross-VPC connectivity is PrivateLink or VPC Lattice.
 	CIDR                       string   `yaml:"cidr,omitempty" json:"cidr,omitempty"`
 	SecondaryCIDR              string   `yaml:"secondaryCidr,omitempty" json:"secondary_cidr,omitempty"`
 	PublicSubnetNetmask        int      `yaml:"publicSubnetNetmask,omitempty" json:"public_subnet_netmask,omitempty"`

@@ -183,7 +183,7 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 	cmd.Flags().String(
 		"aws-vpc-secondary-cidr",
 		"",
-		"Secondary VPC CIDR block carrying pod, node, and database capacity; must be a /16 inside 100.64.0.0/10 and unique per VPC",
+		"Secondary VPC CIDR block carrying pod, node, and database capacity; a /16 inside 100.64.0.0/10, the same on every VPC because it is never routed outside its own",
 	)
 	cmd.Flags().Int(
 		"aws-vpc-public-subnet-netmask",

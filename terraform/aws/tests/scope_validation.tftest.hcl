@@ -1137,7 +1137,12 @@ run "publishes_workload_networking_for_a_managed_scope" {
   }
 }
 
-run "rejects_a_secondary_cidr_shared_between_scopes" {
+# Every VPC uses the same secondary block. It is never routed or advertised
+# outside its own VPC, so identical blocks in different VPCs never meet. The
+# trade-off is that two VPCs sharing it cannot be peered, because AWS rejects a
+# peering connection on any overlapping CIDR; cross-VPC connectivity is
+# PrivateLink or VPC Lattice instead.
+run "accepts_the_same_secondary_cidr_across_scopes" {
   command = plan
 
   variables {
@@ -1164,7 +1169,13 @@ run "rejects_a_secondary_cidr_shared_between_scopes" {
     }
   }
 
-  expect_failures = [var.deployment_scopes]
+  assert {
+    condition = (
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].input.configuration.vpc.secondary_cidr == "100.64.0.0/16" &&
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].input.configuration.vpc.secondary_cidr == "100.64.0.0/16"
+    )
+    error_message = "Two scopes must be able to carry the same secondary CIDR, because the block is never routed outside its own VPC."
+  }
 }
 
 run "rejects_a_secondary_cidr_on_an_unmanaged_vpc" {

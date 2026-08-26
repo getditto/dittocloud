@@ -106,11 +106,13 @@ Pod, node, and database capacity comes from a separate block:
 dittocloud bootstrap aws   --aws-profile my-profile   --aws-region us-west-2   --create-vpc=true   --aws-vpc-name ditto-vpc   --aws-vpc-cidr 10.214.0.0/20   --aws-vpc-secondary-cidr 100.64.0.0/16
 ```
 
-The secondary CIDR must be one of the 64 `/16` blocks inside `100.64.0.0/10`
-and must be unique per VPC: AWS rejects a peering connection when any
-associated CIDR overlaps, secondary blocks included, regardless of routing
-intent. Traffic from these subnets reaches the internet through the NAT gateway
-in its own availability zone and never crosses a peering connection.
+The secondary CIDR must be one of the 64 `/16` blocks inside `100.64.0.0/10`,
+and the same block is used on every VPC because it is never routed or advertised
+outside its own VPC. Two VPCs that share it cannot be peered at all: AWS rejects
+a peering connection on any overlapping CIDR, secondary blocks included, and
+checks the whole set at creation time. Cross-VPC connectivity is PrivateLink or
+VPC Lattice instead. Traffic from these subnets reaches the internet through the
+NAT gateway in its own availability zone and never crosses a peering connection.
 
 > **Upgrading an existing deployment:** every subnet CIDR is derived from
 > `--aws-vpc-public-subnet-netmask` and `--aws-vpc-private-subnet-netmask`, so

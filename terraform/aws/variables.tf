@@ -141,17 +141,6 @@ variable "deployment_scopes" {
   }
 
   validation {
-    condition = length(distinct([
-      for scope in values(var.deployment_scopes) : scope.vpc.secondary_cidr
-      if scope.vpc.secondary_cidr != null
-      ])) == length([
-      for scope in values(var.deployment_scopes) : scope.vpc.secondary_cidr
-      if scope.vpc.secondary_cidr != null
-    ])
-    error_message = "Each scope secondary_cidr must be unique: AWS rejects a peering connection when any associated CIDR overlaps, secondary blocks included, regardless of routing intent."
-  }
-
-  validation {
     condition = alltrue([
       for scope in values(var.deployment_scopes) :
       scope.vpc.mode == "dittocloud" || (
@@ -321,7 +310,7 @@ variable "vpc_cidr" {
 }
 
 variable "vpc_secondary_cidr" {
-  description = "Optional secondary IPv4 CIDR block carrying every workload tier (pod, node, database). Must be one of the 64 /16 blocks inside 100.64.0.0/10 and unique per VPC, because AWS rejects a peering connection when any associated CIDR overlaps."
+  description = "Optional secondary IPv4 CIDR block carrying every workload tier (pod, node, database). Must be one of the allocatable /16 blocks inside 100.64.0.0/10. The same block is used on every VPC, because it is never routed or advertised outside its own VPC. Two VPCs sharing it cannot be peered, since AWS rejects a peering connection on any overlapping CIDR; cross-VPC connectivity is PrivateLink or VPC Lattice instead."
   type        = string
   default     = null
   nullable    = true
