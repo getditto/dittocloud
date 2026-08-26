@@ -69,9 +69,13 @@ variable "secondary_cidr" {
       [for index in range(64) : cidrsubnet("100.64.0.0/10", 6, index)],
       var.secondary_cidr,
     )
-    error_message = "secondary_cidr must be one of the 64 /16 blocks inside 100.64.0.0/10, for example 100.64.0.0/16."
+    error_message = "secondary_cidr must be one of the /16 blocks inside 100.64.0.0/10, for example 100.64.0.0/16."
   }
 
+  # Keep this list in sync with the scope validation in ../variables.tf and with
+  # awsReservedClusterSecondaryCIDRs in cmd/internal/bootstrap/aws_scopes.go.
+  # Variable validation cannot reference a local, so all three spell it out.
+  #
   # 100.66.0.0/16 is the kubeadm cluster pod and Service range. 100.80.0.0/16 and
   # 100.81.0.0/16 are the pod and Service CIDRs every self-managed AWS cluster is
   # built with, in cloud-infra-apps apps/valet-cluster-k8s-aws. A VPC secondary on

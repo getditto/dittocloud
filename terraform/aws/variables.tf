@@ -123,6 +123,11 @@ variable "deployment_scopes" {
 
   # A scope is one VPC, so each scope owns its own workload block and its own
   # subnet sizing. Two scopes sharing a secondary CIDR could never be peered.
+  #
+  # Variable validation cannot reference a local, so the reserved list is spelled
+  # out here, in vpc/variables.tf, and in awsReservedClusterSecondaryCIDRs
+  # (cmd/internal/bootstrap/aws_scopes.go). Reserving a fourth block means
+  # editing all three; nothing fails if one is missed.
   validation {
     condition = alltrue([
       for scope in values(var.deployment_scopes) :
@@ -132,7 +137,7 @@ variable "deployment_scopes" {
         !contains(["100.66.0.0/16", "100.80.0.0/16", "100.81.0.0/16"], scope.vpc.secondary_cidr)
       )
     ])
-    error_message = "A scope secondary_cidr can only be set for a Dittocloud-managed VPC and must be one of the 64 /16 blocks inside 100.64.0.0/10, excluding 100.66.0.0/16, 100.80.0.0/16 and 100.81.0.0/16, which Valet clusters use for in-cluster pod and Service addressing."
+    error_message = "A scope secondary_cidr can only be set for a Dittocloud-managed VPC and must be one of the 61 allocatable /16 blocks inside 100.64.0.0/10. Of the 64 blocks in that range, 100.66.0.0/16, 100.80.0.0/16 and 100.81.0.0/16 are reserved because Valet clusters use them for in-cluster pod and Service addressing."
   }
 
   validation {
