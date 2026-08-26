@@ -76,6 +76,12 @@ type AWSScopeVPC struct {
 	ID                         string   `yaml:"id,omitempty" json:"id,omitempty"`
 	NATGatewayName             string   `yaml:"natGatewayName,omitempty" json:"nat_gateway_name,omitempty"`
 	NATGatewayEIPAllocationIDs []string `yaml:"natGatewayEipAllocationIds,omitempty" json:"nat_gateway_eip_allocation_ids,omitempty"`
+	// KarpenterDiscoveryTagValue is the value of the karpenter.sh/discovery tag on
+	// the node subnets, which is how Karpenter finds where to launch nodes.
+	// Defaults to the scope's cluster name. Set it explicitly when a scope holds
+	// more than one cluster, which scopeTagPolicyVersion 0 allows, because the
+	// cluster name is then not a meaningful single value.
+	KarpenterDiscoveryTagValue string `yaml:"karpenterDiscoveryTagValue,omitempty" json:"karpenter_discovery_tag_value,omitempty"`
 }
 
 // Terraform applies these defaults when the scopes file leaves the sizing out.
@@ -247,6 +253,13 @@ func (scope AWSDeploymentScope) withManagedVPCDefaults() AWSDeploymentScope {
 func rejectAWSManagedVPCFields(scopeRef string, vpc AWSScopeVPC, mode string) error {
 	if vpc.Name != "" || vpc.CIDR != "" || vpc.NATGatewayName != "" {
 		return fmt.Errorf("scope %q cannot set vpc.name, vpc.cidr, or vpc.natGatewayName when vpc.mode is %q", scopeRef, mode)
+	}
+	if vpc.KarpenterDiscoveryTagValue != "" {
+		return fmt.Errorf(
+			"scope %q cannot set vpc.karpenterDiscoveryTagValue when vpc.mode is %q: the node subnets it tags only exist on a Dittocloud-managed VPC",
+			scopeRef,
+			mode,
+		)
 	}
 	if vpc.SecondaryCIDR != "" || vpc.PublicSubnetNetmask != 0 || vpc.PrivateSubnetNetmask != 0 {
 		return fmt.Errorf(

@@ -409,6 +409,9 @@ func awsDeploymentScopeYAMLNode(scope AWSDeploymentScope) *yaml.Node {
 	if scope.VPC.PrivateSubnetNetmask != 0 {
 		appendIntVPCField("privateSubnetNetmask", scope.VPC.PrivateSubnetNetmask)
 	}
+	if scope.VPC.KarpenterDiscoveryTagValue != "" {
+		appendVPCField("karpenterDiscoveryTagValue", scope.VPC.KarpenterDiscoveryTagValue)
+	}
 	if len(scope.VPC.NATGatewayEIPAllocationIDs) > 0 {
 		allocations := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
 		for _, allocationID := range scope.VPC.NATGatewayEIPAllocationIDs {

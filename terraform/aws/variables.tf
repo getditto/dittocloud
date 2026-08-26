@@ -31,6 +31,7 @@ variable "deployment_scopes" {
       id                             = optional(string)
       nat_gateway_name               = optional(string)
       nat_gateway_eip_allocation_ids = optional(list(string), [])
+      karpenter_discovery_tag_value  = optional(string)
     })
   }))
   default = {}

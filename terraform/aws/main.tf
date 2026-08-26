@@ -105,7 +105,7 @@ module "scoped_vpc" {
   public_subnet_netmask          = each.value.vpc.public_subnet_netmask
   private_subnet_netmask         = each.value.vpc.private_subnet_netmask
   manage_kubernetes_cluster_tag  = false
-  karpenter_discovery_tag_value  = each.value.cluster_name
+  karpenter_discovery_tag_value  = try(coalesce(each.value.vpc.karpenter_discovery_tag_value, each.value.cluster_name), null)
   nat_gateway_name               = each.value.vpc.nat_gateway_name
   nat_gateway_eip_allocation_ids = each.value.vpc.nat_gateway_eip_allocation_ids
   tags = merge(

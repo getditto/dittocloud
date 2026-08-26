@@ -112,6 +112,8 @@ go test ./...
 - `--aws-vpc-public-subnet-netmask` — per-AZ public subnet netmask (default `24`); pin to the existing value or subnets renumber
 - `--aws-vpc-private-subnet-netmask` — per-AZ private subnet netmask (default `23`); pin to the existing value or subnets renumber
 - `--aws-vpc-nat-eip-allocation-ids` — pre-allocated Elastic IP allocation IDs for the NAT gateways, one per AZ (repeatable)
+
+On `scopes add`, the managed-VPC equivalents are `--vpc-secondary-cidr` and `--vpc-karpenter-discovery-tag`. Both are `dittocloud` mode only. The discovery tag falls back to the scope's `clusterName`; with neither set the node subnets carry no `karpenter.sh/discovery` tag and Karpenter will not find them.
 - `--karpenter-discovery-tag-value` — value for `karpenter.sh/discovery` on the node subnets; defaults to `--cluster-name`
 - `--controller-trusted-role-arns` — override CAPA controller trusted ARNs
 - `--iam-trusted-role-arns` — override trust editor trusted ARNs

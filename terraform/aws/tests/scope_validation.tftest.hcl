@@ -1142,6 +1142,63 @@ run "publishes_workload_networking_for_a_managed_scope" {
 # trade-off is that two VPCs sharing it cannot be peered, because AWS rejects a
 # peering connection on any overlapping CIDR; cross-VPC connectivity is
 # PrivateLink or VPC Lattice instead.
+# The node subnets carry karpenter.sh/discovery, and its value comes from the
+# scope. An explicit value wins; otherwise the scope's cluster name is used. The
+# explicit form matters because scopeTagPolicyVersion 0 permits several clusters
+# in one scope, where a single cluster name is not meaningful.
+run "prefers_an_explicit_karpenter_discovery_tag_over_the_cluster_name" {
+  command = plan
+
+  variables {
+    deployment_scopes = {
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" = {
+        default      = true
+        cluster_name = "valet-dev"
+        cluster_type = "eks"
+        region       = "ap-southeast-2"
+        vpc = {
+          mode                          = "dittocloud"
+          name                          = "valet"
+          cidr                          = "10.214.0.0/20"
+          secondary_cidr                = "100.64.0.0/16"
+          karpenter_discovery_tag_value = "shared-workload"
+        }
+      }
+    }
+  }
+
+  assert {
+    condition     = local.default_karpenter_discovery_tag_value == "shared-workload"
+    error_message = "An explicit vpc.karpenter_discovery_tag_value must win over the scope cluster name."
+  }
+}
+
+run "falls_back_to_the_cluster_name_for_the_karpenter_discovery_tag" {
+  command = plan
+
+  variables {
+    deployment_scopes = {
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" = {
+        default      = true
+        cluster_name = "valet-dev"
+        cluster_type = "eks"
+        region       = "ap-southeast-2"
+        vpc = {
+          mode           = "dittocloud"
+          name           = "valet"
+          cidr           = "10.214.0.0/20"
+          secondary_cidr = "100.64.0.0/16"
+        }
+      }
+    }
+  }
+
+  assert {
+    condition     = local.default_karpenter_discovery_tag_value == "valet-dev"
+    error_message = "With no explicit value the scope cluster name must tag the node subnets."
+  }
+}
+
 run "accepts_the_same_secondary_cidr_across_scopes" {
   command = plan
 

@@ -117,6 +117,90 @@ func TestAWSScopesAddRecordsTheSecondaryWorkloadBlock(t *testing.T) {
 	}
 }
 
+func TestAWSScopesAddRecordsAnExplicitKarpenterDiscoveryTag(t *testing.T) {
+	forceAWSScopesAddNonInteractive(t)
+	setAWSScopesAddReferenceSequence(t, testDefaultScopeRef)
+	scopesPath := filepath.Join(t.TempDir(), "scopes.yaml")
+	cmd, _ := setupBootstrapTest(t, []string{
+		"aws", "scopes", "add",
+		"--scopes-file=" + scopesPath,
+		"--default",
+		"--region=us-east-1",
+		"--cluster-type=eks",
+		"--vpc-mode=dittocloud",
+		"--vpc-name=valet",
+		"--vpc-cidr=10.217.0.0/20",
+		"--vpc-karpenter-discovery-tag=saas-internal-dev",
+	})
+	cmd.SetOut(&bytes.Buffer{})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected scopes-add error: %v", err)
+	}
+	scopes, err := loadAWSDeploymentScopes(scopesPath)
+	if err != nil {
+		t.Fatalf("unable to load created scopes file: %v", err)
+	}
+	if got := scopes[testDefaultScopeRef].VPC.KarpenterDiscoveryTagValue; got != "saas-internal-dev" {
+		t.Fatalf("karpenter discovery tag: got %q, want %q", got, "saas-internal-dev")
+	}
+}
+
+func TestAWSScopesAddLeavesTheKarpenterDiscoveryTagUnsetByDefault(t *testing.T) {
+	// Unset means Terraform falls back to the scope's cluster name, so the field
+	// must not be written with an empty value that would defeat that coalesce.
+	forceAWSScopesAddNonInteractive(t)
+	setAWSScopesAddReferenceSequence(t, testDefaultScopeRef)
+	scopesPath := filepath.Join(t.TempDir(), "scopes.yaml")
+	cmd, _ := setupBootstrapTest(t, []string{
+		"aws", "scopes", "add",
+		"--scopes-file=" + scopesPath,
+		"--default",
+		"--region=us-east-1",
+		"--cluster-type=eks",
+		"--cluster-name=my-cluster",
+		"--vpc-mode=dittocloud",
+		"--vpc-name=valet",
+		"--vpc-cidr=10.217.0.0/20",
+	})
+	cmd.SetOut(&bytes.Buffer{})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected scopes-add error: %v", err)
+	}
+	content, err := os.ReadFile(scopesPath)
+	if err != nil {
+		t.Fatalf("unable to read created scopes file: %v", err)
+	}
+	if strings.Contains(string(content), "karpenterDiscoveryTagValue") {
+		t.Fatalf("scopes file records an unset karpenter discovery tag:\n%s", content)
+	}
+}
+
+func TestAWSScopesAddRejectsAKarpenterDiscoveryTagOnAnUnmanagedVPC(t *testing.T) {
+	forceAWSScopesAddNonInteractive(t)
+	setAWSScopesAddReferenceSequence(t, testDefaultScopeRef)
+	scopesPath := filepath.Join(t.TempDir(), "scopes.yaml")
+	cmd, _ := setupBootstrapTest(t, []string{
+		"aws", "scopes", "add",
+		"--scopes-file=" + scopesPath,
+		"--default",
+		"--region=us-east-1",
+		"--vpc-mode=existing",
+		"--vpc-id=vpc-0123456789abcdef0",
+		"--vpc-karpenter-discovery-tag=saas-internal-dev",
+	})
+	cmd.SetOut(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected a karpenter discovery tag on an existing VPC to be rejected")
+	}
+	if !strings.Contains(err.Error(), "vpc.karpenterDiscoveryTagValue") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestAWSScopesAddRejectsASecondaryBlockOnAnUnmanagedVPC(t *testing.T) {
 	forceAWSScopesAddNonInteractive(t)
 	setAWSScopesAddReferenceSequence(t, testDefaultScopeRef)

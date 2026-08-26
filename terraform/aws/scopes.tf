@@ -70,10 +70,14 @@ locals {
   default_private_subnet_netmask = (
     local.default_scope != null ? local.default_scope.vpc.private_subnet_netmask : var.private_subnet_netmask
   )
-  # The node subnets carry karpenter.sh/discovery. In scope mode the scope's own
-  # cluster name is the value; the legacy path takes an explicit variable and
-  # falls back to the IAM cluster name when one is configured.
-  default_karpenter_discovery_tag_value = local.default_scope != null ? local.default_scope.cluster_name : try(
+  # The node subnets carry karpenter.sh/discovery. A scope may set the value
+  # explicitly and otherwise falls back to its own cluster name; the explicit form
+  # matters because scopeTagPolicyVersion 0 permits several clusters in one scope,
+  # where the cluster name is not a meaningful single value. The legacy path takes
+  # its own variable and falls back to the IAM cluster name.
+  default_karpenter_discovery_tag_value = local.default_scope != null ? try(
+    coalesce(local.default_scope.vpc.karpenter_discovery_tag_value, local.default_scope.cluster_name), null
+    ) : try(
     coalesce(var.karpenter_discovery_tag_value, var.cluster_name), null
   )
   default_nat_gateway_eip_allocation_ids = (
