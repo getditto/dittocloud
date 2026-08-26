@@ -82,6 +82,23 @@ dittocloud bootstrap aws scopes add \
   --vpc-id vpc-09e877f9012f52241
 ```
 
+A greenfield Dittocloud-managed VPC takes `--default` and the workload block:
+
+```bash
+dittocloud bootstrap aws scopes add \
+  --scopes-file scopes.yaml \
+  --default \
+  --region us-east-1 \
+  --cluster-type eks \
+  --vpc-mode dittocloud \
+  --vpc-name valet \
+  --vpc-cidr 10.217.0.0/20 \
+  --vpc-secondary-cidr 100.64.0.0/16
+```
+
+`--vpc-secondary-cidr` is only valid for `dittocloud` mode; `existing` and `capi`
+scopes reject it, because Dittocloud does not own their address space.
+
 The command only updates the scope file. It never initializes Terraform or
 changes Terraform state. Run a separate normal bootstrap to review and apply
 the resulting infrastructure plan.

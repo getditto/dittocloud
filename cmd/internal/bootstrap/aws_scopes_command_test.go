@@ -80,6 +80,67 @@ func TestAWSScopesAddCreatesGreenfieldDefaultWithoutTerraform(t *testing.T) {
 	}
 }
 
+func TestAWSScopesAddRecordsTheSecondaryWorkloadBlock(t *testing.T) {
+	forceAWSScopesAddNonInteractive(t)
+	setAWSScopesAddReferenceSequence(t, testDefaultScopeRef)
+	scopesPath := filepath.Join(t.TempDir(), "scopes.yaml")
+	cmd, mock := setupBootstrapTest(t, []string{
+		"aws", "scopes", "add",
+		"--scopes-file=" + scopesPath,
+		"--default",
+		"--region=us-east-1",
+		"--cluster-type=eks",
+		"--vpc-mode=dittocloud",
+		"--vpc-name=valet",
+		"--vpc-cidr=10.217.0.0/20",
+		"--vpc-secondary-cidr=100.64.0.0/16",
+	})
+	cmd.SetOut(&bytes.Buffer{})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected scopes-add error: %v", err)
+	}
+	assertNoTerraformLifecycleCalls(t, mock)
+	scopes, err := loadAWSDeploymentScopes(scopesPath)
+	if err != nil {
+		t.Fatalf("unable to load created scopes file: %v", err)
+	}
+	created := scopes[testDefaultScopeRef]
+	if created.VPC.SecondaryCIDR != "100.64.0.0/16" {
+		t.Fatalf("secondary CIDR: got %q, want %q", created.VPC.SecondaryCIDR, "100.64.0.0/16")
+	}
+	// The workload block is only meaningful on a Dittocloud-managed VPC, and the
+	// netmask defaults have to survive alongside it.
+	if created.VPC.PublicSubnetNetmask != awsDefaultPublicSubnetNetmask ||
+		created.VPC.PrivateSubnetNetmask != awsDefaultPrivateSubnetNetmask {
+		t.Fatalf("unexpected subnet sizing: %#v", created.VPC)
+	}
+}
+
+func TestAWSScopesAddRejectsASecondaryBlockOnAnUnmanagedVPC(t *testing.T) {
+	forceAWSScopesAddNonInteractive(t)
+	setAWSScopesAddReferenceSequence(t, testDefaultScopeRef)
+	scopesPath := filepath.Join(t.TempDir(), "scopes.yaml")
+	cmd, _ := setupBootstrapTest(t, []string{
+		"aws", "scopes", "add",
+		"--scopes-file=" + scopesPath,
+		"--default",
+		"--region=us-east-1",
+		"--vpc-mode=existing",
+		"--vpc-id=vpc-0123456789abcdef0",
+		"--vpc-secondary-cidr=100.64.0.0/16",
+	})
+	cmd.SetOut(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected a secondary CIDR on an existing VPC to be rejected")
+	}
+	if !strings.Contains(err.Error(), "vpc.secondaryCidr") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestAWSScopesAddExposesNoReferenceOrPolicyOverride(t *testing.T) {
 	cmd, _ := setupBootstrapTest(t, nil)
 	addCommand, _, err := cmd.Find([]string{"aws", "scopes", "add"})
