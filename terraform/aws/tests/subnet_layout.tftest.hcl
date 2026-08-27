@@ -193,6 +193,52 @@ run "rejects_a_secondary_cidr_outside_the_shared_pool" {
   expect_failures = [var.secondary_cidr]
 }
 
+# With nothing configured the discovery tag still has to exist, because the
+# cluster-side selector always looks for it. The VPC ID is the fallback, which the
+# cluster secret already carries as ditto.live/vpc_id.
+run "tags_node_subnets_for_karpenter_without_any_configuration" {
+  command = plan
+
+  module {
+    source = "./vpc"
+  }
+
+  variables {
+    vpc_name       = "valet"
+    vpc_cidr       = "10.217.0.0/20"
+    secondary_cidr = "100.64.0.0/16"
+  }
+
+  # The value itself is the VPC ID, which is not known until apply, so only the
+  # presence of the key can be asserted from a plan. That is the trade-off of
+  # defaulting to the VPC ID: correct and derivable at runtime, but a plan shows
+  # the tag as (known after apply) rather than a readable value.
+  assert {
+    condition     = contains(keys(local.node_subnet_tags), "karpenter.sh/discovery")
+    error_message = "Node subnets must always carry a karpenter.sh/discovery tag, defaulting to the VPC ID."
+  }
+}
+
+run "prefers_an_explicit_discovery_value_over_the_vpc_id" {
+  command = plan
+
+  module {
+    source = "./vpc"
+  }
+
+  variables {
+    vpc_name                      = "valet"
+    vpc_cidr                      = "10.217.0.0/20"
+    secondary_cidr                = "100.64.0.0/16"
+    karpenter_discovery_tag_value = "shared-workload"
+  }
+
+  assert {
+    condition     = local.karpenter_discovery_value == "shared-workload"
+    error_message = "An explicit karpenter_discovery_tag_value must win over the VPC ID default."
+  }
+}
+
 run "rejects_the_reserved_cluster_block" {
   command = plan
 

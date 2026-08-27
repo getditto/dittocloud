@@ -22,10 +22,23 @@ locals {
     local.kubernetes_cluster_tags,
   )
 
-  karpenter_discovery_value = try(coalesce(var.karpenter_discovery_tag_value, var.kubernetes_cluster_name), "")
-  karpenter_discovery_tags = local.karpenter_discovery_value != "" ? {
+  # Defaults to the VPC ID, so the tag is always present and always derivable.
+  # Karpenter selects node subnets by this tag, and the selector on the cluster
+  # side reads the ditto.live/vpc_id annotation that valet-cluster-operator already
+  # publishes on every cluster secret. Both ends therefore agree on a fact neither
+  # has to be told, with no metadata to set and no naming convention to remember.
+  #
+  # The VPC ID is also the right shape for what the tag means: node subnets belong
+  # to a VPC, and several clusters can share one, so keying on a cluster name would
+  # be wrong wherever more than one cluster lives here.
+  karpenter_discovery_value = coalesce(
+    var.karpenter_discovery_tag_value,
+    var.kubernetes_cluster_name,
+    module.vpc.vpc_id,
+  )
+  karpenter_discovery_tags = {
     "karpenter.sh/discovery" = local.karpenter_discovery_value
-  } : {}
+  }
 
   node_subnet_tags = merge(
     { "ditto.live/subnet-tier" = "node" },
