@@ -396,10 +396,6 @@ func decodeAWSStateScopeConfiguration(attributesJSON json.RawMessage) (string, A
 	if len(dynamicValue) != 2 || dynamicValue["value"] == nil || dynamicValue["type"] == nil {
 		return "", AWSDeploymentScope{}, fmt.Errorf("input must use Terraform's exact dynamic value and type encoding")
 	}
-	if err := validateAWSStateScopeConfigurationType(dynamicValue["type"]); err != nil {
-		return "", AWSDeploymentScope{}, err
-	}
-
 	var stored map[string]json.RawMessage
 	if err := json.Unmarshal(dynamicValue["value"], &stored); err != nil {
 		return "", AWSDeploymentScope{}, fmt.Errorf("input value is malformed: %w", err)
@@ -407,22 +403,30 @@ func decodeAWSStateScopeConfiguration(attributesJSON json.RawMessage) (string, A
 	if len(stored) != 3 || stored["schema_version"] == nil || stored["scope_ref"] == nil || stored["configuration"] == nil {
 		return "", AWSDeploymentScope{}, fmt.Errorf("input value must contain exactly schema_version, scope_ref, and configuration")
 	}
-	if version, err := decodeAWSStateExactNumber(stored["schema_version"]); err != nil || version != awsScopeConfigurationSchemaVersion {
-		return "", AWSDeploymentScope{}, fmt.Errorf("unsupported schema_version; expected %d", awsScopeConfigurationSchemaVersion)
+	version, err := decodeAWSStateExactNumber(stored["schema_version"])
+	if err != nil || version < awsMinimumScopeConfigurationSchemaVersion || version > awsScopeConfigurationSchemaVersion {
+		return "", AWSDeploymentScope{}, fmt.Errorf(
+			"unsupported schema_version; expected %d through %d",
+			awsMinimumScopeConfigurationSchemaVersion,
+			awsScopeConfigurationSchemaVersion,
+		)
+	}
+	if err := validateAWSStateScopeConfigurationType(dynamicValue["type"], version); err != nil {
+		return "", AWSDeploymentScope{}, err
 	}
 
 	var scopeRef string
 	if err := json.Unmarshal(stored["scope_ref"], &scopeRef); err != nil || !awsScopeReferencePattern.MatchString(scopeRef) {
 		return "", AWSDeploymentScope{}, fmt.Errorf("scope_ref is not a valid generated Dittocloud scope reference")
 	}
-	configuration, err := decodeAWSStateScopeConfigurationValue(scopeRef, stored["configuration"])
+	configuration, err := decodeAWSStateScopeConfigurationValue(scopeRef, stored["configuration"], version)
 	if err != nil {
 		return "", AWSDeploymentScope{}, err
 	}
 	return scopeRef, configuration, nil
 }
 
-func validateAWSStateScopeConfigurationType(typeJSON json.RawMessage) error {
+func validateAWSStateScopeConfigurationType(typeJSON json.RawMessage, version int) error {
 	var actual any
 	if err := json.Unmarshal(typeJSON, &actual); err != nil {
 		return fmt.Errorf("input type descriptor is malformed")
@@ -442,25 +446,36 @@ func validateAWSStateScopeConfigurationType(typeJSON json.RawMessage) error {
 					"scope_tag_policy_version": "number",
 					"vpc": []any{
 						"object",
-						map[string]any{
-							"mode":             "string",
-							"name":             "string",
-							"cidr":             "string",
-							"id":               "string",
-							"nat_gateway_name": "string",
-						},
+						awsStateScopeVPCTypeAttributes(version),
 					},
 				},
 			},
 		},
 	}
 	if !reflect.DeepEqual(actual, expected) {
-		return fmt.Errorf("input type descriptor does not match scope configuration schema 1")
+		return fmt.Errorf("input type descriptor does not match scope configuration schema %d", version)
 	}
 	return nil
 }
 
-func decodeAWSStateScopeConfigurationValue(scopeRef string, valueJSON json.RawMessage) (AWSDeploymentScope, error) {
+func awsStateScopeVPCTypeAttributes(version int) map[string]any {
+	attributes := map[string]any{
+		"mode":             "string",
+		"name":             "string",
+		"cidr":             "string",
+		"id":               "string",
+		"nat_gateway_name": "string",
+	}
+	if version >= 2 {
+		attributes["secondary_cidr"] = "string"
+		attributes["public_subnet_netmask"] = "number"
+		attributes["private_subnet_netmask"] = "number"
+		attributes["nat_gateway_eip_allocation_ids"] = []any{"list", "string"}
+	}
+	return attributes
+}
+
+func decodeAWSStateScopeConfigurationValue(scopeRef string, valueJSON json.RawMessage, version int) (AWSDeploymentScope, error) {
 	var value map[string]json.RawMessage
 	if err := json.Unmarshal(valueJSON, &value); err != nil {
 		return AWSDeploymentScope{}, fmt.Errorf("configuration is malformed: %w", err)
@@ -496,6 +511,15 @@ func decodeAWSStateScopeConfigurationValue(scopeRef string, valueJSON json.RawMe
 		return AWSDeploymentScope{}, fmt.Errorf("configuration.vpc is malformed: %w", err)
 	}
 	vpcFields := []string{"mode", "name", "cidr", "id", "nat_gateway_name"}
+	if version >= 2 {
+		vpcFields = append(
+			vpcFields,
+			"secondary_cidr",
+			"public_subnet_netmask",
+			"private_subnet_netmask",
+			"nat_gateway_eip_allocation_ids",
+		)
+	}
 	if !hasExactJSONFields(vpc, vpcFields...) {
 		return AWSDeploymentScope{}, fmt.Errorf("configuration.vpc must contain exactly %s", strings.Join(vpcFields, ", "))
 	}
@@ -511,12 +535,48 @@ func decodeAWSStateScopeConfigurationValue(scopeRef string, valueJSON json.RawMe
 		{name: "id", destination: &configuration.VPC.ID},
 		{name: "nat_gateway_name", destination: &configuration.VPC.NATGatewayName},
 	}
+	if version >= 2 {
+		optionalVPCFields = append(
+			optionalVPCFields,
+			struct {
+				name        string
+				destination *string
+			}{name: "secondary_cidr", destination: &configuration.VPC.SecondaryCIDR},
+		)
+	}
 	for _, field := range optionalVPCFields {
 		decoded, err := decodeAWSStateOptionalString(vpc[field.name])
 		if err != nil {
 			return AWSDeploymentScope{}, fmt.Errorf("configuration.vpc.%s must be a string or null", field.name)
 		}
 		*field.destination = decoded
+	}
+	if version >= 2 {
+		optionalNetmasks := []struct {
+			name        string
+			destination *int
+		}{
+			{name: "public_subnet_netmask", destination: &configuration.VPC.PublicSubnetNetmask},
+			{name: "private_subnet_netmask", destination: &configuration.VPC.PrivateSubnetNetmask},
+		}
+		for _, field := range optionalNetmasks {
+			decoded, err := decodeAWSStateOptionalNumber(vpc[field.name])
+			if err != nil {
+				return AWSDeploymentScope{}, fmt.Errorf("configuration.vpc.%s must be a number or null", field.name)
+			}
+			*field.destination = decoded
+		}
+		allocationIDs, err := decodeAWSStateStringList(vpc["nat_gateway_eip_allocation_ids"])
+		if err != nil {
+			return AWSDeploymentScope{}, fmt.Errorf("configuration.vpc.nat_gateway_eip_allocation_ids must be a list of strings or null")
+		}
+		configuration.VPC.NATGatewayEIPAllocationIDs = allocationIDs
+	}
+	// A schema 1 snapshot predates the DMZ split, so it carries the sizing that
+	// module was pinned to rather than today's defaults.
+	if version < 2 && configuration.VPC.Mode == awsVPCModeDittocloud {
+		configuration.VPC.PublicSubnetNetmask = awsLegacyPublicSubnetNetmask
+		configuration.VPC.PrivateSubnetNetmask = awsLegacyPrivateSubnetNetmask
 	}
 	if err := validateAWSDeploymentScopeFields(scopeRef, configuration); err != nil {
 		return AWSDeploymentScope{}, err
@@ -534,6 +594,27 @@ func hasExactJSONFields(value map[string]json.RawMessage, fields ...string) bool
 		}
 	}
 	return true
+}
+
+func decodeAWSStateOptionalNumber(value json.RawMessage) (int, error) {
+	if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+		return 0, nil
+	}
+	return decodeAWSStateExactNumber(value)
+}
+
+func decodeAWSStateStringList(value json.RawMessage) ([]string, error) {
+	if value == nil || bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+		return nil, nil
+	}
+	var decoded []string
+	if err := json.Unmarshal(value, &decoded); err != nil {
+		return nil, err
+	}
+	if len(decoded) == 0 {
+		return nil, nil
+	}
+	return decoded, nil
 }
 
 func decodeAWSStateOptionalString(value json.RawMessage) (string, error) {

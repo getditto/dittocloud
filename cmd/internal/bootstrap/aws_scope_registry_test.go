@@ -86,6 +86,95 @@ func rawScopeConfigurationInstance(addressScopeRef, storedScopeRef string, scope
 		}
 		return value
 	}
+	optionalNumber := func(value int) any {
+		if value == 0 {
+			return nil
+		}
+		return value
+	}
+	configuration := map[string]any{
+		"default":                  scope.Default,
+		"cluster_name":             optionalString(scope.ClusterName),
+		"cluster_type":             scope.ClusterType,
+		"region":                   scope.Region,
+		"scope_tag_policy_version": scope.ScopeTagPolicyVersion,
+		"vpc": map[string]any{
+			"mode":                   scope.VPC.Mode,
+			"name":                   optionalString(scope.VPC.Name),
+			"cidr":                   optionalString(scope.VPC.CIDR),
+			"secondary_cidr":         optionalString(scope.VPC.SecondaryCIDR),
+			"public_subnet_netmask":  optionalNumber(scope.VPC.PublicSubnetNetmask),
+			"private_subnet_netmask": optionalNumber(scope.VPC.PrivateSubnetNetmask),
+			"id":                     optionalString(scope.VPC.ID),
+			"nat_gateway_name":       optionalString(scope.VPC.NATGatewayName),
+			"nat_gateway_eip_allocation_ids": func() []any {
+				allocations := make([]any, 0, len(scope.VPC.NATGatewayEIPAllocationIDs))
+				for _, allocationID := range scope.VPC.NATGatewayEIPAllocationIDs {
+					allocations = append(allocations, allocationID)
+				}
+				return allocations
+			}(),
+		},
+	}
+	dynamicConfiguration := map[string]any{
+		"value": map[string]any{
+			"schema_version": awsScopeConfigurationSchemaVersion,
+			"scope_ref":      storedScopeRef,
+			"configuration":  configuration,
+		},
+		"type": []any{
+			"object",
+			map[string]any{
+				"schema_version": "number",
+				"scope_ref":      "string",
+				"configuration": []any{
+					"object",
+					map[string]any{
+						"default":                  "bool",
+						"cluster_name":             "string",
+						"cluster_type":             "string",
+						"region":                   "string",
+						"scope_tag_policy_version": "number",
+						"vpc": []any{
+							"object",
+							map[string]any{
+								"mode":                           "string",
+								"name":                           "string",
+								"cidr":                           "string",
+								"secondary_cidr":                 "string",
+								"public_subnet_netmask":          "number",
+								"private_subnet_netmask":         "number",
+								"id":                             "string",
+								"nat_gateway_name":               "string",
+								"nat_gateway_eip_allocation_ids": []any{"list", "string"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	return map[string]any{
+		"index_key": addressScopeRef,
+		"attributes": map[string]any{
+			"id":               "configuration-id",
+			"input":            dynamicConfiguration,
+			"output":           dynamicConfiguration,
+			"triggers_replace": nil,
+		},
+	}
+}
+
+// rawLegacyScopeConfigurationInstance reproduces a snapshot written before the
+// DMZ split, when the configuration schema had no workload block or subnet
+// sizing.
+func rawLegacyScopeConfigurationInstance(addressScopeRef, storedScopeRef string, scope AWSDeploymentScope) map[string]any {
+	optionalString := func(value string) any {
+		if value == "" {
+			return nil
+		}
+		return value
+	}
 	configuration := map[string]any{
 		"default":                  scope.Default,
 		"cluster_name":             optionalString(scope.ClusterName),
@@ -102,7 +191,7 @@ func rawScopeConfigurationInstance(addressScopeRef, storedScopeRef string, scope
 	}
 	dynamicConfiguration := map[string]any{
 		"value": map[string]any{
-			"schema_version": awsScopeConfigurationSchemaVersion,
+			"schema_version": 1,
 			"scope_ref":      storedScopeRef,
 			"configuration":  configuration,
 		},
@@ -442,7 +531,7 @@ func TestLoadAWSStateScopeRegistry(t *testing.T) {
 				instance := configurationResource["instances"].([]any)[0].(map[string]any)
 				attributes := instance["attributes"].(map[string]any)
 				input := attributes["input"].(map[string]any)
-				input["value"].(map[string]any)["schema_version"] = 2
+				input["value"].(map[string]any)["schema_version"] = awsScopeConfigurationSchemaVersion + 1
 				appendRawTerraformStateResource(state, configurationResource)
 				return state
 			}(),

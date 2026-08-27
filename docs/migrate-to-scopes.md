@@ -95,6 +95,13 @@ Confirm all of the following before continuing:
    cluster.
 6. For a Dittocloud-managed VPC, `natGatewayName` matches the stable `Name` tag
    currently applied to every managed NAT gateway.
+7. For a Dittocloud-managed VPC, `publicSubnetNetmask` and
+   `privateSubnetNetmask` match the subnets that exist today. Generation reads
+   these back from state, and they are usually `22` and `18` for a VPC created
+   before the DMZ address layout. **Do not drop them.** Every subnet CIDR is
+   derived from these values, so leaving them out applies today's defaults,
+   renumbers live subnets, and recreates the NAT gateways, nodes, and load
+   balancers with them.
 
 Do not hand-edit the generated `scopeRef`. The seed preflight rejects a
 `clusterName`, Region, VPC, or cluster-type value that conflicts with state

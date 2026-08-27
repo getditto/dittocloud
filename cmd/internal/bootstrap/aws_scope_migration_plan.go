@@ -247,7 +247,7 @@ func terraformPlannedAWSDeploymentScope(value any) (AWSDeploymentScope, bool) {
 		return AWSDeploymentScope{}, false
 	}
 	vpcValues, ok := terraformObject(configuration["vpc"])
-	if !ok || len(vpcValues) != 5 {
+	if !ok || len(vpcValues) != 9 {
 		return AWSDeploymentScope{}, false
 	}
 	vpcMode, ok := vpcValues["mode"].(string)
@@ -256,9 +256,19 @@ func terraformPlannedAWSDeploymentScope(value any) (AWSDeploymentScope, bool) {
 	}
 	vpcName, nameOK := terraformOptionalString(vpcValues["name"])
 	vpcCIDR, cidrOK := terraformOptionalString(vpcValues["cidr"])
+	secondaryCIDR, secondaryOK := terraformOptionalString(vpcValues["secondary_cidr"])
 	vpcID, idOK := terraformOptionalString(vpcValues["id"])
 	natGatewayName, natOK := terraformOptionalString(vpcValues["nat_gateway_name"])
-	if !nameOK || !cidrOK || !idOK || !natOK {
+	if !nameOK || !cidrOK || !secondaryOK || !idOK || !natOK {
+		return AWSDeploymentScope{}, false
+	}
+	publicSubnetNetmask, publicOK := terraformOptionalNumber(vpcValues["public_subnet_netmask"])
+	privateSubnetNetmask, privateOK := terraformOptionalNumber(vpcValues["private_subnet_netmask"])
+	if !publicOK || !privateOK {
+		return AWSDeploymentScope{}, false
+	}
+	allocationIDs, allocationsOK := terraformOptionalStringList(vpcValues["nat_gateway_eip_allocation_ids"])
+	if !allocationsOK {
 		return AWSDeploymentScope{}, false
 	}
 	return AWSDeploymentScope{
@@ -268,13 +278,50 @@ func terraformPlannedAWSDeploymentScope(value any) (AWSDeploymentScope, bool) {
 		Region:                region,
 		ScopeTagPolicyVersion: policyVersion,
 		VPC: AWSScopeVPC{
-			Mode:           vpcMode,
-			Name:           vpcName,
-			CIDR:           vpcCIDR,
-			ID:             vpcID,
-			NATGatewayName: natGatewayName,
+			Mode:                       vpcMode,
+			Name:                       vpcName,
+			CIDR:                       vpcCIDR,
+			SecondaryCIDR:              secondaryCIDR,
+			PublicSubnetNetmask:        publicSubnetNetmask,
+			PrivateSubnetNetmask:       privateSubnetNetmask,
+			ID:                         vpcID,
+			NATGatewayName:             natGatewayName,
+			NATGatewayEIPAllocationIDs: allocationIDs,
 		},
 	}, true
+}
+
+func terraformOptionalNumber(value any) (int, bool) {
+	if value == nil {
+		return 0, true
+	}
+	decoded := terraformNumber(value)
+	if decoded < 0 {
+		return 0, false
+	}
+	return decoded, true
+}
+
+func terraformOptionalStringList(value any) ([]string, bool) {
+	if value == nil {
+		return nil, true
+	}
+	values, ok := value.([]any)
+	if !ok {
+		return nil, false
+	}
+	if len(values) == 0 {
+		return nil, true
+	}
+	decoded := make([]string, 0, len(values))
+	for _, entry := range values {
+		text, ok := entry.(string)
+		if !ok {
+			return nil, false
+		}
+		decoded = append(decoded, text)
+	}
+	return decoded, true
 }
 
 func terraformOptionalString(value any) (string, bool) {

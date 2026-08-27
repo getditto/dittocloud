@@ -100,7 +100,12 @@ run "creates_registry_for_valid_multi_scope_object" {
         private_subnets  = ["subnet-00000000000000001"]
         public_subnets   = ["subnet-00000000000000002"]
         database_subnets = []
+        pod_subnets      = []
+        node_subnets     = []
+        secondary_cidr   = null
       }
+      pod_subnets_by_az = []
+      nat_public_ips    = []
     }
   }
 
@@ -197,7 +202,7 @@ run "creates_registry_for_valid_multi_scope_object" {
 
   assert {
     condition = (
-      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].input.schema_version == 1 &&
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].input.schema_version == 2 &&
       terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].input.scope_ref == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z4" &&
       !terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].input.configuration.default &&
       terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].input.configuration.cluster_name == "sydney-eks" &&
@@ -925,7 +930,12 @@ run "preserves_default_managed_vpc_legacy_output_shape" {
         private_subnets  = ["subnet-00000000000000003"]
         public_subnets   = ["subnet-00000000000000004"]
         database_subnets = ["subnet-00000000000000005"]
+        pod_subnets      = []
+        node_subnets     = []
+        secondary_cidr   = null
       }
+      pod_subnets_by_az = []
+      nat_public_ips    = []
     }
   }
 
@@ -1129,4 +1139,211 @@ run "creates_imds_only_for_eks_regions_in_mixed_scope_set" {
     )
     error_message = "Regional outputs must list every scope but only EKS scope references as IMDS contributors across mixed multi-Region deployments."
   }
+}
+
+run "publishes_workload_networking_for_a_managed_scope" {
+  command = plan
+
+  override_module {
+    target = module.vpc[0]
+    outputs = {
+      vpc_id = "vpc-00000000000000006"
+      vpc = {
+        vpc_id           = "vpc-00000000000000006"
+        private_subnets  = ["subnet-00000000000000010"]
+        public_subnets   = ["subnet-00000000000000011"]
+        database_subnets = ["subnet-00000000000000012"]
+        pod_subnets      = ["subnet-00000000000000013"]
+        node_subnets     = ["subnet-00000000000000014"]
+        secondary_cidr   = "100.64.0.0/16"
+      }
+      pod_subnets_by_az = [
+        {
+          availability_zone = "ap-southeast-2a"
+          subnet_id         = "subnet-00000000000000013"
+        },
+      ]
+      nat_public_ips = ["198.51.100.10"]
+    }
+  }
+
+  variables {
+    deployment_scopes = {
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" = {
+        default      = true
+        cluster_name = "valet-dev"
+        cluster_type = "eks"
+        region       = "ap-southeast-2"
+        vpc = {
+          mode                   = "dittocloud"
+          name                   = "valet"
+          cidr                   = "10.214.0.0/20"
+          secondary_cidr         = "100.64.0.0/16"
+          public_subnet_netmask  = 24
+          private_subnet_netmask = 23
+        }
+      }
+    }
+  }
+
+  assert {
+    condition = (
+      output.aws_workload_networking["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].secondaryCidr == "100.64.0.0/16" &&
+      join(",", output.aws_workload_networking["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].podSubnetIds) == "subnet-00000000000000013" &&
+      join(",", output.aws_workload_networking["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].nodeSubnetIds) == "subnet-00000000000000014" &&
+      output.aws_workload_networking["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].podSubnetsByAz[0].availabilityZone == "ap-southeast-2a" &&
+      output.aws_workload_networking["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].podSubnetsByAz[0].subnetId == "subnet-00000000000000013" &&
+      join(",", output.aws_workload_networking["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].natPublicIps) == "198.51.100.10"
+    )
+    error_message = "A managed scope must publish its secondary CIDR, workload subnets, per-availability-zone pod subnets for ENIConfigs, and NAT egress addresses."
+  }
+
+  assert {
+    condition = (
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].input.configuration.vpc.secondary_cidr == "100.64.0.0/16" &&
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].input.configuration.vpc.public_subnet_netmask == 24 &&
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].input.configuration.vpc.private_subnet_netmask == 23 &&
+      length(terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].input.configuration.vpc.nat_gateway_eip_allocation_ids) == 0
+    )
+    error_message = "The applied-configuration snapshot must record the workload block and subnet sizing, because recovery rebuilds the scopes file from it."
+  }
+}
+
+# Every VPC uses the same secondary block. It is never routed or advertised
+# outside its own VPC, so identical blocks in different VPCs never meet. The
+# trade-off is that two VPCs sharing it cannot be peered, because AWS rejects a
+# peering connection on any overlapping CIDR; cross-VPC connectivity is
+# PrivateLink or VPC Lattice instead.
+# The node subnets carry karpenter.sh/discovery, and its value comes from the
+# scope. An explicit value wins; otherwise the scope's cluster name is used. The
+# explicit form matters because scopeTagPolicyVersion 0 permits several clusters
+# in one scope, where a single cluster name is not meaningful.
+run "prefers_an_explicit_karpenter_discovery_tag_over_the_cluster_name" {
+  command = plan
+
+  variables {
+    deployment_scopes = {
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" = {
+        default      = true
+        cluster_name = "valet-dev"
+        cluster_type = "eks"
+        region       = "ap-southeast-2"
+        vpc = {
+          mode                          = "dittocloud"
+          name                          = "valet"
+          cidr                          = "10.214.0.0/20"
+          secondary_cidr                = "100.64.0.0/16"
+          karpenter_discovery_tag_value = "shared-workload"
+        }
+      }
+    }
+  }
+
+  assert {
+    condition     = local.default_karpenter_discovery_tag_value == "shared-workload"
+    error_message = "An explicit vpc.karpenter_discovery_tag_value must win over the scope cluster name."
+  }
+}
+
+run "falls_back_to_the_cluster_name_for_the_karpenter_discovery_tag" {
+  command = plan
+
+  variables {
+    deployment_scopes = {
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" = {
+        default      = true
+        cluster_name = "valet-dev"
+        cluster_type = "eks"
+        region       = "ap-southeast-2"
+        vpc = {
+          mode           = "dittocloud"
+          name           = "valet"
+          cidr           = "10.214.0.0/20"
+          secondary_cidr = "100.64.0.0/16"
+        }
+      }
+    }
+  }
+
+  assert {
+    condition     = local.default_karpenter_discovery_tag_value == "valet-dev"
+    error_message = "With no explicit value the scope cluster name must tag the node subnets."
+  }
+}
+
+run "accepts_the_same_secondary_cidr_across_scopes" {
+  command = plan
+
+  variables {
+    deployment_scopes = {
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" = {
+        default = true
+        region  = "ap-southeast-2"
+        vpc = {
+          mode           = "dittocloud"
+          name           = "valet-a"
+          cidr           = "10.214.0.0/20"
+          secondary_cidr = "100.64.0.0/16"
+        }
+      }
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z4" = {
+        region = "us-west-2"
+        vpc = {
+          mode           = "dittocloud"
+          name           = "valet-b"
+          cidr           = "10.215.0.0/20"
+          secondary_cidr = "100.64.0.0/16"
+        }
+      }
+    }
+  }
+
+  assert {
+    condition = (
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z3"].input.configuration.vpc.secondary_cidr == "100.64.0.0/16" &&
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].input.configuration.vpc.secondary_cidr == "100.64.0.0/16"
+    )
+    error_message = "Two scopes must be able to carry the same secondary CIDR, because the block is never routed outside its own VPC."
+  }
+}
+
+run "rejects_a_secondary_cidr_on_an_unmanaged_vpc" {
+  command = plan
+
+  variables {
+    deployment_scopes = {
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" = {
+        default = true
+        region  = "ap-southeast-2"
+        vpc = {
+          mode           = "existing"
+          id             = "vpc-09e877f9012f52241"
+          secondary_cidr = "100.64.0.0/16"
+        }
+      }
+    }
+  }
+
+  expect_failures = [var.deployment_scopes]
+}
+
+run "rejects_scope_subnet_netmasks_that_do_not_fit_the_primary_block" {
+  command = plan
+
+  variables {
+    deployment_scopes = {
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" = {
+        default = true
+        region  = "ap-southeast-2"
+        vpc = {
+          mode                  = "dittocloud"
+          name                  = "valet"
+          cidr                  = "10.214.0.0/22"
+          public_subnet_netmask = 24
+        }
+      }
+    }
+  }
+
+  expect_failures = [var.deployment_scopes]
 }
