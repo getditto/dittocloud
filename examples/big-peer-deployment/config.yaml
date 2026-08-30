@@ -1,36 +1,74 @@
+# Deployment definitions - the single source of truth for Part 1.
+#
+# Each top-level key under "deployments" is one complete VPC + EKS stack.
+# With more than one deployment defined, every deployment must target the
+# same region (the root provider serves all of them), and `terraform apply`
+# needs -var primary_deployment=<name> to pick which one Part 2 targets.
+#
+# Quote every subnet/VPC ID. A stray character in an unquoted value reaches
+# Terraform as a "real" string, and EKS rejects it as an invalid subnet.
 ---
 deployments:
+  # A development stack: this example creates the VPC for you.
   big-peer-dev:
+    # Must match the root provider region (`terraform apply -var region=...`).
     region: us-east-1
+
     vpc:
+      # true  = create a new VPC (cidr + subnet CIDRs below)
+      # false = use an existing VPC (vpc_id + subnet IDs; see big-peer-prod)
       create: true
       cidr: 10.0.0.0/16
+      # EKS requires subnets in at least two AZs; three is the safe default.
       availability_zones: ["us-east-1a", "us-east-1b", "us-east-1c"]
+      # Nodes run in private subnets (NAT for egress, no public IPs).
       private_subnets: ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
+      # Public subnets host the NAT gateways (and ELBs, if exposed).
       public_subnets: ["10.0.101.0/24", "10.0.102.0/24", "10.0.103.0/24"]
+
     cluster:
       name: big-peer-dev
+      # Kubernetes version. Keep the quotes: YAML would read 1.30 as 1.3.
       version: "1.30"
+      # SSO/IAM roles granted cluster-admin via EKS access entries.
+      # Use the FULL role ARN including any path (e.g. the aws-reserved SSO
+      # path) - EKS rejects path-stripped ARNs as invalid principals.
+      # admin_principal_arns:
+      #   - arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/us-east-1/AWSReservedSSO_Admin_0123456789abcdef
       managed_node_groups:
         default:
           instance_types: ["m6i.large"]
+          # desired_size applies only at creation. The EKS module then
+          # ignores it so an autoscaler can own the count; this example
+          # installs no autoscaler, so resize via the EKS API/console.
           min_size: 2
           max_size: 4
           desired_size: 2
 
+  # A production-style stack in an existing, customer-managed VPC.
   big-peer-prod:
     region: us-west-2
+
     vpc:
       create: false
       vpc_id: vpc-0123456789abcdef0
+      # All subnets must be in this VPC, in the target region, and spread
+      # across at least three AZs. The VPC also needs DNS support + hostnames,
+      # kubernetes.io/role/internal-elb=1 on private subnets,
+      # kubernetes.io/role/elb=1 on public subnets, and routes to AWS APIs
+      # and container registries. See docs/bring-your-own-vpc.md.
       private_subnet_ids: ["subnet-0123456789abcdef0", "subnet-1123456789abcdef0", "subnet-2123456789abcdef0"]
       public_subnet_ids: ["subnet-3123456789abcdef0", "subnet-4123456789abcdef0", "subnet-5123456789abcdef0"]
+
     cluster:
       name: big-peer-prod
       version: "1.30"
+      # admin_principal_arns:
+      #   - arn:aws:iam::123456789012:role/your-admin-role
       managed_node_groups:
         default:
           instance_types: ["m6i.xlarge"]
+          # The full stack (Kafka + operator + Big Peer) wants >= 3 nodes.
           min_size: 3
           max_size: 6
           desired_size: 3
