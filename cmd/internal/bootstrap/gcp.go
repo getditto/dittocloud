@@ -48,6 +48,7 @@ func promptGcpValues(ctx context.Context, flags *pflag.FlagSet) ([]*tfexec.VarOp
 	required := color.New(color.FgRed, color.Bold)
 
 	// confirm all flag values
+	var visitErr error
 	flags.VisitAll(func(flag *pflag.Flag) {
 		err := flag.Value.Set(StringPrompt(flag.Name, flag.Value.String()))
 		if err != nil {
@@ -56,11 +57,17 @@ func promptGcpValues(ctx context.Context, flags *pflag.FlagSet) ([]*tfexec.VarOp
 			// provide a different value, and we made a typo here. Resetting the flag value to empty will
 			// cause the flag to be prompted for via the allValuesSet check below.
 			if err := flag.Value.Set(""); err != nil {
+				// pflag's Bool type rejects empty string, so if the user entered an invalid
+				// boolean value (e.g. "maybe"), the Set("") reset also fails. This is not
+				// impossible as previously assumed — return an error instead of panicking.
 				log.FromContext(ctx).Error("unexpected error resetting flag value to empty string", "flag", flag.Name, "error", err)
-				panic(err)
+				visitErr = fmt.Errorf("unable to reset flag %q to empty after invalid input: %w", flag.Name, err)
 			}
 		}
 	})
+	if visitErr != nil {
+		return nil, visitErr
+	}
 
 	// prompt for unset values
 	allValuesSet := false

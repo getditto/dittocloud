@@ -130,8 +130,11 @@ func createTerraformOperationBackup(
 		return terraformMigrationBackup{}, fmt.Errorf("unable to create Terraform migration state backup %q: %w", backupPath, err)
 	}
 	backupContent, err := os.ReadFile(backupPath)
-	if err != nil || !bytes.Equal(backupContent, currentState) {
-		return terraformMigrationBackup{}, fmt.Errorf("terraform migration state backup %q could not be verified", backupPath)
+	if err != nil {
+		return terraformMigrationBackup{}, fmt.Errorf("unable to verify terraform migration state backup %q: %w", backupPath, err)
+	}
+	if !bytes.Equal(backupContent, currentState) {
+		return terraformMigrationBackup{}, fmt.Errorf("terraform migration state backup %q failed integrity check", backupPath)
 	}
 	if err := syncStateBackupDirectory(filepath.Dir(backupPath)); err != nil {
 		return terraformMigrationBackup{}, fmt.Errorf("terraform migration state backup %q was written but its directory could not be flushed: %w", backupPath, err)

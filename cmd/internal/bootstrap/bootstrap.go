@@ -2,7 +2,6 @@ package bootstrap
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -540,12 +539,9 @@ func showOutputs(ctx context.Context, tf TerraformExecutor) error {
 	}
 	color.Green("Terraform output:")
 	for k, v := range output {
-		raw, _ := v.Value.MarshalJSON()
-		var m any
-
-		err := json.Unmarshal(raw, &m)
+		raw, err := v.Value.MarshalJSON()
 		if err != nil {
-			return fmt.Errorf("unable to unmarshal terraform output: %w", err)
+			return fmt.Errorf("unable to marshal terraform output %q: %w", k, err)
 		}
 		color.Green("%s: %s", color.New(color.Bold).Sprint(k), raw)
 	}
