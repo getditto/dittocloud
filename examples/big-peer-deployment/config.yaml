@@ -30,11 +30,14 @@ deployments:
       name: big-peer-dev
       # Kubernetes version. Keep the quotes: YAML would read 1.30 as 1.3.
       version: "1.30"
-      # SSO/IAM roles granted cluster-admin via EKS access entries.
+      # REQUIRED: SSO/IAM roles granted cluster-admin via EKS access entries.
+      # At least one entry is validated at plan time - without it, no identity
+      # can reach the cluster API (the EKS module's cluster-creator admin
+      # permission defaults to off).
       # Use the FULL role ARN including any path (e.g. the aws-reserved SSO
       # path) - EKS rejects path-stripped ARNs as invalid principals.
-      # admin_principal_arns:
-      #   - arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/us-east-1/AWSReservedSSO_Admin_0123456789abcdef
+      admin_principal_arns:
+        - arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/us-east-1/AWSReservedSSO_Admin_0123456789abcdef
       managed_node_groups:
         default:
           instance_types: ["m6i.large"]
@@ -46,29 +49,34 @@ deployments:
           desired_size: 2
 
   # A production-style stack in an existing, customer-managed VPC.
-  big-peer-prod:
-    region: us-west-2
-
-    vpc:
-      create: false
-      vpc_id: vpc-0123456789abcdef0
-      # All subnets must be in this VPC, in the target region, and spread
-      # across at least three AZs. The VPC also needs DNS support + hostnames,
-      # kubernetes.io/role/internal-elb=1 on private subnets,
-      # kubernetes.io/role/elb=1 on public subnets, and routes to AWS APIs
-      # and container registries. See docs/bring-your-own-vpc.md.
-      private_subnet_ids: ["subnet-0123456789abcdef0", "subnet-1123456789abcdef0", "subnet-2123456789abcdef0"]
-      public_subnet_ids: ["subnet-3123456789abcdef0", "subnet-4123456789abcdef0", "subnet-5123456789abcdef0"]
-
-    cluster:
-      name: big-peer-prod
-      version: "1.30"
-      # admin_principal_arns:
-      #   - arn:aws:iam::123456789012:role/your-admin-role
-      managed_node_groups:
-        default:
-          instance_types: ["m6i.xlarge"]
-          # The full stack (Kafka + operator + Big Peer) wants >= 3 nodes.
-          min_size: 3
-          max_size: 6
-          desired_size: 3
+  # Commented out by default: every deployment must share the root provider
+  # region, and the placeholder IDs below must be replaced with real ones.
+  # Uncomment, set region to match big-peer-dev (or pass -var region=...),
+  # and fill in your VPC/subnet IDs.
+  #
+  # big-peer-prod:
+  #   region: us-west-2
+  #
+  #   vpc:
+  #     create: false
+  #     vpc_id: vpc-0123456789abcdef0
+  #     # All subnets must be in this VPC, in the target region, and spread
+  #     # across at least three AZs. The VPC also needs DNS support + hostnames,
+  #     # kubernetes.io/role/internal-elb=1 on private subnets,
+  #     # kubernetes.io/role/elb=1 on public subnets, and routes to AWS APIs
+  #     # and container registries. See docs/bring-your-own-vpc.md.
+  #     private_subnet_ids: ["subnet-0123456789abcdef0", "subnet-1123456789abcdef0", "subnet-2123456789abcdef0"]
+  #     public_subnet_ids: ["subnet-3123456789abcdef0", "subnet-4123456789abcdef0", "subnet-5123456789abcdef0"]
+  #
+  #   cluster:
+  #     name: big-peer-prod
+  #     version: "1.30"
+  #     admin_principal_arns:
+  #       - arn:aws:iam::123456789012:role/your-admin-role
+  #     managed_node_groups:
+  #       default:
+  #         instance_types: ["m6i.xlarge"]
+  #         # The full stack (Kafka + operator + Big Peer) wants >= 3 nodes.
+  #         min_size: 3
+  #         max_size: 6
+  #         desired_size: 3

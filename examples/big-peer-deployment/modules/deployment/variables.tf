@@ -19,6 +19,14 @@ variable "deployment" {
       admin_principal_arns = optional(list(string), [])
     })
   })
+
+  # The upstream EKS module defaults enable_cluster_creator_admin_permissions
+  # to false, so without at least one admin ARN the access_entries map renders
+  # empty and no identity can reach the cluster API. Fail fast at plan.
+  validation {
+    condition     = length(var.deployment.cluster.admin_principal_arns) > 0
+    error_message = "cluster.admin_principal_arns must list at least one IAM role ARN (e.g. your SSO admin role). Without it, no identity is granted cluster access."
+  }
 }
 
 variable "tags" {
