@@ -168,6 +168,14 @@
     {
       "Effect": "Allow",
       "Action": [
+        "iam:GetInstanceProfile",
+        "iam:ListInstanceProfiles"
+      ],
+      "Resource": "arn:aws:iam::*:instance-profile/*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
         "eks:DescribeCluster"
       ],
       "Resource": "*"
