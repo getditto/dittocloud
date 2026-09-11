@@ -34,6 +34,12 @@ var (
 )
 
 func persistTerraformState(tmpStateFilePath, localStateFilePath string) error {
+	return PersistTerraformState(tmpStateFilePath, localStateFilePath)
+}
+
+// PersistTerraformState atomically copies the Terraform state from tmpStateFilePath
+// to localStateFilePath using a sibling temp file + fsync to avoid partial writes.
+func PersistTerraformState(tmpStateFilePath, localStateFilePath string) error {
 	stateFileData, err := os.ReadFile(tmpStateFilePath)
 	if err != nil {
 		return &statePersistenceError{
