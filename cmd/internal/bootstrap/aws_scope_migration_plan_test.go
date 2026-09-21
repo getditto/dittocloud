@@ -119,7 +119,7 @@ func exactAWSInitialScopeMigrationPlan() *tfjson.Plan {
 					Actions: tfjson.Actions{tfjson.ActionCreate},
 					After: map[string]any{
 						"input": map[string]any{
-							"schema_version": 1,
+							"schema_version": awsScopeConfigurationSchemaVersion,
 							"scope_ref":      testDefaultScopeRef,
 							"configuration": map[string]any{
 								"default":                  true,
@@ -128,11 +128,15 @@ func exactAWSInitialScopeMigrationPlan() *tfjson.Plan {
 								"region":                   "ap-southeast-2",
 								"scope_tag_policy_version": 0,
 								"vpc": map[string]any{
-									"mode":             awsVPCModeDittocloud,
-									"name":             "ditto-k8s",
-									"cidr":             "10.210.0.0/16",
-									"id":               nil,
-									"nat_gateway_name": testNATGatewayName,
+									"mode":                           awsVPCModeDittocloud,
+									"name":                           "ditto-k8s",
+									"cidr":                           "10.210.0.0/16",
+									"secondary_cidr":                 nil,
+									"public_subnet_netmask":          awsLegacyPublicSubnetNetmask,
+									"private_subnet_netmask":         awsLegacyPrivateSubnetNetmask,
+									"id":                             nil,
+									"nat_gateway_name":               testNATGatewayName,
+									"nat_gateway_eip_allocation_ids": []any{},
 								},
 							},
 						},
@@ -160,10 +164,12 @@ func testInitialScopeMigrationConfiguration() awsInitialScopeMigrationPlanConfig
 			Region:                "ap-southeast-2",
 			ScopeTagPolicyVersion: 0,
 			VPC: AWSScopeVPC{
-				Mode:           awsVPCModeDittocloud,
-				Name:           "ditto-k8s",
-				CIDR:           "10.210.0.0/16",
-				NATGatewayName: testNATGatewayName,
+				Mode:                 awsVPCModeDittocloud,
+				Name:                 "ditto-k8s",
+				CIDR:                 "10.210.0.0/16",
+				PublicSubnetNetmask:  awsLegacyPublicSubnetNetmask,
+				PrivateSubnetNetmask: awsLegacyPrivateSubnetNetmask,
+				NATGatewayName:       testNATGatewayName,
 			},
 		},
 	}
@@ -541,6 +547,8 @@ func writeInitialScopeMigrationScopesFile(t *testing.T) string {
     mode: dittocloud
     name: ditto-k8s
     cidr: 10.210.0.0/16
+    publicSubnetNetmask: 22
+    privateSubnetNetmask: 18
     natGatewayName: `+testNATGatewayName+`
 `)
 }

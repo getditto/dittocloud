@@ -228,6 +228,7 @@ func (document *awsDeploymentScopesDocument) appendScope(scopeRef string, scope 
 	if _, exists := document.scopes[scopeRef]; exists {
 		return nil, fmt.Errorf("scope reference %q already exists in AWS scopes file %q", scopeRef, document.path)
 	}
+	scope = scope.withManagedVPCDefaults()
 	document.document.Content[0].Content = append(
 		document.document.Content[0].Content,
 		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: scopeRef},
@@ -379,6 +380,13 @@ func awsDeploymentScopeYAMLNode(scope AWSDeploymentScope) *yaml.Node {
 			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value},
 		)
 	}
+	appendIntVPCField := func(name string, value int) {
+		vpc.Content = append(
+			vpc.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: name},
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!int", Value: strconv.Itoa(value)},
+		)
+	}
 	appendVPCField("mode", scope.VPC.Mode)
 	if scope.VPC.Name != "" {
 		appendVPCField("name", scope.VPC.Name)
@@ -391,6 +399,32 @@ func awsDeploymentScopeYAMLNode(scope AWSDeploymentScope) *yaml.Node {
 	}
 	if scope.VPC.NATGatewayName != "" {
 		appendVPCField("natGatewayName", scope.VPC.NATGatewayName)
+	}
+	if scope.VPC.SecondaryCIDR != "" {
+		appendVPCField("secondaryCidr", scope.VPC.SecondaryCIDR)
+	}
+	if scope.VPC.PublicSubnetNetmask != 0 {
+		appendIntVPCField("publicSubnetNetmask", scope.VPC.PublicSubnetNetmask)
+	}
+	if scope.VPC.PrivateSubnetNetmask != 0 {
+		appendIntVPCField("privateSubnetNetmask", scope.VPC.PrivateSubnetNetmask)
+	}
+	if scope.VPC.KarpenterDiscoveryTagValue != "" {
+		appendVPCField("karpenterDiscoveryTagValue", scope.VPC.KarpenterDiscoveryTagValue)
+	}
+	if len(scope.VPC.NATGatewayEIPAllocationIDs) > 0 {
+		allocations := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+		for _, allocationID := range scope.VPC.NATGatewayEIPAllocationIDs {
+			allocations.Content = append(
+				allocations.Content,
+				&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: allocationID},
+			)
+		}
+		vpc.Content = append(
+			vpc.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "natGatewayEipAllocationIds"},
+			allocations,
+		)
 	}
 	root.Content = append(
 		root.Content,

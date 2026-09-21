@@ -62,8 +62,28 @@ locals {
       scope.scope_tag_policy_version == 1 ? scope.cluster_name : null
     )
   }
-  default_nat_gateway_name = local.default_scope != null ? local.default_scope.vpc.nat_gateway_name : null
-  default_enable_eks       = local.scope_mode ? try(local.default_scope.cluster_type == "eks", false) : var.enable_eks
+  default_nat_gateway_name   = local.default_scope != null ? local.default_scope.vpc.nat_gateway_name : null
+  default_vpc_secondary_cidr = local.default_scope != null ? local.default_scope.vpc.secondary_cidr : var.vpc_secondary_cidr
+  default_public_subnet_netmask = (
+    local.default_scope != null ? local.default_scope.vpc.public_subnet_netmask : var.public_subnet_netmask
+  )
+  default_private_subnet_netmask = (
+    local.default_scope != null ? local.default_scope.vpc.private_subnet_netmask : var.private_subnet_netmask
+  )
+  # The node subnets carry karpenter.sh/discovery. A scope may set the value
+  # explicitly and otherwise falls back to its own cluster name; the explicit form
+  # matters because scopeTagPolicyVersion 0 permits several clusters in one scope,
+  # where the cluster name is not a meaningful single value. The legacy path takes
+  # its own variable and falls back to the IAM cluster name.
+  default_karpenter_discovery_tag_value = local.default_scope != null ? try(
+    coalesce(local.default_scope.vpc.karpenter_discovery_tag_value, local.default_scope.cluster_name), null
+    ) : try(
+    coalesce(var.karpenter_discovery_tag_value, var.cluster_name), null
+  )
+  default_nat_gateway_eip_allocation_ids = (
+    local.default_scope != null ? local.default_scope.vpc.nat_gateway_eip_allocation_ids : var.nat_gateway_eip_allocation_ids
+  )
+  default_enable_eks = local.scope_mode ? try(local.default_scope.cluster_type == "eks", false) : var.enable_eks
   default_scope_tags = local.scope_mode && local.default_scope_ref != null ? merge(
     var.tags,
     { "ditto.live/scope-ref" = local.default_scope_ref },
@@ -125,7 +145,9 @@ resource "terraform_data" "scope_configuration" {
   for_each = var.deployment_scopes
 
   input = {
-    schema_version = 1
+    # Schema 2 added the secondary workload block, the DMZ subnet netmasks, and
+    # the NAT Elastic IP allocations. Recovery still reads schema 1 snapshots.
+    schema_version = 2
     scope_ref      = each.key
     configuration = {
       default                  = each.value.default
@@ -134,11 +156,15 @@ resource "terraform_data" "scope_configuration" {
       region                   = each.value.region
       scope_tag_policy_version = each.value.scope_tag_policy_version
       vpc = {
-        mode             = each.value.vpc.mode
-        name             = each.value.vpc.name
-        cidr             = each.value.vpc.cidr
-        id               = each.value.vpc.id
-        nat_gateway_name = each.value.vpc.nat_gateway_name
+        mode                           = each.value.vpc.mode
+        name                           = each.value.vpc.name
+        cidr                           = each.value.vpc.cidr
+        secondary_cidr                 = each.value.vpc.secondary_cidr
+        public_subnet_netmask          = each.value.vpc.mode == "dittocloud" ? each.value.vpc.public_subnet_netmask : null
+        private_subnet_netmask         = each.value.vpc.mode == "dittocloud" ? each.value.vpc.private_subnet_netmask : null
+        id                             = each.value.vpc.id
+        nat_gateway_name               = each.value.vpc.nat_gateway_name
+        nat_gateway_eip_allocation_ids = each.value.vpc.nat_gateway_eip_allocation_ids
       }
     }
   }

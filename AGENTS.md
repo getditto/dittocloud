@@ -87,6 +87,18 @@ go test ./...
 
 **VPC Module**: Creates a VPC with subnets across multiple availability zones (requires region with at least 3 AZs). Omitted when `--customer-managed-vpc` is passed.
 
+**DMZ + Workload Split**: The primary CIDR (`vpc_cidr`) is a DMZ carrying only load balancers, NAT gateways, and explicitly placed EC2 — it is the only surface a peered VPC ever sees. Public subnets default to `/24` and private to `/23`, each allocated from its own aligned block so resizing one tier never renumbers another (`terraform/aws/vpc/layout.tf`). Setting `vpc_secondary_cidr` adds a second CIDR out of `100.64.0.0/10` carrying every workload tier: pod `/18`, node `/22`, and database `/22` per AZ, plus one spare block per tier and a reserved `/19`. `100.66.0.0/16`, `100.80.0.0/16` and `100.81.0.0/16` are rejected because Valet clusters use them for in-cluster pod and Service addressing: the first is the kubeadm cluster range, the other two are the pod and Service CIDRs of every self-managed AWS cluster.
+
+**Subnet Renumbering**: Subnet CIDRs are derived from `public_subnet_netmask` and `private_subnet_netmask`, so changing either renumbers live subnets and recreates the NAT gateways, nodes, and load balancers with them. A deployment created before the DMZ split must pin `public_subnet_netmask = 22` and `private_subnet_netmask = 18`; against a `/16` primary that reproduces the previous allocation exactly. `bootstrap aws scopes generate` reads the sizing back from the subnets already in state, and a schema 1 configuration snapshot recovers with those legacy values pinned. The CLI refuses the run before invoking Terraform when the requested sizing differs from what exists — single-scope mode compares the subnets in state, scope mode compares each scope's applied configuration snapshot, and `--allow-subnet-renumbering` authorizes it deliberately (`aws_subnet_renumbering.go`).
+
+**Workload Routing**: Pod and node subnets share one route table per AZ (`<vpc>-workload-<az>`) carrying `local` plus a default route to that AZ's NAT gateway. Database subnets get their own per-AZ tables. None of them carry peering routes — peering attaches to the private DMZ only, and a workload initiating a connection to a peered VPC from a `100.64` address fails on the return path. That case needs a terminating proxy in the DMZ and is unsupported.
+
+**VPC CNI Custom Networking**: Pods only land in the pod subnet when the cluster sets `AWS_VPC_K8S_CNI_CUSTOM_NETWORK_CFG=true`, one `ENIConfig` per AZ, and `ENI_CONFIG_LABEL_DEF=topology.kubernetes.io/zone`. Without all three, VPC CNI places pods in the node subnet and the pod tier goes unused. The `aws_workload_networking` output publishes the per-AZ pod subnets for generating those `ENIConfig` resources; that cluster configuration lives in `valet-cluster`, not here.
+
+**Subnet Tags**: Tags are the placement mechanism. `kubernetes.io/role/elb` on public DMZ, `kubernetes.io/role/internal-elb` on private DMZ, `karpenter.sh/discovery` on node subnets. Terraform owns the Karpenter tag because the CAPA controller boundary does not permit the `karpenter.sh` namespace (`ec2_tag_keys_cond` in `cross_account_iam/locals.tf`). A mis-tagged subnet silently puts nodes in the DMZ or load balancers in the node subnet.
+
+**NAT Addresses**: The module owns the NAT Elastic IPs (`terraform/aws/vpc/nat.tf`) rather than letting the upstream module create them, so egress addresses are stable and readable as an output. `moved` blocks adopt the addresses the upstream module created previously. Pass `nat_gateway_eip_allocation_ids` to use addresses allocated out of band, which is what keeps them fixed across a VPC rebuild.
+
 **CAPA Controller Policy Split**: The CAPA controller role is granted permissions via two separate IAM policies. The base policy (`ditto-capa-controller-policy`) is always attached. The VPC lifecycle policy (`ditto-capa-controller-vpc-lifecycle-policy`) is only attached when `customer_managed_vpc = false`.
 
 **Two-Phase IAM Tightening**: Phase 1 (default, no `--cluster-name`) is condition-free for EC2 resource mutations — broad access needed because existing CAPA resources may not carry `ditto.live/managed_by`. `ec2:CreateTags`/`ec2:DeleteTags` are scoped by tag key namespace (`kubernetes.io/*`, `k8s.io/*`, `sigs.k8s.io/*`, `ditto.live/*`) to support BYO-VPC tagging without allowing arbitrary tag writes on client resources. VPC lifecycle creates/deletes are gated on `ditto.live/managed_by = dittocloud`. Phase 2 (`--cluster-name` set) switches EC2 conditions to cluster-specific `kubernetes.io/cluster/<name>` tags; ELBv2 conditions use `elbv2.k8s.aws/cluster = <name>`. The second run requires an existing state file — the CLI enforces this with an early error before any Terraform runs.
@@ -95,11 +107,19 @@ go test ./...
 - `--aws-profile` — AWS profile
 - `--aws-region` — AWS region (default `us-east-1`)
 - `--aws-vpc-name` — VPC name (default `ditto`)
-- `--aws-vpc-cidr` — VPC CIDR block (default `10.210.0.0/16`)
+- `--aws-vpc-cidr` — primary (DMZ) VPC CIDR block (default `10.210.0.0/16`)
+- `--aws-vpc-secondary-cidr` — secondary CIDR carrying pod, node, and database capacity; a `/16` inside `100.64.0.0/10`, the same on every VPC because it is never routed outside its own
+- `--aws-vpc-public-subnet-netmask` — per-AZ public subnet netmask (default `24`); pin to the existing value or subnets renumber
+- `--aws-vpc-private-subnet-netmask` — per-AZ private subnet netmask (default `23`); pin to the existing value or subnets renumber
+- `--aws-vpc-nat-eip-allocation-ids` — pre-allocated Elastic IP allocation IDs for the NAT gateways, one per AZ (repeatable)
+
+On `scopes add`, the managed-VPC equivalents are `--vpc-secondary-cidr` and `--vpc-karpenter-discovery-tag`. Both are `dittocloud` mode only. The discovery tag falls back to the scope's `clusterName`; with neither set the node subnets carry no `karpenter.sh/discovery` tag and Karpenter will not find them.
+- `--karpenter-discovery-tag-value` — value for `karpenter.sh/discovery` on the node subnets; defaults to `--cluster-name`
 - `--controller-trusted-role-arns` — override CAPA controller trusted ARNs
 - `--iam-trusted-role-arns` — override trust editor trusted ARNs
 - `--customer-managed-vpc` — omit VPC creation and VPC lifecycle IAM permissions
 - `--vpc-id` — restrict CAPA EC2 create/mutate operations to a specific VPC via `ec2:Vpc` condition; can be combined with either phase; mutually exclusive with `--aws-vpc-name`/`--aws-vpc-cidr`
+- `--allow-subnet-renumbering` — authorize a netmask change that replaces existing subnets
 - `--cluster-name` — phase-2 lock-down; requires existing state file
 
 ## Testing

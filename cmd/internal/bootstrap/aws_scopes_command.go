@@ -135,6 +135,8 @@ func awsScopesAddCmd() *cobra.Command {
 	cmd.Flags().String("vpc-mode", "", "VPC ownership mode: dittocloud, existing, or capi")
 	cmd.Flags().String("vpc-name", "", "VPC name; required for dittocloud mode")
 	cmd.Flags().String("vpc-cidr", "", "VPC CIDR; required for dittocloud mode")
+	cmd.Flags().String("vpc-secondary-cidr", "", "Secondary VPC CIDR carrying pod, node, and database capacity; a /16 inside 100.64.0.0/10, dittocloud mode only")
+	cmd.Flags().String("vpc-karpenter-discovery-tag", "", "Value of the karpenter.sh/discovery tag on the node subnets; defaults to the scope cluster name, dittocloud mode only")
 	cmd.Flags().String("vpc-id", "", "VPC ID; required for existing mode and optional for capi mode")
 	return cmd
 }
@@ -196,11 +198,26 @@ func collectAWSScopesAddInput(flags *pflag.FlagSet) (AWSDeploymentScope, error) 
 	if err != nil {
 		return AWSDeploymentScope{}, fmt.Errorf("unable to get vpc-cidr: %w", err)
 	}
+	vpcSecondaryCIDR, err := flags.GetString("vpc-secondary-cidr")
+	if err != nil {
+		return AWSDeploymentScope{}, fmt.Errorf("unable to get vpc-secondary-cidr: %w", err)
+	}
+	vpcKarpenterDiscoveryTag, err := flags.GetString("vpc-karpenter-discovery-tag")
+	if err != nil {
+		return AWSDeploymentScope{}, fmt.Errorf("unable to get vpc-karpenter-discovery-tag: %w", err)
+	}
 	vpcID, err := flags.GetString("vpc-id")
 	if err != nil {
 		return AWSDeploymentScope{}, fmt.Errorf("unable to get vpc-id: %w", err)
 	}
-	vpc := AWSScopeVPC{Mode: vpcMode, Name: vpcName, CIDR: vpcCIDR, ID: vpcID}
+	vpc := AWSScopeVPC{
+		Mode:                       vpcMode,
+		Name:                       vpcName,
+		CIDR:                       vpcCIDR,
+		SecondaryCIDR:              vpcSecondaryCIDR,
+		KarpenterDiscoveryTagValue: vpcKarpenterDiscoveryTag,
+		ID:                         vpcID,
+	}
 	switch vpcMode {
 	case awsVPCModeDittocloud:
 		vpc.Name, err = requiredAWSScopesAddString(flags, "vpc-name", "Enter the VPC name")
@@ -230,7 +247,7 @@ func collectAWSScopesAddInput(flags *pflag.FlagSet) (AWSDeploymentScope, error) 
 		Region:                region,
 		ScopeTagPolicyVersion: 0,
 		VPC:                   vpc,
-	}
+	}.withManagedVPCDefaults()
 	if err := validateAWSDeploymentScopeFields("new scope", scope); err != nil {
 		return AWSDeploymentScope{}, err
 	}

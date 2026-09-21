@@ -54,10 +54,12 @@ func testTagVerificationScope(clusterType, clusterName string) AWSDeploymentScop
 		Region:                "ap-southeast-2",
 		ScopeTagPolicyVersion: 0,
 		VPC: AWSScopeVPC{
-			Mode:           awsVPCModeDittocloud,
-			Name:           "ditto-k8s",
-			CIDR:           "10.210.0.0/16",
-			NATGatewayName: "iam-test-timc-nat",
+			Mode:                 awsVPCModeDittocloud,
+			Name:                 "ditto-k8s",
+			CIDR:                 "10.210.0.0/16",
+			PublicSubnetNetmask:  awsLegacyPublicSubnetNetmask,
+			PrivateSubnetNetmask: awsLegacyPrivateSubnetNetmask,
+			NATGatewayName:       "iam-test-timc-nat",
 		},
 	}
 }
@@ -123,6 +125,8 @@ func TestAWSScopesTagsVerifyReadOnlyKubeadmReport(t *testing.T) {
     mode: dittocloud
     name: ditto-k8s
     cidr: 10.210.0.0/16
+    publicSubnetNetmask: 22
+    privateSubnetNetmask: 18
     natGatewayName: iam-test-timc-nat
 `)
 	stateBefore, err := os.ReadFile(statePath)
@@ -190,6 +194,8 @@ func TestAWSScopesTagsVerifyPassesEKSIdentityToBuiltInVerifier(t *testing.T) {
     mode: dittocloud
     name: ditto-k8s
     cidr: 10.210.0.0/16
+    publicSubnetNetmask: 22
+    privateSubnetNetmask: 18
     natGatewayName: iam-test-timc-nat
 `)
 	mockVerifier := &mockAWSScopeTagVerifier{report: awsScopeTagVerificationReport{
@@ -226,6 +232,8 @@ func TestAWSScopesTagsVerifyEnablePersistsSingleClusterConfigurationOnly(t *test
     mode: dittocloud
     name: ditto-k8s
     cidr: 10.210.0.0/16
+    publicSubnetNetmask: 22
+    privateSubnetNetmask: 18
     natGatewayName: iam-test-timc-nat
 `)
 	stateBefore, err := os.ReadFile(statePath)

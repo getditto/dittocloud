@@ -103,7 +103,7 @@ readonly unexpected_final_changes="$(jq -c \
           .index != $scope_ref or
           .provider_name != "terraform.io/builtin/terraform" or
           .change.after.input != {
-            schema_version: 1,
+            schema_version: 2,
             scope_ref: $scope_ref,
             configuration: {
               default: true,
@@ -115,8 +115,12 @@ readonly unexpected_final_changes="$(jq -c \
                 mode: "dittocloud",
                 name: "migration-vpc",
                 cidr: "10.220.0.0/16",
+                secondary_cidr: null,
+                public_subnet_netmask: 24,
+                private_subnet_netmask: 23,
                 id: null,
-                nat_gateway_name: null
+                nat_gateway_name: null,
+                nat_gateway_eip_allocation_ids: []
               }
             }
           }

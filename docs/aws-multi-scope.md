@@ -30,6 +30,45 @@ dsc-01k2m8g7n4p6q9r3t5v8x1y2z3:
     id: vpc-0123456789abcdef0
 ```
 
+A Dittocloud-managed VPC carries its own subnet sizing and, optionally, the
+secondary block that holds every workload tier:
+
+```yaml
+dsc-01k2m8g7n4p6q9r3t5v8x1y2z4:
+  region: us-west-2
+  clusterType: eks
+  clusterName: valet-dev
+  scopeTagPolicyVersion: 0
+  vpc:
+    mode: dittocloud
+    name: valet
+    cidr: 10.214.0.0/20
+    secondaryCidr: 100.64.0.0/16
+    publicSubnetNetmask: 24
+    privateSubnetNetmask: 23
+```
+
+`cidr` is a DMZ: it carries load balancers, NAT gateways, and explicitly placed
+EC2, and it is the only surface a peered VPC sees. `secondaryCidr` carries pod,
+node, and database capacity and is the same block on every VPC, because it is
+never routed or advertised outside its own VPC so identical blocks never meet.
+Two VPCs that share it cannot be peered at all — AWS rejects a peering connection
+on any overlapping CIDR, secondary blocks included, and checks the whole set at
+creation time — so cross-VPC connectivity is PrivateLink or VPC Lattice, or a
+transit gateway propagating only the primaries. It must be one of the 64 `/16`
+blocks inside `100.64.0.0/10`. Three of those blocks are not allocatable because Valet clusters
+already use them for in-cluster pod and Service addressing: `100.66.0.0/16` is the
+kubeadm cluster range, and `100.80.0.0/16` and `100.81.0.0/16` are the pod and
+Service CIDRs every self-managed AWS cluster is built with.
+
+`publicSubnetNetmask` and `privateSubnetNetmask` default to `24` and `23`.
+**Every subnet CIDR is derived from them, so changing either renumbers live
+subnets** and recreates the NAT gateways, nodes, and load balancers with them. A
+VPC created before the DMZ split must pin `publicSubnetNetmask: 22` and
+`privateSubnetNetmask: 18`; `scopes generate` reads those values back from the
+subnets already in state, and `scopes recover` pins them when it reads a
+configuration snapshot written before the split.
+
 Do not create or edit a `scopeRef` manually. Use `scopes add` for a greenfield
 configuration or an additional non-default scope:
 
@@ -42,6 +81,34 @@ dittocloud bootstrap aws scopes add \
   --vpc-mode existing \
   --vpc-id vpc-09e877f9012f52241
 ```
+
+A greenfield Dittocloud-managed VPC takes `--default` and the workload block:
+
+```bash
+dittocloud bootstrap aws scopes add \
+  --scopes-file scopes.yaml \
+  --default \
+  --region us-east-1 \
+  --cluster-type eks \
+  --vpc-mode dittocloud \
+  --vpc-name valet \
+  --vpc-cidr 10.217.0.0/20 \
+  --vpc-secondary-cidr 100.64.0.0/16
+```
+
+`--vpc-secondary-cidr` is only valid for `dittocloud` mode; `existing` and `capi`
+scopes reject it, because Dittocloud does not own their address space. The same
+applies to `--vpc-karpenter-discovery-tag`, which sets the `karpenter.sh/discovery`
+value on the node subnets.
+
+That tag is how Karpenter finds where to launch nodes, and Terraform has to own it
+because the CAPA controller boundary does not permit the `karpenter.sh` namespace.
+Left unset, it falls back to the scope's `clusterName`, and a scope with neither
+gets **no discovery tag at all** — Karpenter then falls back to whatever its
+`EC2NodeClass` matches next, which for a Valet cluster is the
+`kubernetes.io/cluster/*` tag CAPA applies to the DMZ subnets, not the node tier.
+Set it explicitly when `scopeTagPolicyVersion` is `0` and the scope holds more than
+one cluster, because a single `clusterName` is not meaningful there.
 
 The command only updates the scope file. It never initializes Terraform or
 changes Terraform state. Run a separate normal bootstrap to review and apply

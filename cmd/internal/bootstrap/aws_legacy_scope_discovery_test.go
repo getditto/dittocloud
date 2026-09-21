@@ -70,6 +70,24 @@ func rawAWSLegacyManagedVPCResource(name, cidr string) map[string]any {
 	}
 }
 
+// The subnets that already exist are the only trustworthy record of how a legacy
+// VPC was sized.
+func rawAWSLegacyManagedSubnetResource(name string, cidrs ...string) map[string]any {
+	instances := make([]any, 0, len(cidrs))
+	for _, cidr := range cidrs {
+		instances = append(instances, map[string]any{
+			"attributes": map[string]any{"cidr_block": cidr},
+		})
+	}
+	return map[string]any{
+		"module":    "module.vpc[0].module.vpc",
+		"mode":      "managed",
+		"type":      "aws_subnet",
+		"name":      name,
+		"instances": instances,
+	}
+}
+
 func rawAWSLegacyEKSMarkerResource() map[string]any {
 	return map[string]any{
 		"module": "module.cross_account_iam[0]",
@@ -137,6 +155,8 @@ func TestDiscoverAWSLegacyScopeUsesOnlyAcceptedEvidence(t *testing.T) {
 		map[string]any{"aws": rawAWSLegacyOutput("ap-southeast-2", "vpc-09e877f9012f52241")},
 		rawAWSLegacyVPCValidationResource(false, nil),
 		rawAWSLegacyManagedVPCResource("ditto-default", "10.210.0.0/16"),
+		rawAWSLegacyManagedSubnetResource("public", "10.210.0.0/22", "10.210.4.0/22", "10.210.8.0/22"),
+		rawAWSLegacyManagedSubnetResource("private", "10.210.64.0/18", "10.210.128.0/18", "10.210.192.0/18"),
 		rawAWSLegacyEKSMarkerResource(),
 		rawAWSLegacyPhaseTwoPolicyResource("capa_controller_base", "legacy-cluster"),
 	))
@@ -155,9 +175,11 @@ func TestDiscoverAWSLegacyScopeUsesOnlyAcceptedEvidence(t *testing.T) {
 		Region:                "ap-southeast-2",
 		ScopeTagPolicyVersion: 0,
 		VPC: AWSScopeVPC{
-			Mode: awsVPCModeDittocloud,
-			Name: "ditto-default",
-			CIDR: "10.210.0.0/16",
+			Mode:                 awsVPCModeDittocloud,
+			Name:                 "ditto-default",
+			CIDR:                 "10.210.0.0/16",
+			PublicSubnetNetmask:  22,
+			PrivateSubnetNetmask: 18,
 		},
 	}
 	if !reflect.DeepEqual(discovery.Scope, want) {

@@ -81,23 +81,33 @@ module "vpc" {
   source = "./vpc"
   count  = local.create_dittocloud_vpc ? 1 : 0
 
-  region                        = local.root_region
-  vpc_name                      = local.default_vpc_name
-  vpc_cidr                      = local.default_vpc_cidr
-  manage_kubernetes_cluster_tag = false
-  nat_gateway_name              = local.default_nat_gateway_name
-  tags                          = local.default_scope_tags
+  region                         = local.root_region
+  vpc_name                       = local.default_vpc_name
+  vpc_cidr                       = local.default_vpc_cidr
+  secondary_cidr                 = local.default_vpc_secondary_cidr
+  public_subnet_netmask          = local.default_public_subnet_netmask
+  private_subnet_netmask         = local.default_private_subnet_netmask
+  manage_kubernetes_cluster_tag  = false
+  karpenter_discovery_tag_value  = local.default_karpenter_discovery_tag_value
+  nat_gateway_name               = local.default_nat_gateway_name
+  nat_gateway_eip_allocation_ids = local.default_nat_gateway_eip_allocation_ids
+  tags                           = local.default_scope_tags
 }
 
 module "scoped_vpc" {
   source   = "./vpc"
   for_each = local.non_default_dittocloud_scopes
 
-  region                        = each.value.region
-  vpc_name                      = each.value.vpc.name
-  vpc_cidr                      = each.value.vpc.cidr
-  manage_kubernetes_cluster_tag = false
-  nat_gateway_name              = each.value.vpc.nat_gateway_name
+  region                         = each.value.region
+  vpc_name                       = each.value.vpc.name
+  vpc_cidr                       = each.value.vpc.cidr
+  secondary_cidr                 = each.value.vpc.secondary_cidr
+  public_subnet_netmask          = each.value.vpc.public_subnet_netmask
+  private_subnet_netmask         = each.value.vpc.private_subnet_netmask
+  manage_kubernetes_cluster_tag  = false
+  karpenter_discovery_tag_value  = try(coalesce(each.value.vpc.karpenter_discovery_tag_value, each.value.cluster_name), null)
+  nat_gateway_name               = each.value.vpc.nat_gateway_name
+  nat_gateway_eip_allocation_ids = each.value.vpc.nat_gateway_eip_allocation_ids
   tags = merge(
     var.tags,
     { "ditto.live/scope-ref" = each.key },
@@ -179,6 +189,13 @@ resource "terraform_data" "validate_vpc_mode" {
 
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
+
+# Published outside the aws output so the workload tiers stay decoupled from the
+# IAM and load-balancer surface that valet already consumes.
+output "aws_workload_networking" {
+  description = "Workload subnet inventory for each Dittocloud-managed VPC: the secondary CIDR, pod and node subnets, per-availability-zone pod subnets for VPC CNI ENIConfigs, and the NAT egress addresses."
+  value       = local.aws_workload_networking_output
+}
 
 output "aws" {
   value = merge(

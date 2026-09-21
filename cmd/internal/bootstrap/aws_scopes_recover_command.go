@@ -11,7 +11,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const awsScopeConfigurationSchemaVersion = 1
+// Schema 2 added the secondary workload block, the DMZ subnet netmasks, and the
+// NAT Elastic IP allocations. Schema 1 snapshots are still read so an account
+// applied before that change can be recovered without a Terraform run first.
+const (
+	awsScopeConfigurationSchemaVersion        = 2
+	awsMinimumScopeConfigurationSchemaVersion = 1
+)
 
 func awsScopesRecoverCmd() *cobra.Command {
 	cmd := &cobra.Command{
