@@ -147,8 +147,8 @@ func TestAWSScopesAddRecordsAnExplicitKarpenterDiscoveryTag(t *testing.T) {
 }
 
 func TestAWSScopesAddLeavesTheKarpenterDiscoveryTagUnsetByDefault(t *testing.T) {
-	// Unset means Terraform falls back to the scope's cluster name, so the field
-	// must not be written with an empty value that would defeat that coalesce.
+	// Unset means Terraform falls back to the VPC ID, so the field must not be
+	// written with an empty value that would defeat that fallback.
 	forceAWSScopesAddNonInteractive(t)
 	setAWSScopesAddReferenceSequence(t, testDefaultScopeRef)
 	scopesPath := filepath.Join(t.TempDir(), "scopes.yaml")

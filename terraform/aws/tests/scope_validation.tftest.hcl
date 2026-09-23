@@ -55,6 +55,12 @@ mock_provider "aws" {
       arn = "arn:aws:iam::123456789012:instance-profile/mock-profile"
     }
   }
+
+  mock_resource "aws_sqs_queue" {
+    defaults = {
+      arn = "arn:aws:sqs:ap-southeast-2:123456789012:mock-queue"
+    }
+  }
 }
 
 variables {
@@ -1214,11 +1220,10 @@ run "publishes_workload_networking_for_a_managed_scope" {
 # trade-off is that two VPCs sharing it cannot be peered, because AWS rejects a
 # peering connection on any overlapping CIDR; cross-VPC connectivity is
 # PrivateLink or VPC Lattice instead.
-# The node subnets carry karpenter.sh/discovery, and its value comes from the
-# scope. An explicit value wins; otherwise the scope's cluster name is used. The
-# explicit form matters because scopeTagPolicyVersion 0 permits several clusters
-# in one scope, where a single cluster name is not meaningful.
-run "prefers_an_explicit_karpenter_discovery_tag_over_the_cluster_name" {
+# The node subnets carry karpenter.sh/discovery. An explicit value wins;
+# otherwise both default and non-default scopes use their VPC IDs, even when
+# cluster_name is set for IAM or scope tag-policy purposes.
+run "prefers_an_explicit_karpenter_discovery_tag_over_the_vpc_id" {
   command = plan
 
   variables {
@@ -1241,11 +1246,11 @@ run "prefers_an_explicit_karpenter_discovery_tag_over_the_cluster_name" {
 
   assert {
     condition     = local.default_karpenter_discovery_tag_value == "shared-workload"
-    error_message = "An explicit vpc.karpenter_discovery_tag_value must win over the scope cluster name."
+    error_message = "An explicit vpc.karpenter_discovery_tag_value must win over the VPC ID."
   }
 }
 
-run "falls_back_to_the_cluster_name_for_the_karpenter_discovery_tag" {
+run "defaults_named_scope_discovery_to_the_vpc_id" {
   command = plan
 
   variables {
@@ -1266,8 +1271,47 @@ run "falls_back_to_the_cluster_name_for_the_karpenter_discovery_tag" {
   }
 
   assert {
-    condition     = local.default_karpenter_discovery_tag_value == "valet-dev"
-    error_message = "With no explicit value the scope cluster name must tag the node subnets."
+    condition     = local.default_karpenter_discovery_tag_value == null
+    error_message = "A named default scope must leave discovery unset so the VPC module uses its VPC ID."
+  }
+}
+
+run "defaults_named_non_default_scope_discovery_to_the_vpc_id" {
+  command = apply
+
+  variables {
+    deployment_scopes = {
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" = {
+        default      = true
+        cluster_type = "eks"
+        region       = "ap-southeast-2"
+        vpc = {
+          mode           = "dittocloud"
+          name           = "valet-default"
+          cidr           = "10.214.0.0/20"
+          secondary_cidr = "100.64.0.0/16"
+        }
+      }
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z4" = {
+        cluster_name = "v2-vnext-test"
+        cluster_type = "eks"
+        region       = "ap-southeast-2"
+        vpc = {
+          mode           = "dittocloud"
+          name           = "valet-v2-vnext-test"
+          cidr           = "10.221.0.0/20"
+          secondary_cidr = "100.64.0.0/16"
+        }
+      }
+    }
+  }
+
+  assert {
+    condition = (
+      module.vpc[0].karpenter_discovery_tag_value == module.vpc[0].vpc_id &&
+      module.scoped_vpc["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].karpenter_discovery_tag_value == module.scoped_vpc["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].vpc_id
+    )
+    error_message = "Both default and named non-default scopes must tag node subnets with their own VPC IDs."
   }
 }
 

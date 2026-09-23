@@ -229,6 +229,10 @@ output "vpc_id" {
   value = module.vpc.vpc_id
 }
 
+output "karpenter_discovery_tag_value" {
+  value = local.karpenter_discovery_value
+}
+
 # One ENIConfig per availability zone points VPC CNI custom networking at that
 # zone's pod subnet. Without AWS_VPC_K8S_CNI_CUSTOM_NETWORK_CFG=true, an
 # ENIConfig per AZ, and ENI_CONFIG_LABEL_DEF=topology.kubernetes.io/zone on the

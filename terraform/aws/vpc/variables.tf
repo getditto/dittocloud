@@ -150,7 +150,7 @@ variable "manage_kubernetes_cluster_tag" {
 }
 
 variable "karpenter_discovery_tag_value" {
-  description = "Value for the karpenter.sh/discovery tag on the node subnets, which is how Karpenter finds where to launch nodes. Defaults to kubernetes_cluster_name; the tag is omitted when neither is set."
+  description = "Value for the karpenter.sh/discovery tag on the node subnets, which is how Karpenter finds where to launch nodes. Defaults to kubernetes_cluster_name when supplied, otherwise the VPC ID."
   type        = string
   default     = null
   nullable    = true
