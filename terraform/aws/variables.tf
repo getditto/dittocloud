@@ -330,7 +330,7 @@ variable "private_subnet_netmask" {
 }
 
 variable "karpenter_discovery_tag_value" {
-  description = "Value for the karpenter.sh/discovery tag on the node subnets, which is how Karpenter finds where to launch nodes. Defaults to cluster_name when set; the tag is omitted when neither is set. Terraform has to own this tag because the CAPA controller boundary does not permit the karpenter.sh namespace."
+  description = "Value for the karpenter.sh/discovery tag on the node subnets. In scope mode, an unset value defaults to the VPC ID even when cluster_name is set; legacy mode retains its cluster-name fallback. Terraform owns this tag because the CAPA controller boundary does not permit the karpenter.sh namespace."
   type        = string
   default     = null
   nullable    = true

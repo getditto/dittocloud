@@ -103,12 +103,10 @@ value on the node subnets.
 
 That tag is how Karpenter finds where to launch nodes, and Terraform has to own it
 because the CAPA controller boundary does not permit the `karpenter.sh` namespace.
-Left unset, it falls back to the scope's `clusterName`, and a scope with neither
-gets **no discovery tag at all** — Karpenter then falls back to whatever its
-`EC2NodeClass` matches next, which for a Valet cluster is the
-`kubernetes.io/cluster/*` tag CAPA applies to the DMZ subnets, not the node tier.
-Set it explicitly when `scopeTagPolicyVersion` is `0` and the scope holds more than
-one cluster, because a single `clusterName` is not meaningful there.
+Left unset, it defaults to the VPC ID, including for a named scope. The Valet EKS
+chart publishes that same VPC ID for Karpenter's `EC2NodeClass` selector. Set an
+explicit value only to preserve an existing discovery tag during migration, and
+ensure the cluster-side selector uses the same value before applying it.
 
 The command only updates the scope file. It never initializes Terraform or
 changes Terraform state. Run a separate normal bootstrap to review and apply

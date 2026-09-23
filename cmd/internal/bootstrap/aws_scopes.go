@@ -78,9 +78,8 @@ type AWSScopeVPC struct {
 	NATGatewayEIPAllocationIDs []string `yaml:"natGatewayEipAllocationIds,omitempty" json:"nat_gateway_eip_allocation_ids,omitempty"`
 	// KarpenterDiscoveryTagValue is the value of the karpenter.sh/discovery tag on
 	// the node subnets, which is how Karpenter finds where to launch nodes.
-	// Defaults to the scope's cluster name. Set it explicitly when a scope holds
-	// more than one cluster, which scopeTagPolicyVersion 0 allows, because the
-	// cluster name is then not a meaningful single value.
+	// Defaults to the VPC ID, including when the scope has a cluster name. Set it
+	// explicitly only when an existing subnet tag must be preserved.
 	KarpenterDiscoveryTagValue string `yaml:"karpenterDiscoveryTagValue,omitempty" json:"karpenter_discovery_tag_value,omitempty"`
 }
 

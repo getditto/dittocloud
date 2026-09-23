@@ -113,7 +113,7 @@ go test ./...
 - `--aws-vpc-private-subnet-netmask` — per-AZ private subnet netmask (default `23`); pin to the existing value or subnets renumber
 - `--aws-vpc-nat-eip-allocation-ids` — pre-allocated Elastic IP allocation IDs for the NAT gateways, one per AZ (repeatable)
 
-On `scopes add`, the managed-VPC equivalents are `--vpc-secondary-cidr` and `--vpc-karpenter-discovery-tag`. Both are `dittocloud` mode only. The discovery tag falls back to the scope's `clusterName`; with neither set the node subnets carry no `karpenter.sh/discovery` tag and Karpenter will not find them.
+On `scopes add`, the managed-VPC equivalents are `--vpc-secondary-cidr` and `--vpc-karpenter-discovery-tag`. Both are `dittocloud` mode only. The discovery tag defaults to the VPC ID even when the scope has a `clusterName`, matching the Valet EKS Karpenter selector. An explicit override must also be reflected in that selector.
 - `--karpenter-discovery-tag-value` — value for `karpenter.sh/discovery` on the node subnets; defaults to `--cluster-name`
 - `--controller-trusted-role-arns` — override CAPA controller trusted ARNs
 - `--iam-trusted-role-arns` — override trust editor trusted ARNs

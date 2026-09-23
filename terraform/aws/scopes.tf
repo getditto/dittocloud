@@ -70,14 +70,11 @@ locals {
   default_private_subnet_netmask = (
     local.default_scope != null ? local.default_scope.vpc.private_subnet_netmask : var.private_subnet_netmask
   )
-  # The node subnets carry karpenter.sh/discovery. A scope may set the value
-  # explicitly and otherwise falls back to its own cluster name; the explicit form
-  # matters because scopeTagPolicyVersion 0 permits several clusters in one scope,
-  # where the cluster name is not a meaningful single value. The legacy path takes
-  # its own variable and falls back to the IAM cluster name.
-  default_karpenter_discovery_tag_value = local.default_scope != null ? try(
-    coalesce(local.default_scope.vpc.karpenter_discovery_tag_value, local.default_scope.cluster_name), null
-    ) : try(
+  # In scope mode, leave an unset discovery value null so the VPC module tags
+  # node subnets with its VPC ID, matching the Valet EKS EC2NodeClass selector.
+  # A scope's cluster name identifies its IAM/tag-policy target, not its VPC.
+  # Preserve the legacy non-scope fallback to the cluster name.
+  default_karpenter_discovery_tag_value = local.default_scope != null ? local.default_scope.vpc.karpenter_discovery_tag_value : try(
     coalesce(var.karpenter_discovery_tag_value, var.cluster_name), null
   )
   default_nat_gateway_eip_allocation_ids = (
