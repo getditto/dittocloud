@@ -2,6 +2,7 @@ package privatenetworking
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -79,7 +80,7 @@ type lifecycleConfig struct {
 // runTerraformLifecycle handles tmpdir setup, state management, and the full
 // terraform init → plan → apply (or destroy) flow. Command-specific behaviour
 // is supplied via cfg.
-func runTerraformLifecycle(cmd *cobra.Command, vars []*tfexec.VarOption, cfg lifecycleConfig) error {
+func runTerraformLifecycle(cmd *cobra.Command, vars []*tfexec.VarOption, cfg lifecycleConfig) (runErr error) {
 	progress := color.New(color.FgMagenta)
 	success := color.New(color.FgGreen, color.Bold)
 	failure := color.New(color.FgRed, color.Bold)
@@ -122,8 +123,10 @@ func runTerraformLifecycle(cmd *cobra.Command, vars []*tfexec.VarOption, cfg lif
 		if err := os.WriteFile(tmpStateFilePath, input, 0600); err != nil {
 			return fmt.Errorf("unable to write state file to temporary directory: %w", err)
 		}
-	} else {
+	} else if errors.Is(err, os.ErrNotExist) {
 		_, _ = progress.Printf("No local state file found, new state file will be created at %q\n", localStateFilePath)
+	} else {
+		return fmt.Errorf("unable to inspect local state file %q: %w", localStateFilePath, err)
 	}
 
 	shouldDownload := cmd.Flag("force-terraform-download").Value.String() == "true"
@@ -161,13 +164,11 @@ func runTerraformLifecycle(cmd *cobra.Command, vars []*tfexec.VarOption, cfg lif
 
 		defer func() {
 			_, _ = progress.Printf("Copying state file back to %q\n", localStateFilePath)
-			stateFileData, err := os.ReadFile(tmpStateFilePath)
-			if err != nil {
-				_, _ = failure.Printf("unable to read state file from temporary directory: %v", err)
-				return
-			}
-			if err := os.WriteFile(localStateFilePath, stateFileData, 0600); err != nil {
-				_, _ = failure.Printf("unable to write state file to %q: %v", localStateFilePath, err)
+			if err := bootstrap.PersistTerraformState(tmpStateFilePath, localStateFilePath); err != nil {
+				_, _ = failure.Printf("unable to persist state file to %q: %v", localStateFilePath, err)
+				if runErr == nil {
+					runErr = err
+				}
 			}
 		}()
 
@@ -239,13 +240,11 @@ func runTerraformLifecycle(cmd *cobra.Command, vars []*tfexec.VarOption, cfg lif
 
 	defer func() {
 		_, _ = progress.Printf("Copying state file back to %q\n", localStateFilePath)
-		stateFileData, err := os.ReadFile(tmpStateFilePath)
-		if err != nil {
-			_, _ = failure.Printf("unable to read state file from temporary directory: %v", err)
-			return
-		}
-		if err := os.WriteFile(localStateFilePath, stateFileData, 0600); err != nil {
-			_, _ = failure.Printf("unable to write state file to %q: %v", localStateFilePath, err)
+		if err := bootstrap.PersistTerraformState(tmpStateFilePath, localStateFilePath); err != nil {
+			_, _ = failure.Printf("unable to persist state file to %q: %v", localStateFilePath, err)
+			if runErr == nil {
+				runErr = err
+			}
 		}
 	}()
 

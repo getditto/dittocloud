@@ -35,7 +35,7 @@ func Setup(level string) *slog.Logger {
 		slogLevel = slog.LevelInfo
 	}
 
-	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slogLevel,
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
 			// Simplify the time format
