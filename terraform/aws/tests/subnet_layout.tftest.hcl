@@ -341,3 +341,55 @@ run "rejects_an_incomplete_set_of_nat_addresses" {
 
   expect_failures = [var.nat_gateway_eip_allocation_ids]
 }
+
+run "private_nat_gateways_are_disabled_by_default" {
+  command = plan
+
+  module {
+    source = "./vpc"
+  }
+
+  assert {
+    condition     = length(aws_nat_gateway.private) == 0 && length(output.private_nat_gateways_by_az) == 0
+    error_message = "Existing VPCs must not incur private NAT gateway costs without opting in."
+  }
+}
+
+run "private_nat_gateways_use_the_same_az_dmz_subnets" {
+  # The mocked apply resolves IDs so placement and routing can be compared.
+  command = apply
+
+  module {
+    source = "./vpc"
+  }
+
+  variables {
+    region                      = "us-east-1"
+    vpc_name                    = "valet"
+    vpc_cidr                    = "10.214.0.0/20"
+    secondary_cidr              = "100.64.0.0/16"
+    enable_private_nat_gateways = true
+  }
+
+  assert {
+    condition = length(aws_nat_gateway.private) == 3 && alltrue([
+      for az, gateway in aws_nat_gateway.private :
+      gateway.connectivity_type == "private" &&
+      gateway.subnet_id == module.vpc.private_subnets[local.az_indexes[az]] &&
+      gateway.allocation_id == null &&
+      gateway.tags["Name"] == "valet-private-nat-${az}" &&
+      output.private_nat_gateways_by_az[az].id == gateway.id &&
+      output.private_nat_gateways_by_az[az].route_table_id == module.vpc.private_route_table_ids[local.az_indexes[az]]
+    ])
+    error_message = "Each AZ must get a private NAT in its private DMZ subnet, with no EIP and usable routing outputs."
+  }
+
+  assert {
+    condition = length(aws_eip.nat) == 3 && alltrue([
+      for az, route in aws_route.workload_nat_gateway :
+      route.destination_cidr_block == "0.0.0.0/0" &&
+      route.nat_gateway_id == module.vpc.natgw_ids[local.az_indexes[az]]
+    ])
+    error_message = "Enabling private NAT must preserve the public NAT addresses and workload internet routes."
+  }
+}

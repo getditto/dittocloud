@@ -9,12 +9,10 @@
 #
 # Routing policy: these subnets reach the internet through their availability
 # zone's NAT gateway and reach the rest of the VPC over the local route. They
-# deliberately carry no peering routes and no transit gateway attachment —
-# secondary addresses never leave the VPC. Cross-VPC access is published through
-# an internal load balancer in the private DMZ instead. A workload that initiates
-# a connection to a peered VPC from a secondary address will fail on the return
-# path even when the far side has a load balancer, because the far VPC has no
-# route back; that case needs a terminating proxy in the DMZ and is unsupported.
+# carry no peering routes by default. For outbound peering, callers can enable
+# private NAT gateways in the private DMZ and add destination-specific routes
+# through them. The peer then sees primary CIDR addresses for the return path;
+# secondary addresses are never advertised to it.
 #
 locals {
   pod_subnet_tags = merge(

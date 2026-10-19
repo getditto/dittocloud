@@ -89,6 +89,7 @@ module "vpc" {
   private_subnet_netmask         = local.default_private_subnet_netmask
   manage_kubernetes_cluster_tag  = false
   karpenter_discovery_tag_value  = local.default_karpenter_discovery_tag_value
+  enable_private_nat_gateways    = local.default_enable_private_nat_gateways
   nat_gateway_name               = local.default_nat_gateway_name
   nat_gateway_eip_allocation_ids = local.default_nat_gateway_eip_allocation_ids
   tags                           = local.default_scope_tags
@@ -106,6 +107,7 @@ module "scoped_vpc" {
   private_subnet_netmask         = each.value.vpc.private_subnet_netmask
   manage_kubernetes_cluster_tag  = false
   karpenter_discovery_tag_value  = each.value.vpc.karpenter_discovery_tag_value
+  enable_private_nat_gateways    = each.value.vpc.enable_private_nat_gateways
   nat_gateway_name               = each.value.vpc.nat_gateway_name
   nat_gateway_eip_allocation_ids = each.value.vpc.nat_gateway_eip_allocation_ids
   tags = merge(

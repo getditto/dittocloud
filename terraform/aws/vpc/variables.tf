@@ -178,6 +178,12 @@ variable "nat_gateway_name" {
   }
 }
 
+variable "enable_private_nat_gateways" {
+  description = "Create one private NAT gateway per availability zone in the private DMZ subnets for outbound peering traffic. Routes are managed separately."
+  type        = bool
+  default     = false
+}
+
 variable "nat_gateway_eip_allocation_ids" {
   description = "Optional pre-allocated Elastic IP allocation IDs for the NAT gateways, one per availability zone in order. When empty this module allocates and owns the addresses; supply them to keep egress addresses stable across a VPC rebuild."
   type        = list(string)

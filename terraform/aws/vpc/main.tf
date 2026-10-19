@@ -257,6 +257,18 @@ output "nat_public_ips" {
   value       = local.nat_eip_public_ips
 }
 
+output "private_nat_gateways_by_az" {
+  description = "Private NAT gateways and their DMZ route tables, keyed by availability zone. Empty when disabled."
+  value = {
+    for az, gateway in aws_nat_gateway.private : az => {
+      id             = gateway.id
+      private_ip     = gateway.private_ip
+      subnet_id      = gateway.subnet_id
+      route_table_id = module.vpc.private_route_table_ids[local.az_indexes[az]]
+    }
+  }
+}
+
 output "subnets" {
   description = "Allocated subnet CIDR blocks by tier and availability zone, plus the reserved block held back inside the secondary CIDR."
   value = {

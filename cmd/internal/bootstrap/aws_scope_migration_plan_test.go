@@ -137,6 +137,7 @@ func exactAWSInitialScopeMigrationPlan() *tfjson.Plan {
 									"id":                             nil,
 									"nat_gateway_name":               testNATGatewayName,
 									"nat_gateway_eip_allocation_ids": []any{},
+									"enable_private_nat_gateways":    false,
 								},
 							},
 						},

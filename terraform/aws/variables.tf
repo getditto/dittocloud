@@ -29,6 +29,7 @@ variable "deployment_scopes" {
       public_subnet_netmask          = optional(number, 24)
       private_subnet_netmask         = optional(number, 23)
       id                             = optional(string)
+      enable_private_nat_gateways    = optional(bool, false)
       nat_gateway_name               = optional(string)
       nat_gateway_eip_allocation_ids = optional(list(string), [])
       karpenter_discovery_tag_value  = optional(string)
@@ -151,6 +152,14 @@ variable "deployment_scopes" {
       )
     ])
     error_message = "Only a Dittocloud-managed VPC has subnet sizing or NAT Elastic IP allocations. Leave public_subnet_netmask and private_subnet_netmask at their defaults of 24 and 23, and nat_gateway_eip_allocation_ids empty, for capi and existing scopes."
+  }
+
+  validation {
+    condition = alltrue([
+      for scope in values(var.deployment_scopes) :
+      !scope.vpc.enable_private_nat_gateways || scope.vpc.mode == "dittocloud"
+    ])
+    error_message = "enable_private_nat_gateways requires vpc.mode = dittocloud because Dittocloud must manage the subnets where it creates the gateways."
   }
 
   validation {
@@ -334,6 +343,12 @@ variable "karpenter_discovery_tag_value" {
   type        = string
   default     = null
   nullable    = true
+}
+
+variable "enable_private_nat_gateways" {
+  description = "Create one private NAT gateway per availability zone in the private DMZ subnets for outbound peering traffic. Routes are managed separately."
+  type        = bool
+  default     = false
 }
 
 variable "nat_gateway_eip_allocation_ids" {

@@ -113,7 +113,8 @@ locals {
           subnetId         = entry.subnet_id
         }
       ]
-      natPublicIps = scope.default ? module.vpc[0].nat_public_ips : module.scoped_vpc[scope_ref].nat_public_ips
+      natPublicIps           = scope.default ? module.vpc[0].nat_public_ips : module.scoped_vpc[scope_ref].nat_public_ips
+      privateNatGatewaysByAz = scope.default ? module.vpc[0].private_nat_gateways_by_az : module.scoped_vpc[scope_ref].private_nat_gateways_by_az
     }
     if local.scope_outputs_enabled && scope.vpc.mode == "dittocloud"
   }

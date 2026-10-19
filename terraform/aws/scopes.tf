@@ -62,8 +62,9 @@ locals {
       scope.scope_tag_policy_version == 1 ? scope.cluster_name : null
     )
   }
-  default_nat_gateway_name   = local.default_scope != null ? local.default_scope.vpc.nat_gateway_name : null
-  default_vpc_secondary_cidr = local.default_scope != null ? local.default_scope.vpc.secondary_cidr : var.vpc_secondary_cidr
+  default_enable_private_nat_gateways = local.default_scope != null ? local.default_scope.vpc.enable_private_nat_gateways : var.enable_private_nat_gateways
+  default_nat_gateway_name            = local.default_scope != null ? local.default_scope.vpc.nat_gateway_name : null
+  default_vpc_secondary_cidr          = local.default_scope != null ? local.default_scope.vpc.secondary_cidr : var.vpc_secondary_cidr
   default_public_subnet_netmask = (
     local.default_scope != null ? local.default_scope.vpc.public_subnet_netmask : var.public_subnet_netmask
   )
@@ -142,9 +143,9 @@ resource "terraform_data" "scope_configuration" {
   for_each = var.deployment_scopes
 
   input = {
-    # Schema 2 added the secondary workload block, the DMZ subnet netmasks, and
-    # the NAT Elastic IP allocations. Recovery still reads schema 1 snapshots.
-    schema_version = 2
+    # Schema 3 adds the private NAT gateway opt-in. Recovery still reads
+    # schema 1 and 2 snapshots with private NAT gateways disabled.
+    schema_version = 3
     scope_ref      = each.key
     configuration = {
       default                  = each.value.default
@@ -160,6 +161,7 @@ resource "terraform_data" "scope_configuration" {
         public_subnet_netmask          = each.value.vpc.mode == "dittocloud" ? each.value.vpc.public_subnet_netmask : null
         private_subnet_netmask         = each.value.vpc.mode == "dittocloud" ? each.value.vpc.private_subnet_netmask : null
         id                             = each.value.vpc.id
+        enable_private_nat_gateways    = each.value.vpc.enable_private_nat_gateways
         nat_gateway_name               = each.value.vpc.nat_gateway_name
         nat_gateway_eip_allocation_ids = each.value.vpc.nat_gateway_eip_allocation_ids
       }

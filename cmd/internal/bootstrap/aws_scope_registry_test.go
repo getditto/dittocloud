@@ -99,14 +99,15 @@ func rawScopeConfigurationInstance(addressScopeRef, storedScopeRef string, scope
 		"region":                   scope.Region,
 		"scope_tag_policy_version": scope.ScopeTagPolicyVersion,
 		"vpc": map[string]any{
-			"mode":                   scope.VPC.Mode,
-			"name":                   optionalString(scope.VPC.Name),
-			"cidr":                   optionalString(scope.VPC.CIDR),
-			"secondary_cidr":         optionalString(scope.VPC.SecondaryCIDR),
-			"public_subnet_netmask":  optionalNumber(scope.VPC.PublicSubnetNetmask),
-			"private_subnet_netmask": optionalNumber(scope.VPC.PrivateSubnetNetmask),
-			"id":                     optionalString(scope.VPC.ID),
-			"nat_gateway_name":       optionalString(scope.VPC.NATGatewayName),
+			"mode":                        scope.VPC.Mode,
+			"name":                        optionalString(scope.VPC.Name),
+			"cidr":                        optionalString(scope.VPC.CIDR),
+			"secondary_cidr":              optionalString(scope.VPC.SecondaryCIDR),
+			"public_subnet_netmask":       optionalNumber(scope.VPC.PublicSubnetNetmask),
+			"private_subnet_netmask":      optionalNumber(scope.VPC.PrivateSubnetNetmask),
+			"id":                          optionalString(scope.VPC.ID),
+			"nat_gateway_name":            optionalString(scope.VPC.NATGatewayName),
+			"enable_private_nat_gateways": scope.VPC.EnablePrivateNATGateways,
 			"nat_gateway_eip_allocation_ids": func() []any {
 				allocations := make([]any, 0, len(scope.VPC.NATGatewayEIPAllocationIDs))
 				for _, allocationID := range scope.VPC.NATGatewayEIPAllocationIDs {
@@ -146,6 +147,7 @@ func rawScopeConfigurationInstance(addressScopeRef, storedScopeRef string, scope
 								"private_subnet_netmask":         "number",
 								"id":                             "string",
 								"nat_gateway_name":               "string",
+								"enable_private_nat_gateways":    "bool",
 								"nat_gateway_eip_allocation_ids": []any{"list", "string"},
 							},
 						},

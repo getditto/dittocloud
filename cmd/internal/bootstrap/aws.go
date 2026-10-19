@@ -195,6 +195,7 @@ func awsCmd(vars *[]*tfexec.VarOption) *cobra.Command {
 		23,
 		"Netmask for each per-AZ private subnet; pin this to the value an existing deployment already uses, because changing it renumbers live subnets",
 	)
+	cmd.Flags().Bool("aws-vpc-enable-private-nat-gateways", false, "Create one private NAT gateway per availability zone in private DMZ subnets; peering routes are managed separately")
 	cmd.Flags().StringArray(
 		"aws-vpc-nat-eip-allocation-ids",
 		[]string{},
@@ -267,6 +268,7 @@ func validateAWSScopesFlags(flags *pflag.FlagSet) (bool, AWSDeploymentScopes, st
 		"aws-vpc-secondary-cidr",
 		"aws-vpc-public-subnet-netmask",
 		"aws-vpc-private-subnet-netmask",
+		"aws-vpc-enable-private-nat-gateways",
 		"aws-vpc-nat-eip-allocation-ids",
 		"karpenter-discovery-tag-value",
 		"create-vpc",
@@ -412,6 +414,7 @@ var awsManagedVPCFlags = []string{
 	"aws-vpc-secondary-cidr",
 	"aws-vpc-public-subnet-netmask",
 	"aws-vpc-private-subnet-netmask",
+	"aws-vpc-enable-private-nat-gateways",
 	"aws-vpc-nat-eip-allocation-ids",
 	"karpenter-discovery-tag-value",
 }
@@ -456,6 +459,14 @@ func awsManagedVPCTerraformVariables(flags *pflag.FlagSet) ([]*tfexec.VarOption,
 			return nil, fmt.Errorf("unable to get %s: %w", netmaskFlag.flagName, err)
 		}
 		vars = append(vars, tfexec.Var(fmt.Sprintf("%s=%d", netmaskFlag.variableName, value)))
+	}
+
+	if flags.Changed("aws-vpc-enable-private-nat-gateways") {
+		enabled, err := flags.GetBool("aws-vpc-enable-private-nat-gateways")
+		if err != nil {
+			return nil, fmt.Errorf("unable to get aws-vpc-enable-private-nat-gateways: %w", err)
+		}
+		vars = append(vars, tfexec.Var(fmt.Sprintf("enable_private_nat_gateways=%t", enabled)))
 	}
 
 	if flags.Changed("aws-vpc-nat-eip-allocation-ids") {

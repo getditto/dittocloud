@@ -68,7 +68,7 @@ func TestAWSScopesAddCreatesGreenfieldDefaultWithoutTerraform(t *testing.T) {
 		t.Fatalf("unable to load created scopes file: %v", err)
 	}
 	created := scopes[testDefaultScopeRef]
-	if !created.Default || created.ClusterType != awsClusterTypeEKS || created.ScopeTagPolicyVersion != 0 {
+	if !created.Default || created.ClusterType != awsClusterTypeEKS || created.ScopeTagPolicyVersion != 0 || created.VPC.EnablePrivateNATGateways {
 		t.Fatalf("unexpected created default scope: %#v", created)
 	}
 	content, err := os.ReadFile(scopesPath)
@@ -94,6 +94,7 @@ func TestAWSScopesAddRecordsTheSecondaryWorkloadBlock(t *testing.T) {
 		"--vpc-name=valet",
 		"--vpc-cidr=10.217.0.0/20",
 		"--vpc-secondary-cidr=100.64.0.0/16",
+		"--vpc-enable-private-nat-gateways",
 	})
 	cmd.SetOut(&bytes.Buffer{})
 
@@ -106,6 +107,9 @@ func TestAWSScopesAddRecordsTheSecondaryWorkloadBlock(t *testing.T) {
 		t.Fatalf("unable to load created scopes file: %v", err)
 	}
 	created := scopes[testDefaultScopeRef]
+	if !created.VPC.EnablePrivateNATGateways {
+		t.Fatal("private NAT flag was not persisted in the scopes YAML")
+	}
 	if created.VPC.SecondaryCIDR != "100.64.0.0/16" {
 		t.Fatalf("secondary CIDR: got %q, want %q", created.VPC.SecondaryCIDR, "100.64.0.0/16")
 	}
@@ -579,5 +583,27 @@ func TestAWSScopesAddReportsAtomicWriteRecoveryPath(t *testing.T) {
 	}
 	if string(unchangedContent) != string(originalContent) {
 		t.Fatalf("scopes file changed after failed replacement:\n%s", unchangedContent)
+	}
+}
+
+func TestAWSScopesAddRejectsPrivateNATForUnmanagedVPCs(t *testing.T) {
+	forceAWSScopesAddNonInteractive(t)
+	for _, mode := range []string{awsVPCModeCAPI, awsVPCModeExisting} {
+		t.Run(mode, func(t *testing.T) {
+			cmd := awsScopesAddCmd()
+			err := cmd.ParseFlags([]string{
+				"--region=us-east-1",
+				"--vpc-mode=" + mode,
+				"--vpc-id=vpc-0123456789abcdef0",
+				"--vpc-enable-private-nat-gateways",
+			})
+			if err != nil {
+				t.Fatalf("parse flags: %v", err)
+			}
+			_, err = collectAWSScopesAddInput(cmd.Flags())
+			if err == nil || !strings.Contains(err.Error(), "vpc.enablePrivateNatGateways") {
+				t.Fatalf("got %v, want private NAT validation error", err)
+			}
+		})
 	}
 }

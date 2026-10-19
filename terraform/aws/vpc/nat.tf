@@ -51,3 +51,20 @@ moved {
   from = module.vpc.aws_eip.nat[2]
   to   = aws_eip.nat[2]
 }
+
+# Private NAT gateways translate workload addresses to the primary VPC CIDR
+# before traffic crosses a peering connection. They need no Elastic IPs.
+# Destination routes through these gateways and the peering are managed by the
+# caller; existing internet egress continues to use the public NAT gateways.
+resource "aws_nat_gateway" "private" {
+  for_each = var.enable_private_nat_gateways ? toset(local.azs) : toset([])
+  region   = local.region
+
+  connectivity_type = "private"
+  subnet_id         = module.vpc.private_subnets[local.az_indexes[each.key]]
+
+  tags = merge(
+    local.tags,
+    { Name = "${local.name}-private-nat-${each.key}" },
+  )
+}

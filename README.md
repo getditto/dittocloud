@@ -112,7 +112,12 @@ outside its own VPC. Two VPCs that share it cannot be peered at all: AWS rejects
 a peering connection on any overlapping CIDR, secondary blocks included, and
 checks the whole set at creation time. Cross-VPC connectivity is PrivateLink or
 VPC Lattice instead. Traffic from these subnets reaches the internet through the
-NAT gateway in its own availability zone and never crosses a peering connection.
+public NAT gateway in its own availability zone. For outbound access to a
+non-overlapping peered VPC, opt in to private NAT gateways in the private DMZ
+with `--aws-vpc-enable-private-nat-gateways`. This creates one private NAT
+gateway per availability zone, disabled by default. Peering connections and
+destination-specific routes are managed separately. For the scope YAML setting,
+see [AWS multi-scope configuration](docs/aws-multi-scope.md).
 
 > **Upgrading an existing deployment:** every subnet CIDR is derived from
 > `--aws-vpc-public-subnet-netmask` and `--aws-vpc-private-subnet-netmask`, so

@@ -247,7 +247,7 @@ func terraformPlannedAWSDeploymentScope(value any) (AWSDeploymentScope, bool) {
 		return AWSDeploymentScope{}, false
 	}
 	vpcValues, ok := terraformObject(configuration["vpc"])
-	if !ok || len(vpcValues) != 9 {
+	if !ok || len(vpcValues) != 10 {
 		return AWSDeploymentScope{}, false
 	}
 	vpcMode, ok := vpcValues["mode"].(string)
@@ -265,6 +265,10 @@ func terraformPlannedAWSDeploymentScope(value any) (AWSDeploymentScope, bool) {
 	publicSubnetNetmask, publicOK := terraformOptionalNumber(vpcValues["public_subnet_netmask"])
 	privateSubnetNetmask, privateOK := terraformOptionalNumber(vpcValues["private_subnet_netmask"])
 	if !publicOK || !privateOK {
+		return AWSDeploymentScope{}, false
+	}
+	enablePrivateNATGateways, privateNATOK := vpcValues["enable_private_nat_gateways"].(bool)
+	if !privateNATOK {
 		return AWSDeploymentScope{}, false
 	}
 	allocationIDs, allocationsOK := terraformOptionalStringList(vpcValues["nat_gateway_eip_allocation_ids"])
@@ -287,6 +291,7 @@ func terraformPlannedAWSDeploymentScope(value any) (AWSDeploymentScope, bool) {
 			ID:                         vpcID,
 			NATGatewayName:             natGatewayName,
 			NATGatewayEIPAllocationIDs: allocationIDs,
+			EnablePrivateNATGateways:   enablePrivateNATGateways,
 		},
 	}, true
 }
