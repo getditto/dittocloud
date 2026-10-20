@@ -176,6 +176,73 @@ func testInitialScopeMigrationConfiguration() awsInitialScopeMigrationPlanConfig
 	}
 }
 
+func TestValidateAWSInitialScopeMigrationPlanPrivateNATOutputCompatibility(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		beforeVPC map[string]any
+		afterVPC  map[string]any
+		wantError bool
+	}{
+		{
+			name:      "older state gains an empty private NAT output",
+			beforeVPC: map[string]any{"vpc_id": "vpc-00000000000000001"},
+			afterVPC:  map[string]any{"vpc_id": "vpc-00000000000000001", "private_nat_gateways_by_az": map[string]any{}},
+		},
+		{
+			name:      "addition does not permit a changed VPC ID",
+			beforeVPC: map[string]any{"vpc_id": "vpc-00000000000000001"},
+			afterVPC:  map[string]any{"vpc_id": "vpc-00000000000000002", "private_nat_gateways_by_az": map[string]any{}},
+			wantError: true,
+		},
+		{
+			name:      "addition does not permit another output",
+			beforeVPC: map[string]any{"vpc_id": "vpc-00000000000000001"},
+			afterVPC:  map[string]any{"vpc_id": "vpc-00000000000000001", "private_nat_gateways_by_az": map[string]any{}, "unexpected": true},
+			wantError: true,
+		},
+		{
+			name:      "addition does not permit removing an existing output",
+			beforeVPC: map[string]any{"vpc_id": "vpc-00000000000000001", "nat_public_ips": []any{"192.0.2.1"}},
+			afterVPC:  map[string]any{"vpc_id": "vpc-00000000000000001", "private_nat_gateways_by_az": map[string]any{}},
+			wantError: true,
+		},
+		{
+			name:      "new gateways cannot appear during migration",
+			beforeVPC: map[string]any{"vpc_id": "vpc-00000000000000001"},
+			afterVPC:  map[string]any{"vpc_id": "vpc-00000000000000001", "private_nat_gateways_by_az": map[string]any{"ap-southeast-2a": map[string]any{"id": "nat-1"}}},
+			wantError: true,
+		},
+		{
+			name:      "null is not an empty gateway map",
+			beforeVPC: map[string]any{"vpc_id": "vpc-00000000000000001"},
+			afterVPC:  map[string]any{"vpc_id": "vpc-00000000000000001", "private_nat_gateways_by_az": nil},
+			wantError: true,
+		},
+		{
+			name:      "existing gateways cannot disappear",
+			beforeVPC: map[string]any{"vpc_id": "vpc-00000000000000001", "private_nat_gateways_by_az": map[string]any{"ap-southeast-2a": map[string]any{"id": "nat-1"}}},
+			afterVPC:  map[string]any{"vpc_id": "vpc-00000000000000001", "private_nat_gateways_by_az": map[string]any{}},
+			wantError: true,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			plan := exactAWSInitialScopeMigrationPlan()
+			plan.OutputChanges["aws"].Before.(map[string]any)["vpc"] = []any{test.beforeVPC}
+			plan.OutputChanges["aws"].After.(map[string]any)["vpc"] = []any{test.afterVPC}
+			err := validateAWSInitialScopeMigrationPlan(plan, testInitialScopeMigrationConfiguration())
+			if test.wantError {
+				if err == nil || !strings.Contains(err.Error(), `changes legacy aws output field "vpc"`) {
+					t.Fatalf("got %v, want legacy VPC output rejection", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("expected additive migration to pass: %v", err)
+			}
+		})
+	}
+}
+
 func TestValidateAWSInitialScopeMigrationPlanAcceptsOnlyAdditiveMigration(t *testing.T) {
 	plan := exactAWSInitialScopeMigrationPlan()
 	plan.ResourceDrift = []*tfjson.ResourceChange{
