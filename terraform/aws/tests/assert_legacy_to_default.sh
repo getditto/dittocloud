@@ -103,7 +103,7 @@ readonly unexpected_final_changes="$(jq -c \
           .index != $scope_ref or
           .provider_name != "terraform.io/builtin/terraform" or
           .change.after.input != {
-            schema_version: 2,
+            schema_version: 3,
             scope_ref: $scope_ref,
             configuration: {
               default: true,
@@ -120,7 +120,8 @@ readonly unexpected_final_changes="$(jq -c \
                 private_subnet_netmask: 23,
                 id: null,
                 nat_gateway_name: null,
-                nat_gateway_eip_allocation_ids: []
+                nat_gateway_eip_allocation_ids: [],
+                enable_private_nat_gateways: false
               }
             }
           }

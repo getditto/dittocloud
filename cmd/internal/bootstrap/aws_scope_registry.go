@@ -472,6 +472,9 @@ func awsStateScopeVPCTypeAttributes(version int) map[string]any {
 		attributes["private_subnet_netmask"] = "number"
 		attributes["nat_gateway_eip_allocation_ids"] = []any{"list", "string"}
 	}
+	if version >= 3 {
+		attributes["enable_private_nat_gateways"] = "bool"
+	}
 	return attributes
 }
 
@@ -519,6 +522,9 @@ func decodeAWSStateScopeConfigurationValue(scopeRef string, valueJSON json.RawMe
 			"private_subnet_netmask",
 			"nat_gateway_eip_allocation_ids",
 		)
+	}
+	if version >= 3 {
+		vpcFields = append(vpcFields, "enable_private_nat_gateways")
 	}
 	if !hasExactJSONFields(vpc, vpcFields...) {
 		return AWSDeploymentScope{}, fmt.Errorf("configuration.vpc must contain exactly %s", strings.Join(vpcFields, ", "))
@@ -571,6 +577,13 @@ func decodeAWSStateScopeConfigurationValue(scopeRef string, valueJSON json.RawMe
 			return AWSDeploymentScope{}, fmt.Errorf("configuration.vpc.nat_gateway_eip_allocation_ids must be a list of strings or null")
 		}
 		configuration.VPC.NATGatewayEIPAllocationIDs = allocationIDs
+	}
+	if version >= 3 {
+		var enabled *bool
+		if err := json.Unmarshal(vpc["enable_private_nat_gateways"], &enabled); err != nil || enabled == nil {
+			return AWSDeploymentScope{}, fmt.Errorf("configuration.vpc.enable_private_nat_gateways must be a boolean")
+		}
+		configuration.VPC.EnablePrivateNATGateways = *enabled
 	}
 	// A schema 1 snapshot predates the DMZ split, so it carries the sizing that
 	// module was pinned to rather than today's defaults.

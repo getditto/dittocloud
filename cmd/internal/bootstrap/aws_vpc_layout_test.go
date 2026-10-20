@@ -1,8 +1,11 @@
 package bootstrap
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestAWSScopeWorkloadBlockRoundTrip(t *testing.T) {
@@ -17,6 +20,7 @@ func TestAWSScopeWorkloadBlockRoundTrip(t *testing.T) {
     name: valet
     cidr: 10.214.0.0/20
     secondaryCidr: 100.64.0.0/16
+    enablePrivateNatGateways: true
     natGatewayEipAllocationIds:
       - eipalloc-0123456789abcdef0
       - eipalloc-0123456789abcdef1
@@ -47,7 +51,11 @@ func TestAWSScopeWorkloadBlockRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected marshal error: %v", err)
 	}
+	if !scope.VPC.EnablePrivateNATGateways {
+		t.Fatal("private NAT opt-in was lost while loading YAML")
+	}
 	for _, want := range []string{
+		`"enable_private_nat_gateways":true`,
 		`"secondary_cidr":"100.64.0.0/16"`,
 		`"public_subnet_netmask":24`,
 		`"private_subnet_netmask":23`,
@@ -444,4 +452,98 @@ func TestAWSScopeSubnetRenumberingPreflight(t *testing.T) {
 			t.Fatalf("unexpected error for authorized renumbering: %v", err)
 		}
 	})
+}
+
+func TestAWSScopePrivateNATConfigurationRecovery(t *testing.T) {
+	for _, version := range []int{2, 3} {
+		t.Run(fmt.Sprintf("schema_%d", version), func(t *testing.T) {
+			scope := AWSDeploymentScope{
+				Default:     true,
+				ClusterType: awsClusterTypeEKS,
+				Region:      "us-west-2",
+				VPC: AWSScopeVPC{
+					Mode:                     awsVPCModeDittocloud,
+					Name:                     "valet",
+					CIDR:                     "10.214.0.0/20",
+					PublicSubnetNetmask:      24,
+					PrivateSubnetNetmask:     23,
+					EnablePrivateNATGateways: true,
+				},
+			}
+			instance := rawScopeConfigurationInstance(testDefaultScopeRef, testDefaultScopeRef, scope)
+			if version == 2 {
+				input := instance["attributes"].(map[string]any)["input"].(map[string]any)
+				value := input["value"].(map[string]any)
+				value["schema_version"] = 2
+				delete(value["configuration"].(map[string]any)["vpc"].(map[string]any), "enable_private_nat_gateways")
+				configurationType := input["type"].([]any)[1].(map[string]any)["configuration"].([]any)[1].(map[string]any)
+				delete(configurationType["vpc"].([]any)[1].(map[string]any), "enable_private_nat_gateways")
+			}
+			state := rawScopeRegistryState(rawScopeRegistryInstance(testDefaultScopeRef, testDefaultScopeRef, true))
+			appendRawTerraformStateResource(state, rawScopeConfigurationResource(instance))
+			registry, err := loadAWSStateScopeRegistry(writeTerraformStateTestFile(t, state))
+			if err != nil {
+				t.Fatalf("recover configuration: %v", err)
+			}
+			recovered := registry.Configurations[testDefaultScopeRef]
+			if recovered.VPC.EnablePrivateNATGateways != (version == 3) {
+				t.Fatalf("private NAT enabled = %t for schema %d", recovered.VPC.EnablePrivateNATGateways, version)
+			}
+			// Recovery's YAML writer must preserve an enabled opt-in too.
+			encoded, err := yaml.Marshal(awsDeploymentScopeYAMLNode(recovered))
+			if err != nil {
+				t.Fatalf("encode recovered scope: %v", err)
+			}
+			if strings.Contains(string(encoded), "enablePrivateNatGateways: true") != (version == 3) {
+				t.Fatalf("unexpected recovered YAML: %s", encoded)
+			}
+		})
+	}
+}
+
+func TestAWSScopePrivateNATRejectedForUnmanagedVPCs(t *testing.T) {
+	for _, mode := range []string{awsVPCModeCAPI, awsVPCModeExisting} {
+		err := rejectAWSManagedVPCFields(testDefaultScopeRef, AWSScopeVPC{
+			Mode:                     mode,
+			EnablePrivateNATGateways: true,
+		}, mode)
+		if err == nil || !strings.Contains(err.Error(), "enablePrivateNatGateways") {
+			t.Errorf("mode %s: got %v, want private NAT validation error", mode, err)
+		}
+	}
+}
+
+func TestAWSPrivateNATBootstrapFlag(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		args      []string
+		want      string
+		wantError string
+	}{
+		{name: "unset leaves Terraform default", want: ""},
+		{name: "enabled", args: []string{"--aws-vpc-enable-private-nat-gateways"}, want: "true"},
+		{name: "explicitly disabled", args: []string{"--aws-vpc-enable-private-nat-gateways=false"}, want: "false"},
+		{name: "VPC creation disabled", args: []string{"--aws-vpc-enable-private-nat-gateways", "--create-vpc=false"}, wantError: "can only be used when --create-vpc=true"},
+		{name: "customer managed VPC", args: []string{"--aws-vpc-enable-private-nat-gateways", "--customer-managed-vpc", "--vpc-id=vpc-0123456789abcdef0"}, wantError: "can only be used when --create-vpc=true"},
+		{name: "scope mode uses YAML", args: []string{"--aws-vpc-enable-private-nat-gateways", "--scopes", "--scopes-file=unused.yaml"}, wantError: "configure it in the scopes YAML"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			args := append([]string{"aws", "--aws-profile=test-profile", "--dry-run"}, test.args...)
+			cmd, mock := setupBootstrapTest(t, args)
+			err := cmd.Execute()
+			if test.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantError) {
+					t.Fatalf("got %v, want error containing %q", err, test.wantError)
+				}
+				assertNoTerraformLifecycleCalls(t, mock)
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := mock.PlanVars["enable_private_nat_gateways"]; got != test.want {
+				t.Fatalf("Terraform input = %q, want %q", got, test.want)
+			}
+		})
+	}
 }

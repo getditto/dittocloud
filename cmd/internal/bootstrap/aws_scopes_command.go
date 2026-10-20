@@ -136,6 +136,7 @@ func awsScopesAddCmd() *cobra.Command {
 	cmd.Flags().String("vpc-name", "", "VPC name; required for dittocloud mode")
 	cmd.Flags().String("vpc-cidr", "", "VPC CIDR; required for dittocloud mode")
 	cmd.Flags().String("vpc-secondary-cidr", "", "Secondary VPC CIDR carrying pod, node, and database capacity; a /16 inside 100.64.0.0/10, dittocloud mode only")
+	cmd.Flags().Bool("vpc-enable-private-nat-gateways", false, "Create one private NAT gateway per availability zone in private DMZ subnets, dittocloud mode only; peering routes are managed separately")
 	cmd.Flags().String("vpc-karpenter-discovery-tag", "", "Value of the karpenter.sh/discovery tag on the node subnets; defaults to the VPC ID, dittocloud mode only")
 	cmd.Flags().String("vpc-id", "", "VPC ID; required for existing mode and optional for capi mode")
 	return cmd
@@ -202,6 +203,10 @@ func collectAWSScopesAddInput(flags *pflag.FlagSet) (AWSDeploymentScope, error) 
 	if err != nil {
 		return AWSDeploymentScope{}, fmt.Errorf("unable to get vpc-secondary-cidr: %w", err)
 	}
+	enablePrivateNATGateways, err := flags.GetBool("vpc-enable-private-nat-gateways")
+	if err != nil {
+		return AWSDeploymentScope{}, fmt.Errorf("unable to get vpc-enable-private-nat-gateways: %w", err)
+	}
 	vpcKarpenterDiscoveryTag, err := flags.GetString("vpc-karpenter-discovery-tag")
 	if err != nil {
 		return AWSDeploymentScope{}, fmt.Errorf("unable to get vpc-karpenter-discovery-tag: %w", err)
@@ -215,6 +220,7 @@ func collectAWSScopesAddInput(flags *pflag.FlagSet) (AWSDeploymentScope, error) 
 		Name:                       vpcName,
 		CIDR:                       vpcCIDR,
 		SecondaryCIDR:              vpcSecondaryCIDR,
+		EnablePrivateNATGateways:   enablePrivateNATGateways,
 		KarpenterDiscoveryTagValue: vpcKarpenterDiscoveryTag,
 		ID:                         vpcID,
 	}

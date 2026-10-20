@@ -247,7 +247,7 @@ func terraformPlannedAWSDeploymentScope(value any) (AWSDeploymentScope, bool) {
 		return AWSDeploymentScope{}, false
 	}
 	vpcValues, ok := terraformObject(configuration["vpc"])
-	if !ok || len(vpcValues) != 9 {
+	if !ok || len(vpcValues) != 10 {
 		return AWSDeploymentScope{}, false
 	}
 	vpcMode, ok := vpcValues["mode"].(string)
@@ -265,6 +265,10 @@ func terraformPlannedAWSDeploymentScope(value any) (AWSDeploymentScope, bool) {
 	publicSubnetNetmask, publicOK := terraformOptionalNumber(vpcValues["public_subnet_netmask"])
 	privateSubnetNetmask, privateOK := terraformOptionalNumber(vpcValues["private_subnet_netmask"])
 	if !publicOK || !privateOK {
+		return AWSDeploymentScope{}, false
+	}
+	enablePrivateNATGateways, privateNATOK := vpcValues["enable_private_nat_gateways"].(bool)
+	if !privateNATOK {
 		return AWSDeploymentScope{}, false
 	}
 	allocationIDs, allocationsOK := terraformOptionalStringList(vpcValues["nat_gateway_eip_allocation_ids"])
@@ -287,6 +291,7 @@ func terraformPlannedAWSDeploymentScope(value any) (AWSDeploymentScope, bool) {
 			ID:                         vpcID,
 			NATGatewayName:             natGatewayName,
 			NATGatewayEIPAllocationIDs: allocationIDs,
+			EnablePrivateNATGateways:   enablePrivateNATGateways,
 		},
 	}, true
 }
@@ -527,6 +532,9 @@ func validateAWSInitialScopeMigrationOutputs(changes map[string]*tfjson.Change, 
 		awsOutputUpdates++
 		for key, value := range before {
 			if !reflect.DeepEqual(after[key], value) {
+				if key == "vpc" && awsInitialScopeMigrationAddsEmptyPrivateNATOutput(value, after[key]) {
+					continue
+				}
 				return fmt.Errorf("initial AWS scope migration changes legacy aws output field %q", key)
 			}
 		}
@@ -551,6 +559,28 @@ func validateAWSInitialScopeMigrationOutputs(changes map[string]*tfjson.Change, 
 		return fmt.Errorf("initial AWS scope migration must update exactly one aws output; found %d", awsOutputUpdates)
 	}
 	return nil
+}
+
+// The aws output embeds every VPC module output. Older state therefore lacks
+// this field even when private NAT is disabled. Accept only that empty addition;
+// existing module outputs must remain exactly equal during the migration.
+func awsInitialScopeMigrationAddsEmptyPrivateNATOutput(before, after any) bool {
+	beforeModules, beforeOK := before.([]any)
+	afterModules, afterOK := after.([]any)
+	if !beforeOK || !afterOK || len(beforeModules) != 1 || len(afterModules) != 1 {
+		return false
+	}
+	beforeVPC, beforeOK := terraformObject(beforeModules[0])
+	afterVPC, afterOK := terraformObject(afterModules[0])
+	if !beforeOK || !afterOK {
+		return false
+	}
+	const outputName = "private_nat_gateways_by_az"
+	if _, exists := beforeVPC[outputName]; exists {
+		return false
+	}
+	gateways, ok := terraformObject(afterVPC[outputName])
+	return ok && len(gateways) == 0 && reflect.DeepEqual(beforeVPC, cloneTerraformObjectWithout(afterVPC, outputName))
 }
 
 func terraformObject(value any) (map[string]any, bool) {

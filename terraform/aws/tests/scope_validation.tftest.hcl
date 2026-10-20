@@ -208,7 +208,7 @@ run "creates_registry_for_valid_multi_scope_object" {
 
   assert {
     condition = (
-      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].input.schema_version == 2 &&
+      terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].input.schema_version == 3 &&
       terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].input.scope_ref == "dsc-01k2m8g7n4p6q9r3t5v8x1y2z4" &&
       !terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].input.configuration.default &&
       terraform_data.scope_configuration["dsc-01k2m8g7n4p6q9r3t5v8x1y2z4"].input.configuration.cluster_name == "sydney-eks" &&
@@ -1384,6 +1384,64 @@ run "rejects_scope_subnet_netmasks_that_do_not_fit_the_primary_block" {
           name                  = "valet"
           cidr                  = "10.214.0.0/22"
           public_subnet_netmask = 24
+        }
+      }
+    }
+  }
+
+  expect_failures = [var.deployment_scopes]
+}
+
+run "enables_private_nat_for_default_and_non_default_managed_scopes" {
+  command = plan
+
+  variables {
+    deployment_scopes = {
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" = {
+        default = true
+        region  = "ap-southeast-2"
+        vpc = {
+          mode                        = "dittocloud"
+          name                        = "default"
+          cidr                        = "10.214.0.0/20"
+          enable_private_nat_gateways = true
+        }
+      }
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z4" = {
+        region = "ap-southeast-2"
+        vpc = {
+          mode                        = "dittocloud"
+          name                        = "additional"
+          cidr                        = "10.215.0.0/20"
+          enable_private_nat_gateways = true
+        }
+      }
+    }
+  }
+
+  assert {
+    condition = alltrue([
+      for scope_ref in keys(var.deployment_scopes) :
+      terraform_data.scope_configuration[scope_ref].input.configuration.vpc.enable_private_nat_gateways &&
+      toset(keys(output.aws_workload_networking[scope_ref].privateNatGatewaysByAz)) == toset([
+        "ap-southeast-2a", "ap-southeast-2b", "ap-southeast-2c",
+      ])
+    ])
+    error_message = "Both managed module paths must receive the opt-in, publish gateways per AZ, and persist it for recovery."
+  }
+}
+
+run "rejects_private_nat_for_a_capi_scope" {
+  command = plan
+
+  variables {
+    deployment_scopes = {
+      "dsc-01k2m8g7n4p6q9r3t5v8x1y2z3" = {
+        default = true
+        region  = "ap-southeast-2"
+        vpc = {
+          mode                        = "capi"
+          enable_private_nat_gateways = true
         }
       }
     }

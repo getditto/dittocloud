@@ -11,11 +11,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Schema 2 added the secondary workload block, the DMZ subnet netmasks, and the
-// NAT Elastic IP allocations. Schema 1 snapshots are still read so an account
-// applied before that change can be recovered without a Terraform run first.
+// Schema 2 added the secondary workload block, DMZ subnet netmasks, and NAT
+// Elastic IP allocations. Schema 3 adds the private NAT gateway opt-in.
+// Recovery still reads schema 1 and 2 snapshots without a Terraform run first;
+// private NAT gateways default to disabled for those snapshots.
 const (
-	awsScopeConfigurationSchemaVersion        = 2
+	awsScopeConfigurationSchemaVersion        = 3
 	awsMinimumScopeConfigurationSchemaVersion = 1
 )
 

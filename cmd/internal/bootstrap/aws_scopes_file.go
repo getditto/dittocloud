@@ -412,6 +412,12 @@ func awsDeploymentScopeYAMLNode(scope AWSDeploymentScope) *yaml.Node {
 	if scope.VPC.KarpenterDiscoveryTagValue != "" {
 		appendVPCField("karpenterDiscoveryTagValue", scope.VPC.KarpenterDiscoveryTagValue)
 	}
+	if scope.VPC.EnablePrivateNATGateways {
+		vpc.Content = append(vpc.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "enablePrivateNatGateways"},
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: "true"},
+		)
+	}
 	if len(scope.VPC.NATGatewayEIPAllocationIDs) > 0 {
 		allocations := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
 		for _, allocationID := range scope.VPC.NATGatewayEIPAllocationIDs {

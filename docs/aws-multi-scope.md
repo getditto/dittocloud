@@ -61,6 +61,26 @@ already use them for in-cluster pod and Service addressing: `100.66.0.0/16` is t
 kubeadm cluster range, and `100.80.0.0/16` and `100.81.0.0/16` are the pod and
 Service CIDRs every self-managed AWS cluster is built with.
 
+For workloads that initiate connections to a non-overlapping peered VPC, set
+`vpc.enablePrivateNatGateways: true` in scope YAML (Terraform:
+`deployment_scopes[scope_ref].vpc.enable_private_nat_gateways`). It defaults to
+`false` to avoid additional NAT gateway costs. Enabling it adds one private NAT
+gateway per availability zone in the private DMZ subnets, without Elastic IPs.
+Existing public NAT gateways and default internet routes stay unchanged.
+When generating a managed scope with `scopes add`, pass
+`--vpc-enable-private-nat-gateways` to record this opt-in in the YAML. Both CLI
+flags and the YAML option default to disabled. Ordinary bootstrap runs without
+`--scopes` use `--aws-vpc-enable-private-nat-gateways`.
+
+The gateways translate workload source addresses to private DMZ addresses, so
+the peer only needs return routes to the primary CIDR. The caller must manage
+the peering connection, routes from the node/pod route tables for peer CIDRs
+through the same-AZ private NAT, routes from the private DMZ to the peering
+connection, and return routes in the peer. This option creates gateways only.
+`aws_workload_networking[scope_ref].privateNatGatewaysByAz` exposes each gateway's
+`id`, `private_ip`, `subnet_id`, and DMZ `route_table_id`, keyed by availability
+zone. The VPC submodule exposes the same map as `private_nat_gateways_by_az`.
+
 `publicSubnetNetmask` and `privateSubnetNetmask` default to `24` and `23`.
 **Every subnet CIDR is derived from them, so changing either renumbers live
 subnets** and recreates the NAT gateways, nodes, and load balancers with them. A

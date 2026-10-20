@@ -75,6 +75,7 @@ type AWSScopeVPC struct {
 	PrivateSubnetNetmask       int      `yaml:"privateSubnetNetmask,omitempty" json:"private_subnet_netmask,omitempty"`
 	ID                         string   `yaml:"id,omitempty" json:"id,omitempty"`
 	NATGatewayName             string   `yaml:"natGatewayName,omitempty" json:"nat_gateway_name,omitempty"`
+	EnablePrivateNATGateways   bool     `yaml:"enablePrivateNatGateways,omitempty" json:"enable_private_nat_gateways,omitempty"`
 	NATGatewayEIPAllocationIDs []string `yaml:"natGatewayEipAllocationIds,omitempty" json:"nat_gateway_eip_allocation_ids,omitempty"`
 	// KarpenterDiscoveryTagValue is the value of the karpenter.sh/discovery tag on
 	// the node subnets, which is how Karpenter finds where to launch nodes.
@@ -266,6 +267,9 @@ func rejectAWSManagedVPCFields(scopeRef string, vpc AWSScopeVPC, mode string) er
 			scopeRef,
 			mode,
 		)
+	}
+	if vpc.EnablePrivateNATGateways {
+		return fmt.Errorf("scope %q cannot enable vpc.enablePrivateNatGateways when vpc.mode is %q", scopeRef, mode)
 	}
 	if len(vpc.NATGatewayEIPAllocationIDs) > 0 {
 		return fmt.Errorf("scope %q cannot set vpc.natGatewayEipAllocationIds when vpc.mode is %q", scopeRef, mode)
